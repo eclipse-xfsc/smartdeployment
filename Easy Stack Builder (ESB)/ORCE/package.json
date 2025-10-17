@@ -1,0 +1,31 @@
+{
+    "name": "node-red-leanea-orce",
+    "version": "2.0.0",
+    "description": "ORCE deployer node",
+    "dependencies": {
+        "tmp": "^0.2.1"
+    },
+    "keywords": [
+        "orce",
+        "xfsc",
+        "faps",
+        "fap",
+        "kubernetes",
+        "k8s"
+    ],
+    "node-red": {
+        "nodes": {
+            "orce": "orce.js"
+        }
+    },
+    "files": [
+        "deploy.sh",
+        "uninstall.sh",
+        "orce.html",
+        "orce.js"
+    ],
+    "engines": {
+        "node": ">=14.0.0",
+        "node-red": ">=3.0.0"
+    }
+}
