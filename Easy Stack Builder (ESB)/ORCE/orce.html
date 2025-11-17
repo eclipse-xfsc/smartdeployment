@@ -1,0 +1,249 @@
+<!-- Orchestration Engine Node Definition -->
+<script type="text/x-red" data-template-name="Orchestration Engine">
+    <style>
+        .tab-container {
+            display: flex;
+            border-bottom: 1px solid #ccc;
+        }
+        .tab-link {
+            display: inline-block;
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            background: #eee;
+            color: #555;
+            text-decoration: none;
+            font-weight: normal;
+        }
+        .tab-link.active {
+            background: #fff;
+            color: #000;
+            font-weight: bold;
+            border-bottom: 1px solid #fff;
+        }
+        .tab-content {
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 4px 4px 4px;
+            padding: 10px;
+            background: #fff;
+        }
+        .form-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .form-row label {
+            width: 120px!important;
+            margin-right: 10px;
+            font-weight: normal;
+            color: #333;
+            text-align: right;
+        }
+        .form-row input[type="text"],
+        .form-row input[type="file"],
+        .form-row input[type="password"],
+        .form-row select,
+        .form-row textarea {
+            flex: 1;
+        }
+        #node-input-customScript {
+            width: 100%;
+            min-height: 250px;
+            resize: vertical;
+        }
+    </style>
+
+    <div class="form-row tab-container">
+        <a href="#" class="tab-link active" data-tab="tab1">Instance</a>
+        <a href="#" class="tab-link" data-tab="tab2">Deployment</a>
+        <a href="#" class="tab-link" data-tab="tab3">Domain</a>
+        <a href="#" class="tab-link" data-tab="tab4">Information</a>
+    </div>
+
+    <!-- Tab1: Instance -->
+    <div id="tab1" class="tab-content">
+        <div class="form-row">
+            <label for="node-input-instanceName">Instance Name</label>
+            <input type="text" id="node-input-instanceName" placeholder="Instance name">
+        </div>
+        <div class="form-row">
+            <label for="node-input-auth">Authentication</label>
+            <select id="node-input-auth">
+                <option value="without">Without Auth</option>
+                <option value="basic">Basic</option>
+            </select>
+        </div>
+        <div id="auth-fields" style="display: none;">
+            <div class="form-row">
+                <label for="node-input-username">Username</label>
+                <input type="text" id="node-input-username" placeholder="Username">
+            </div>
+            <div class="form-row">
+                <label for="node-input-password">Password</label>
+                <input type="password" id="node-input-password" placeholder="Password">
+            </div>
+        </div>
+        <div class="form-row">
+            <label for="node-input-name">Name</label>
+            <input type="text" id="node-input-name" placeholder="Node name">
+        </div>
+    </div>
+
+    <!-- Tab2: Deployment -->
+    <div id="tab2" class="tab-content" style="display: none;">
+        <div class="form-row">
+            <label for="node-input-deploymentType">Deployment Type</label>
+            <select id="node-input-deploymentType">
+                <option value="k8s">k8s</option>
+                <option value="docker" disabled>docker (coming soon)</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="node-input-kubeconfig">kubeconfig</label>
+            <input type="file" id="node-input-kubeconfig">
+            <input type="hidden" id="node-input-kubeconfigContent">
+        </div>
+    </div>
+
+    <!-- Tab3: Domain -->
+    <div id="tab3" class="tab-content" style="display: none;">
+        <div class="form-row">
+            <label for="node-input-deploymentPathType">Deployment Type</label>
+            <select id="node-input-deploymentPathType">
+                <option value="path">Path</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="node-input-domainAddress">Domain address</label>
+            <input type="text" id="node-input-domainAddress" placeholder="Domain address">
+        </div>
+        <div class="form-row">
+            <label for="node-input-privateKey">Private Key</label>
+            <input type="file" id="node-input-privateKey">
+            <input type="hidden" id="node-input-privateKeyContent">
+        </div>
+        <div class="form-row">
+            <label for="node-input-certificate">Certificate</label>
+            <input type="file" id="node-input-certificate">
+            <input type="hidden" id="node-input-certificateContent">
+        </div>
+    </div>
+
+    <!-- Tab4: Information -->
+    <div id="tab4" class="tab-content" style="display: none;">
+        <textarea id="node-input-customScript"></textarea>
+    </div>
+</script>
+
+<script type="text/javascript">
+    (function () {
+        // Helper to read a file input into a hidden field
+        function setupFile(fieldFile, fieldHidden) {
+            var inp = $("#node-input-" + fieldFile)[0];
+            inp.addEventListener("change", function () {
+                var f = this.files[0];
+                if (!f) { return; }
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    $("#node-input-" + fieldHidden).val(e.target.result);
+                };
+                reader.readAsText(f);
+            });
+        }
+
+        RED.nodes.registerType('Orchestration Engine', {
+            category: 'FAPs',
+            color: '#c0deed',
+            icon: 'bridge.svg',
+            defaults: {
+                instanceName: { value: "" },
+                auth: { value: "without" },
+                username: { value: "" },
+                password: { value: "" },
+                name: { value: "" },
+                deploymentType: { value: "k8s" },
+                deploymentPathType: { value: "path" },
+                domainAddress: { value: "" },
+                customScript: { value: "" },
+                kubeconfigContent: { value: "" },
+                privateKeyContent: { value: "" },
+                certificateContent: { value: "" }
+            },
+            inputs: 1,
+            outputs: 1,
+            label: function () {
+                return this.name || "Orchestration Engine";
+            },
+            oneditprepare: function () {
+                // Authentication toggler
+                $("#node-input-auth").change(function () {
+                    if ($(this).val() === "basic") {
+                        $("#auth-fields").show();
+                    } else {
+                        $("#auth-fields").hide();
+                    }
+                }).trigger("change");
+
+                // File readers
+                setupFile("kubeconfig", "kubeconfigContent");
+                setupFile("privateKey", "privateKeyContent");
+                setupFile("certificate", "certificateContent");
+
+                // Tab click logic
+                $(".tab-link").click(function (e) {
+                    e.preventDefault();
+                    $(".tab-link").removeClass("active");
+                    $(this).addClass("active");
+                    $(".tab-content").hide();
+                    var tab = $(this).data("tab");
+                    $("#" + tab).show();
+
+                    // Populate Information textarea when tab4 is shown
+                    if (tab === "tab4") {
+                        var inst = $("#node-input-instanceName").val() || "";
+                        var domain = $("#node-input-domainAddress").val() || "";
+                        $("#node-input-customScript").val(inst + " " + domain);
+                    }
+                });
+
+                function updateUrlField() {
+                    var domain = $("#node-input-domainAddress")
+                        .val()
+                        .trim()
+                        .replace(/^https?:\/\//, "");
+                    var inst = $("#node-input-instanceName").val().trim();
+                    var url = "https://" + domain + "/" + inst;
+                    $("#node-input-customScript").val(url);
+                }
+
+                // 2) wire up the tab clicks
+                $(".tab-link").click(function (e) {
+                    e.preventDefault();
+                    $(".tab-link").removeClass("active");
+                    $(this).addClass("active");
+                    $(".tab-content").hide();
+                    $("#" + $(this).data("tab")).show();
+
+                    if ($(this).data("tab") === "tab4") {
+                        updateUrlField();
+                    }
+                });
+
+                // 3) ALSO re-run updateUrlField() if the user edits domain or instance *while* on tab4
+                $("#node-input-domainAddress, #node-input-instanceName").on("input", function () {
+                    if ($(".tab-link.active").data("tab") === "tab4") {
+                        updateUrlField();
+                    }
+                });
+
+                // 4) optional: if the dialog launches already on tab4, populate once
+                if ($(".tab-link.active").data("tab") === "tab4") {
+                    updateUrlField();
+                }
+
+            }
+        });
+    })();
+</script>
