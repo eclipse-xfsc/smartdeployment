@@ -61,35 +61,33 @@ docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
 After pulling and deploying the image, you can go to [http://localhost:1880](http://localhost:1880) to access your local Orchestration Engine. Now you have to install "Orchestration Engine" node. To do so, you have to click on "New Node" button in the left sidebar as shown here.
 
-![new button](./docImages/photo_2025-06-12_23-05-42.jpg?raw=true)
+![new button](./docImages/step1.jpg?raw=true)
 
 Then, in the new window upload the node package (`orce-esb-orce-2.0.0.tgz` in this repository) and install it. Refresh the page and if everything is done correctly and without errors you can proceed to step2 (creating your flow).
-![upload node](./docImages/stepnew.png?raw=true)
+![upload node](./docImages/step2.png?raw=true)
 ### 2. Create your flow
 Drag and drop inject, Orchestration Engine and a debug node. Connect them like below so Orchestration Engine can be triggered by the inject node.
-![step one (flow)](./docImages/photo_2_2025-06-12_15-30-18.jpg?raw=true)
+![step one (flow)](./docImages/step3_orce.jpg?raw=true)
 ### 3. Name your instance and choose authentication method
 Double click on the node to open edit dialog.
 Enter your instance name. This name is going to be the suburl of the instance destination. For example, if we name an instance `facis`, the final url of the instance is going to be `www.example.com/facis`.
-![step two (instance tab)](./docImages/photo_7_2025-06-12_15-30-18.jpg?raw=true)
+![step two (instance tab)](./docImages/step4_orce.jpg?raw=true)
 ### 4. Choose deployment type and supply necessary credentials
 In this tab you can select deployment type. Docker is not available as of June 12th, 2025. You also have to supply the kubeconfig file of the destination cluster.
-![step three (deployment type)](./docImages/photo_5_2025-06-12_15-30-18.jpg?raw=true)
+![step three (deployment type)](./docImages/step5_orce.jpg?raw=true)
 ### 5. Provide your desired domain address and supply TLS credentials
-![step four (domain)](./docImages/photo_8_2025-06-12_15-30-18.jpg?raw=true)
+![step four (domain)](./docImages/step6_orce.jpg?raw=true)
 ### 6. You can see the destination URL in Information tab
 After you have entered everything, you can see the final path of the instance as if it's deployed.
-![step five (information)](./docImages/photo_1_2025-06-12_15-30-18.jpg?raw=true)
+![step five (information)](./docImages/step7_orce.jpg?raw=true)
 ### 7. Click done and then deploy
 Click done on top right of the editor and then click on Save&Deploy in top right of the page.
 Then you have to trigger Orchestration Engine via activating the inject node in this scenario.
 ![step six (deploy)](./docImages/photo_4_2025-06-12_15-30-18.jpg?raw=true)
 ### 8. Your instance is up!
 After a few seconds of waiting, when the status under the node is changed to "deployed" you can access the instance.
-![step seven (instance is up)](./docImages/photo_3_2025-06-12_15-30-18.jpg?raw=true)
 
-- ***Instance Removal:*** Click the trash icon next to your ORCE instance node, then click Deploy in the upper right. You should see your instance (in this case, `xfsc-orce-facis`) getting terminated in ~1min. As you can see the pods (and other related resources which are not shown in this image) are terminating.
-![instance termination](./docImages/photo_2025-06-12_23-26-10.jpg?raw=true)
+- ***Instance Removal:*** Click the trash icon next to your ORCE instance node, then click Deploy in the upper right. You should see your instance (in this case, `xfsc-orce-facis`) getting terminated in ~1min.
 
 ---
 
