@@ -1,0 +1,27 @@
+{
+  "name": "orce-esb-tsastack",
+  "version": "0.2.0",
+  "description": "TSA stack deployer node that reuses shared OCMW services",
+  "dependencies": {
+    "tmp": "^0.2.1"
+  },
+  "keywords": [
+    "tsa",
+    "trust-services",
+    "xfsc",
+    "node-red",
+    "kubernetes",
+    "k8s",
+    "helm",
+    "ocmw"
+  ],
+  "node-red": {
+    "nodes": {
+      "tsastack": "tsastack.js"
+    }
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "node-red": ">=3.0.0"
+  }
+}
