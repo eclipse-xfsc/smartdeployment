@@ -1,4 +1,4 @@
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
+<img width="1919" height="993" alt="image" src="https://github.com/user-attachments/assets/7d515712-2435-439e-a09b-5b080829128c" />[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
 
 # PCM
 
@@ -75,6 +75,9 @@ docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 After pulling and starting the image, go to [http://localhost:1880](http://localhost:1880) to access your local Orchestration Engine.
 
 Now install the PCM deployer node into ORCE. If you already have a packaged `.tgz` artifact for this directory, upload it through **New Node** in the left sidebar and install it. If you are working directly from source, package the node first and then upload the resulting archive. Refresh the page after installation.
+![upload node](./docImages/step1.jpg?raw=true)
+
+![upload node](./docImages/step2.jpg?raw=true)
 
 If everything is installed correctly, proceed to step 2.
 
@@ -126,6 +129,8 @@ Because of that, you must provide:
 - **Registry password**
 
 This is not optional in the current design: the dynamic build strategy depends on a registry that the deployment script can log into and push to.
+
+![upload node](./docImages/step3_pcm.jpg?raw=true)
 
 ### 6. Click done and then deploy
 Click **Done** in the node editor and then click **Save & Deploy** in the ORCE editor. Finally, trigger the flow with the inject node.
