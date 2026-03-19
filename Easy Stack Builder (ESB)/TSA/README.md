@@ -80,8 +80,12 @@ As described in the [ORCE page](https://github.com/eclipse-xfsc/orchestration-en
 ```bash
 docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
+
+After the container starts, open [http://localhost:1880](http://localhost:1880). Then install the TSA node package from this repository into ORCE/ORCE and refresh the editor. The node appears in the **FAPs** category as **TSA Stack**.
+
 ![new node](./docImages/step1.jpg?raw=true)
-After the container starts, open [http://localhost:1880](http://localhost:1880). Then install the TSA node package from this repository into ORCE/ORCE and refresh the editor. The node appears in the **FAPs** category as **TSA Stack**.![new node](./docImages/step2.jpg?raw=true)
+
+![new node](./docImages/step2.jpg?raw=true)
 
 ### 1.3. Existing OCM stack
 TSA is **not** a fully standalone stack. It expects an existing OCM namespace and discovers the following shared services from there:
