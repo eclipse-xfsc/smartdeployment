@@ -1,0 +1,30 @@
+{
+    "name": "orce-esb-pcmcloud",
+    "version": "0.0.3",
+    "description": "PCMCloud deployer node",
+    "dependencies": {
+        "tmp": "^0.2.1"
+    },
+    "keywords": [
+        "pcm",
+        "pcmcloud",
+        "cloud",
+        "easy",
+        "stack",
+        "builder",
+        "xfsc",
+        "faps",
+        "fap",
+        "kubernetes",
+        "k8s"
+    ],
+    "node-red": {
+        "nodes": {
+            "ocmwstack": "pcmcloud.js"
+        }
+    },
+    "engines": {
+        "node": ">=14.0.0",
+        "node-red": ">=3.0.0"
+    }
+}
