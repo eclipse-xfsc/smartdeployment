@@ -1,0 +1,6 @@
+dependencies:
+- name: status-list-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.3-main
+digest: sha256:6e9366fcee48ca17e9093b4318c401d05aca9c86b9c49041edbf5c968562c26b
+generated: "2026-02-02T13:08:28.294688387+01:00"
