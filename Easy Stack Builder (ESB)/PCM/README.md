@@ -128,9 +128,9 @@ Because of that, you must provide:
 - **Registry username**
 - **Registry password**
 
+![upload node](./docImages/step3_pcm.jpg?raw=true)
 This is not optional in the current design: the dynamic build strategy depends on a registry that the deployment script can log into and push to.
 
-![upload node](./docImages/step3_pcm.jpg?raw=true)
 
 ### 6. Click done and then deploy
 Click **Done** in the node editor and then click **Save & Deploy** in the ORCE editor. Finally, trigger the flow with the inject node.
