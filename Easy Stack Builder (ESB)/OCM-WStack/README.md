@@ -69,8 +69,9 @@ As in the ORCE workspace, you can run a local parent environment with Docker:
 ```bash
 docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
-![new node](./docImages/step1.jpg?raw=true)
+
 After the container starts, open [http://localhost:1880](http://localhost:1880) and install the packaged node from this directory: `orce-esb-ocmwstack-1.0.0.tgz`.
+![new node](./docImages/step1.jpg?raw=true)
 
 ![upload node](./docImages/step2.jpg?raw=true)
 Once the package is installed successfully, refresh the page. You should then see **OCM-W-Stack** in the **FAPs** category of the ORCE palette.
