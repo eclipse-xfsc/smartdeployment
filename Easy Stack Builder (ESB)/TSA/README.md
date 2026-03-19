@@ -119,7 +119,7 @@ Provide:
 
 - **TSA namespace** – the namespace for the new TSA deployment
 - **OCM namespace** – the namespace of the shared OCM stack TSA should reuse
-- **Base domain** – the bare hostname suffix, for example `apps.example.com`
+- **Base domain** – the bare high-level hostname suffix, for example `example.com`
 
 The deployer exposes TSA on a single host:
 
