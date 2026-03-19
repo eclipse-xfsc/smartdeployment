@@ -1,0 +1,97 @@
+<!-- Editor UI for OCM-W-Stack node -->
+<script type="text/x-red" data-template-name="OCM-W-Stack">
+  <style>
+    .form-row { display:flex; align-items:center; margin-bottom:10px; }
+    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
+    .form-row input[type="text"], .form-row input[type="email"] { flex:1; }
+  </style>
+
+  <div class="form-row">
+    <label for="node-input-instanceName">Instance name</label>
+    <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-domainAddress">Domain</label>
+    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-emailAddress">Email</label>
+    <input type="email" id="node-input-emailAddress" placeholder="e.g. admin@example.com">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-kubeconfig">kubeconfig</label>
+    <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
+    <input type="hidden" id="node-input-kubeconfigContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-privateKey">TLS Private Key</label>
+    <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
+    <input type="hidden" id="node-input-privateKeyContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-certificate">TLS Certificate</label>
+    <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
+    <input type="hidden" id="node-input-certificateContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-name">Node label</label>
+    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
+  </div>
+</script>
+
+<script type="text/javascript">
+(function() {
+  function setupFile(fieldFile, fieldHidden) {
+    var inp = $("#node-input-" + fieldFile)[0];
+    if (!inp) return;
+    inp.addEventListener("change", function() {
+      var f = this.files && this.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      // Read as text so we preserve exact file contents (no base64/data: prefix)
+      reader.onload = function(e) {
+        $("#node-input-" + fieldHidden).val(e.target.result);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+  RED.nodes.registerType('OCM-W-Stack', {
+    category: 'FAPs',
+    color: '#c0deed',
+    icon: 'bridge.svg',
+    defaults: {
+      name:                { value: "" },
+      instanceName:        { value: "", required: true },
+      domainAddress:       { value: "", required: true },
+      emailAddress:        { value: "", required: true },
+      kubeconfigContent:   { value: "", required: true },
+      privateKeyContent:   { value: "", required: true },
+      certificateContent:  { value: "", required: true }
+    },
+    inputs: 1,
+    outputs: 1,
+    label: function() {
+      return this.name || this.instanceName || "OCM-W-Stack";
+    },
+    oneditprepare: function() {
+      setupFile("kubeconfig", "kubeconfigContent");
+      setupFile("privateKey", "privateKeyContent");
+      setupFile("certificate", "certificateContent");
+    },
+    oneditsave: function() {
+      // Light validation for common mistakes
+      var domain = $("#node-input-domainAddress").val().trim();
+      if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
+        RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
+      }
+    }
+  });
+})();
+</script>

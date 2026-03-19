@@ -1,0 +1,29 @@
+{
+    "name": "orce-esb-ocmwstack",
+    "version": "1.0.0",
+    "description": "OCM-W-Stack deployer node",
+    "dependencies": {
+        "tmp": "^0.2.1"
+    },
+    "keywords": [
+        "ocm",
+        "ocm-w-stack",
+        "easy",
+        "stack",
+        "builder",
+        "xfsc",
+        "faps",
+        "fap",
+        "kubernetes",
+        "k8s"
+    ],
+    "node-red": {
+        "nodes": {
+            "ocmwstack": "ocmwstack.js"
+        }
+    },
+    "engines": {
+        "node": ">=14.0.0",
+        "node-red": ">=3.0.0"
+    }
+}
