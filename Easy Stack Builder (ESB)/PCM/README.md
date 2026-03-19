@@ -1,4 +1,4 @@
-<img width="1919" height="993" alt="image" src="https://github.com/user-attachments/assets/7d515712-2435-439e-a09b-5b080829128c" />[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](../LICENSE)
 
 # PCM
 
