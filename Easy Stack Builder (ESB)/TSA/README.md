@@ -2,7 +2,7 @@
 
 # TSA
 
-An automated Trust Services Agent workspace that deploys a TSA instance to a Kubernetes cluster while reusing shared services from an existing OCMW stack.
+An automated Trust Services Agent workspace that deploys a TSA instance to a Kubernetes cluster while reusing shared services from an existing OCM stack.
 
 ---
 
@@ -13,7 +13,7 @@ An automated Trust Services Agent workspace that deploys a TSA instance to a Kub
   - [1. Prepare the environment and prerequisites](#1-prepare-the-environment-and-prerequisites)
     - [1.1. Kubernetes](#11-kubernetes)
     - [1.2. Local ORCE](#12-local-orce)
-    - [1.3. Existing OCMW stack](#13-existing-ocmw-stack)
+    - [1.3. Existing OCM stack](#13-existing-OCM-stack)
   - [2. Create your flow](#2-create-your-flow)
   - [3. Configure namespaces and base domain](#3-configure-namespaces-and-base-domain)
   - [4. Upload kubeconfig and TLS credentials](#4-upload-kubeconfig-and-tls-credentials)
@@ -31,16 +31,16 @@ An automated Trust Services Agent workspace that deploys a TSA instance to a Kub
 
 ## 🚀 Overview
 
-TSA is a deployment workspace for standing up a Trust Services Agent environment on Kubernetes while reusing shared OCMW services that already exist in another namespace. Instead of redeploying platform-wide dependencies such as Keycloak, signer, NATS, and the DID resolver, the TSA node connects to an existing OCMW namespace through cluster DNS and only provisions the TSA-local runtime pieces it needs: MongoDB, Redis, policy, task, cache, infohub, and optionally the legacy login flow.
+TSA is a deployment workspace for standing up a Trust Services Agent environment on Kubernetes while reusing shared OCM services that already exist in another namespace. Instead of redeploying platform-wide dependencies such as Keycloak, signer, NATS, and the DID resolver, the TSA node connects to an existing OCM namespace through cluster DNS and only provisions the TSA-local runtime pieces it needs: MongoDB, Redis, policy, task, cache, infohub, and optionally the legacy login flow.
 
-The included ORCE node collects the target TSA namespace, the OCMW namespace, the base domain, kubeconfig, TLS material, registry information, and optional OCM/email parameters. When triggered, the backend writes the uploaded files to temporary paths and invokes `deploy.sh`, which ensures ingress-nginx and cert-manager are present, creates the namespace and secrets, discovers the shared OCMW services, builds the TSA service images dynamically, pushes them to your registry, bootstraps MongoDB, configures a dedicated Keycloak realm and OAuth client in the shared Keycloak instance, deploys the TSA services, and runs smoke tests.
+The included ORCE node collects the target TSA namespace, the OCM namespace, the base domain, kubeconfig, TLS material, registry information, and optional OCM/email parameters. When triggered, the backend writes the uploaded files to temporary paths and invokes `deploy.sh`, which ensures ingress-nginx and cert-manager are present, creates the namespace and secrets, discovers the shared OCM services, builds the TSA service images dynamically, pushes them to your registry, bootstraps MongoDB, configures a dedicated Keycloak realm and OAuth client in the shared Keycloak instance, deploys the TSA services, and runs smoke tests.
 
 The public deployment model is intentionally compact. TSA is exposed under a single host:
 
 - `https://<tsa-namespace>.<base-domain>/infohub`
 - `https://<tsa-namespace>.<base-domain>/login` *(optional legacy login path)*
 
-This makes TSA well suited for quickly creating tenant-like workspaces that sit on top of a shared OCMW backbone while still keeping their own runtime state, OAuth client, Mongo data, Redis cache, and ingress resources isolated inside a namespaced deployment.
+This makes TSA well suited for quickly creating tenant-like workspaces that sit on top of a shared OCM backbone while still keeping their own runtime state, OAuth client, Mongo data, Redis cache, and ingress resources isolated inside a namespaced deployment.
 
 ---
 
@@ -55,7 +55,7 @@ You'll need:
 
 1.1. A Kubernetes cluster to host the TSA instance  
 1.2. A local ORCE instance to host the parent low-code environment  
-1.3. An already-running OCMW namespace whose shared services TSA can reuse
+1.3. An already-running OCM namespace whose shared services TSA can reuse
 
 ### 1.1. Kubernetes
 The **TSA Stack** node requires a working Kubernetes cluster that is reachable through kubeconfig and allows namespace creation, ingress provisioning, secret creation, and workload rollout. The deployment script installs or repairs **ingress-nginx** and **cert-manager** automatically if they are missing, so the supplied kubeconfig must have sufficient permissions for those operations.
@@ -83,8 +83,8 @@ docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ![new node](./docImages/step1.jpg?raw=true)
 After the container starts, open [http://localhost:1880](http://localhost:1880). Then install the TSA node package from this repository into ORCE/ORCE and refresh the editor. The node appears in the **FAPs** category as **TSA Stack**.![new node](./docImages/step2.jpg?raw=true)
 
-### 1.3. Existing OCMW stack
-TSA is **not** a fully standalone stack. It expects an existing OCMW namespace and discovers the following shared services from there:
+### 1.3. Existing OCM stack
+TSA is **not** a fully standalone stack. It expects an existing OCM namespace and discovers the following shared services from there:
 
 - Keycloak
 - signer
@@ -95,9 +95,9 @@ These services are reused over cluster-internal addresses such as `*.svc.cluster
 
 Before deployment, make sure you know:
 
-- the exact **OCMW namespace** name,
+- the exact **OCM namespace** name,
 - that those shared services are healthy,
-- and that Keycloak credentials are still available through the OCMW secret expected by the deployment.
+- and that Keycloak credentials are still available through the OCM secret expected by the deployment.
 
 ### 2. Create your flow
 Drag and drop an **inject** node, the **TSA Stack** node, and a **debug** node. Connect them so the inject node triggers the TSA deployment and the debug node shows the deployment result.
@@ -114,7 +114,7 @@ Double click the **TSA Stack** node to open the editor.
 Provide:
 
 - **TSA namespace** – the namespace for the new TSA deployment
-- **OCMW namespace** – the namespace of the shared OCMW stack TSA should reuse
+- **OCM namespace** – the namespace of the shared OCM stack TSA should reuse
 - **Base domain** – the bare hostname suffix, for example `apps.example.com`
 
 The deployer exposes TSA on a single host:
@@ -172,7 +172,7 @@ During deployment, the node status changes through its normal lifecycle:
 The deployment script performs the following high-level sequence:
 
 1. Creates the namespace if needed
-2. Discovers shared OCMW services
+2. Discovers shared OCM services
 3. Ensures ingress-nginx and cert-manager exist
 4. Creates TLS and registry secrets
 5. Builds and pushes TSA component images
@@ -198,7 +198,7 @@ The deployment summary also reports the generated values for:
 - resolved shared-service addresses
 - built image tag and registry prefix
 
-- ***Instance Removal:*** deleting the TSA node and redeploying the flow triggers `uninstall.sh`, which deletes only the TSA namespace. Shared OCMW services and other cluster-wide components are intentionally left untouched.
+- ***Instance Removal:*** deleting the TSA node and redeploying the flow triggers `uninstall.sh`, which deletes only the TSA namespace. Shared OCM services and other cluster-wide components are intentionally left untouched.
 
 ---
 
@@ -209,7 +209,7 @@ Before deployment, provide the following values in the node editor:
 1. **TSA namespace**  
    The namespace created for the TSA deployment.
 
-2. **OCMW namespace**  
+2. **OCM namespace**  
    The existing namespace from which shared services are reused.
 
 3. **Base domain**  
@@ -239,7 +239,7 @@ Before deployment, provide the following values in the node editor:
 11. **Deploy TSA login**  
     Enables or disables the legacy login flow and its `/login` route.
 
-### Shared services reused from OCMW
+### Shared services reused from OCM
 
 - Keycloak
 - signer
@@ -273,7 +273,7 @@ Before deployment, provide the following values in the node editor:
 ```
 
 - **deploy.sh**  
-  Main deployment entry point. It validates inputs, ensures required cluster components exist, discovers shared OCMW services, creates TLS and registry secrets, builds and pushes TSA component images, deploys MongoDB/Redis, bootstraps Keycloak, applies the TSA workloads and ingress, and runs smoke tests.
+  Main deployment entry point. It validates inputs, ensures required cluster components exist, discovers shared OCM services, creates TLS and registry secrets, builds and pushes TSA component images, deploys MongoDB/Redis, bootstraps Keycloak, applies the TSA workloads and ingress, and runs smoke tests.
 
 - **uninstall.sh**  
   Removes the TSA instance by deleting the target namespace.
@@ -318,7 +318,7 @@ base64
 
 - A Kubernetes cluster
 - A writable container registry
-- A working OCMW namespace with shared Keycloak, signer, NATS, and resolver services
+- A working OCM namespace with shared Keycloak, signer, NATS, and resolver services
 
 ---
 
