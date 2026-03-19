@@ -1,0 +1,202 @@
+
+<!-- Editor UI for AAS-Stack node -->
+<script type="text/x-red" data-template-name="AAS-Stack">
+  <style>
+    .form-row { display:flex; align-items:center; margin-bottom:10px; }
+    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
+    .form-row input[type="text"],
+    .form-row input[type="password"] { flex:1; }
+    .db-mode-options { display:flex; gap:18px; flex-wrap:wrap; }
+    .db-mode-options label { width:auto!important; margin-right:0; text-align:left; }
+    .db-mode-options input[type="radio"] { width:auto; margin-right:6px; }
+    .form-help {
+      margin-left:170px;
+      color:#666;
+      font-size:12px;
+      line-height:1.4;
+    }
+  </style>
+
+  <div class="form-row">
+    <label for="node-input-instanceName">Instance name</label>
+    <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-domainAddress">Domain</label>
+    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-kubeconfig">kubeconfig</label>
+    <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
+    <input type="hidden" id="node-input-kubeconfigContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-privateKey">TLS Private Key</label>
+    <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
+    <input type="hidden" id="node-input-privateKeyContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-certificate">TLS Certificate</label>
+    <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
+    <input type="hidden" id="node-input-certificateContent">
+  </div>
+
+  <div class="form-row">
+    <label>Database</label>
+    <div class="db-mode-options">
+      <label for="node-input-dbType-embedded">
+        <input type="radio" id="node-input-dbType-embedded" name="node-input-dbType-choice" value="embedded">
+        Embedded deploy
+      </label>
+      <label for="node-input-dbType-external">
+        <input type="radio" id="node-input-dbType-external" name="node-input-dbType-choice" value="external">
+        External DB
+      </label>
+    </div>
+    <input type="hidden" id="node-input-dbType">
+  </div>
+
+  <div id="external-db-fields" style="display:none;">
+    <div class="form-row">
+      <label for="node-input-externalDbUrl">DB JDBC URL</label>
+      <input type="text" id="node-input-externalDbUrl" placeholder="jdbc:postgresql://db.example.com:5432/aas">
+    </div>
+
+    <div class="form-row">
+      <label for="node-input-externalDbUsername">DB Username</label>
+      <input type="text" id="node-input-externalDbUsername" placeholder="e.g. aas">
+    </div>
+
+    <div class="form-row">
+      <label for="node-input-externalDbPassword">DB Password</label>
+      <input type="password" id="node-input-externalDbPassword" placeholder="Database password">
+    </div>
+
+    <div class="form-help">
+      Use a full PostgreSQL JDBC URL, for example <code>jdbc:postgresql://db.example.com:5432/aas</code>.
+    </div>
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-name">Node label</label>
+    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
+  </div>
+</script>
+
+<script type="text/javascript">
+(function() {
+  function setupFile(fieldFile, fieldHidden) {
+    var inp = $("#node-input-" + fieldFile)[0];
+    if (!inp) return;
+    inp.addEventListener("change", function() {
+      var f = this.files && this.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      // Read as text so we preserve exact file contents (no base64/data: prefix)
+      reader.onload = function(e) {
+        $("#node-input-" + fieldHidden).val(e.target.result);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+  function currentDbType(context) {
+    var editorField = $("#node-input-dbType");
+    if (editorField.length) {
+      var value = (editorField.val() || "").trim();
+      if (value) return value;
+    }
+    return (context && context.dbType) || "embedded";
+  }
+
+  function setDbModeVisibility(dbType) {
+    var normalized = (dbType === "external") ? "external" : "embedded";
+    $("#node-input-dbType").val(normalized).trigger("change");
+    $("#external-db-fields").toggle(normalized === "external");
+    $("#node-input-externalDbUrl").trigger("change");
+    $("#node-input-externalDbUsername").trigger("change");
+    $("#node-input-externalDbPassword").trigger("change");
+  }
+
+  function syncDbModeFromRadios() {
+    var selected = $('input[name="node-input-dbType-choice"]:checked').val() || "embedded";
+    setDbModeVisibility(selected);
+  }
+
+  RED.nodes.registerType('AAS-Stack', {
+    category: 'FAPs',
+    color: '#c0deed',
+    icon: 'bridge.svg',
+    defaults: {
+      name:                { value: "" },
+      instanceName:        { value: "", required: true },
+      domainAddress:       { value: "", required: true },
+      kubeconfigContent:   { value: "", required: true },
+      privateKeyContent:   { value: "", required: true },
+      certificateContent:  { value: "", required: true },
+      dbType:              { value: "embedded", required: true },
+      externalDbUrl: {
+        value: "",
+        validate: function(v) {
+          var dbType = currentDbType(this);
+          if (dbType !== "external") return true;
+          var value = (v || "").trim();
+          return !!value && /^jdbc:postgresql:\/\//i.test(value);
+        }
+      },
+      externalDbUsername: {
+        value: "",
+        validate: function(v) {
+          var dbType = currentDbType(this);
+          if (dbType !== "external") return true;
+          return !!((v || "").trim());
+        }
+      },
+      externalDbPassword: {
+        value: "",
+        validate: function(v) {
+          var dbType = currentDbType(this);
+          if (dbType !== "external") return true;
+          return String(v || "").length > 0;
+        }
+      }
+    },
+    inputs: 1,
+    outputs: 1,
+    label: function() {
+      return this.name || this.instanceName || "AAS-Stack";
+    },
+    oneditprepare: function() {
+      setupFile("kubeconfig", "kubeconfigContent");
+      setupFile("privateKey", "privateKeyContent");
+      setupFile("certificate", "certificateContent");
+
+      var dbType = currentDbType(this);
+      $("#node-input-dbType-" + (dbType === "external" ? "external" : "embedded")).prop("checked", true);
+      setDbModeVisibility(dbType);
+      $('input[name="node-input-dbType-choice"]').on("change", syncDbModeFromRadios);
+    },
+    oneditsave: function() {
+      // Persist DB type selected in the radio group.
+      syncDbModeFromRadios();
+
+      // Light validation for common mistakes.
+      var domain = $("#node-input-domainAddress").val().trim();
+      if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
+        RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
+      }
+
+      if (currentDbType(this) === "external") {
+        var jdbcUrl = $("#node-input-externalDbUrl").val().trim();
+        if (jdbcUrl && !/^jdbc:postgresql:\/\//i.test(jdbcUrl)) {
+          RED.notify("External DB URL should be a PostgreSQL JDBC URL, for example jdbc:postgresql://host:5432/db.", "warning");
+        }
+      }
+    }
+  });
+})();
+</script>

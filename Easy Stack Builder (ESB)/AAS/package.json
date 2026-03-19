@@ -1,0 +1,29 @@
+{
+  "name": "orce-esb-aasstack",
+  "version": "2.0.0",
+  "description": "AAS deployer node",
+  "dependencies": {
+    "tmp": "^0.2.1"
+  },
+  "keywords": [
+    "aas",
+    "authentication",
+    "authorization",
+    "stack",
+    "builder",
+    "xfsc",
+    "faps",
+    "kubernetes",
+    "k8s",
+    "helm"
+  ],
+  "node-red": {
+    "nodes": {
+      "aas": "aas.js"
+    }
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "node-red": ">=3.0.0"
+  }
+}
