@@ -85,7 +85,7 @@ Drag and drop an **inject** node, the **OCM-W-Stack** node, and a **debug** node
 Double-click the **OCM-W-Stack** node to open the editor.
 
 - **Instance name** defines the Kubernetes namespace used for the deployment and acts as the logical name of your stack.
-- **Domain** must be a bare hostname such as `apps.example.com` (no `http://`, `https://`, or path segment).
+- **Domain** must be a bare high-level hostname such as `example.com` (no `http://`, `https://`, or path segment).
 - **Email** is passed to the cluster issuer configuration used during deployment.
 
 You can also set an optional **Node label** for a friendlier display name in the flow editor.
