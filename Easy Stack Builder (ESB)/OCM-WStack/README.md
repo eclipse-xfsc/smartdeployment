@@ -69,13 +69,16 @@ As in the ORCE workspace, you can run a local parent environment with Docker:
 ```bash
 docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
-
+![new node](./docImages/step1.png?raw=true)
 After the container starts, open [http://localhost:1880](http://localhost:1880) and install the packaged node from this directory: `orce-esb-ocmwstack-1.0.0.tgz`.
 
+![upload node](./docImages/step2.png?raw=true)
 Once the package is installed successfully, refresh the page. You should then see **OCM-W-Stack** in the **FAPs** category of the ORCE palette.
 
 ### 2. Create your flow
 Drag and drop an **inject** node, the **OCM-W-Stack** node, and a **debug** node into the canvas. Connect them so the inject node can trigger the OCM-W-Stack deployment and the debug node can display the script output.
+
+![supplying info](./docImages/step3.png?raw=true)
 
 ### 3. Configure instance name, domain, and email
 Double-click the **OCM-W-Stack** node to open the editor.
