@@ -1,0 +1,65 @@
+well-known-service:
+  replicaCount: 1
+  name: well-known-service
+
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+    name: well-known-service
+    tag: "v1.2.1"
+    pullPolicy: IfNotPresent
+
+  podAnnotations: {}
+
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      nginx.ingress.kubernetes.io/rewrite-target: /v1/tenants/tenant_space/.well-known/openid-credential-issuer
+    hosts:
+      - host: cloud-wallet.DOMAIN
+        paths:
+          - path: /.well-known/openid-credential-issuer
+            port: 8080
+            pathtype: ImplementationSpecific
+    tls:
+      - secretName: xfsc-wildcard
+        hosts:
+          - cloud-wallet.DOMAIN
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+
+  service:
+    port: 8080
+    type: ClusterIP
+
+  server:
+    http:
+      host: 0.0.0.0
+      port: 8080
+
+  config:
+    loglevel: DEBUG
+    isdev: false
+    postgres:
+      host: postgres-postgresql.NAMESPACE.svc.cluster.local       
+      port: 5432
+      database: wellknown
+      user: postgres
+      password: 
+        key: postgresql-password
+        name: wellknown-db-secret
+      params: sslmode:disable
+    nats:
+      url: nats.NAMESPACE.svc.cluster.local:4222
+      queuegroup: wellknown
+    issuer: cloud-wallet.DOMAIN
+    importer:
+      broadcast:
+    credential:
+      configexpiration: 120
