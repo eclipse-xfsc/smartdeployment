@@ -1,5 +1,5 @@
 {
-    "name": "node-red-leanea-orce",
+    "name": "orce-esb-orce",
     "version": "2.0.0",
     "description": "ORCE deployer node",
     "dependencies": {
