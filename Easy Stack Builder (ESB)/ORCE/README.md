@@ -56,8 +56,7 @@ After this step, you can proceed to step 1.2 (Installing a local ORCE)
 ### 1.2. Local ORCE
 As you can read in [ORCE page](https://github.com/eclipse-xfsc/orchestration-engine), you can install it on your local machine with this command:
 ```bash
-docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
-  # ORCE 2.0.12 latest
+docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12  # ORCE 2.0.12 latest
 ```
 After pulling and deploying the image, you can go to [http://localhost:1880](http://localhost:1880) to access your local Orchestration Engine. Now you have to install "Orchestration Engine" node. To do so, you have to click on "New Node" button in the left sidebar as shown here.
 
