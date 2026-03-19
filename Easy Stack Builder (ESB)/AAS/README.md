@@ -75,8 +75,10 @@ As described in the [ORCE page](https://github.com/eclipse-xfsc/orchestration-en
 docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
 
+![new node](./docImages/step1.jpg?raw=true)
 After pulling and starting the image, open [http://localhost:1880](http://localhost:1880) to access your local Orchestration Engine.
 
+![new node](./docImages/step2.jpg?raw=true)
 Then install the AAS node package from this repository using the **New Node** flow in the left sidebar. After the package is installed and the editor is refreshed, the node becomes available in the **FAPs** category as **AAS-Stack**.
 
 ### 1.3. Tooling on the ORCE host
@@ -137,6 +139,7 @@ These files are written to temporary files during execution and then passed to `
 The editor provides two database options:
 
 #### Embedded deploy
+![new node](./docImages/step3_aas_embedded.jpg?raw=true)
 Use this mode when you want the workspace to install PostgreSQL in the same namespace as AAS.
 
 In this mode, the deployment script will:
@@ -149,6 +152,7 @@ In this mode, the deployment script will:
 - create the `aas-db-secret` secret for the chart.
 
 #### External DB
+![new node](./docImages/step3_aas_external.jpg?raw=true)
 Use this mode when you already have a PostgreSQL instance available.
 
 You must provide:
