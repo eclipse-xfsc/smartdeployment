@@ -20,7 +20,7 @@ EasyStack Builder is a suite of deployment modules built directly into ORCE, our
 
 These modules are designed to automate the full deployment process of federated cloud services such as:
 - Federated Catalogue
-- AA
+- AAS
 - OCM
 - PCM Cloud
 - TSA E1
