@@ -1,0 +1,79 @@
+credential-verification-service:
+  replicaCount: 1
+  name: credential-verification-service
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+    name: credential-verification-service
+    tag: "main"
+    pullPolicy: Always
+  podAnnotations: {}
+  ingress:
+    enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        proxy_set_header X-DID did:web:cloud-wallet.DOMAIN;
+        proxy_set_header X-NAMESPACE tenant_space;
+        proxy_set_header X-KEY eckey;
+      nginx.org/client-max-body-size: 2K
+      nginx.ingress.kubernetes.io/rewrite-target: /v1/tenants/tenant_space/presentation/$2
+    hosts:
+      - host: cloud-wallet.DOMAIN
+        paths:
+          - path: /api/presentation(/|$)(.*)
+            port: 8080
+            pathType: ImplementationSpecific
+    tls:
+      - secretName: xfsc-wildcard
+        hosts:
+          - cloud-wallet.DOMAIN
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+  service:
+    port: 8080
+    type: ClusterIP
+  server:
+    http:
+      host: ""
+      port: 8080
+  config:
+    serverMode: production
+    disableTLS: false
+    cassandra:
+      Key: cassandra-password
+      Name: cassandra
+      cassandraHosts: cassandra.NAMESPACE.svc.cluster.local
+      cassandraUser: cassandra
+    signing:
+      Name:  signing
+      Key:   signing-key
+    servingPort: 8080
+    country: DE
+    region: EU
+    didResolver: http://universal-resolver-service.NAMESPACE.svc.cluster.local:8080
+    externalPresentation:
+      enabled: true
+      authorizeEndpoint: credential-verification-service.NAMESPACE.svc.cluster.local:8080/v1/tenants/tenant_space/presentation/
+      requestObjectPolicy:
+      clientIdPolicy:
+      clientUrlSchema: https
+    signerService:
+      presentationVerifyUrl: http://signer.NAMESPACE.svc.cluster.local:8080/v1/presentation/verify
+      presentationSignUrl: http://signer.NAMESPACE.svc.cluster.local:8080/v1/presentation/proof
+      signerTopic: signer-topic
+    topics:
+      authorization: presentation.authorisation
+      authorizationReply: presentation.authorisation.reply
+      proofNotify: presentation.proof.notify
+      presentationRequest: request
+      storageRequest: storage
+    messaging:
+      protocol: nats
+      nats:
+        url: nats.NAMESPACE.svc.cluster.local:4222
+        queueGroup: credential-verification-service
+        timeoutInSec: 10
