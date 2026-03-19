@@ -1,0 +1,6 @@
+nats:
+  auth:
+    enabled: false
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/nats

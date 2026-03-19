@@ -1,0 +1,88 @@
+didcomm-connector:
+  replicaCount: 1
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
+    name: didcomm-connector
+    pullPolicy: Always
+    tag: "latest"
+
+  imagePullSecrets: []
+  nameOverride: ""
+  fullnameOverride: ""
+
+  serviceAccount:
+    create: true
+    automount: true
+    annotations: {}
+    name: ""
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext: {}
+
+  securityContext: {}
+
+  service:
+    type: ClusterIP
+    port: 9090
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true" 
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
+    hosts:
+      - host: cloud-wallet.DOMAIN
+        paths:
+          - path: /api/didcomm(/|$)(.*)
+            port: 9090
+            pathType: ImplementationSpecific
+    tls: 
+      - secretName: xfsc-wildcard
+        hosts:
+          - cloud-wallet.DOMAIN
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 100
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+
+  tolerations: []
+
+  affinity: {}
+
+  config:
+    env: DEV
+    logLevel: "debug"
+    label: Cloud Wallet Mediator
+    port: 9090
+    url: "https://cloud-wallet.DOMAIN/api/didcomm"
+    tokenExpiration: 1
+    didcomm:
+      resolverUrl: "http://universal-resolver-service.NAMESPACE.svc.cluster.local:8080"
+      messageEncrypted: false
+
+    messaging:
+      protocol: "nats"
+      nats:
+        url: nats://nats.NAMESPACE.svc.cluster.local:4222
+        topic: "didcomm-connector"
+        queueGroup: didcomm
+        timeoutInSec: 10
+    database:
+      inMemory: false
+      host: cassandra.NAMESPACE.svc.cluster.local:9042
+      port: 9042
+      user: "cassandra"
+      password:
+        passwordSecret: cassandra
+        passwordKey: cassandra-password
+      keyspace: didcomm_space
+      dbName: cassandra
