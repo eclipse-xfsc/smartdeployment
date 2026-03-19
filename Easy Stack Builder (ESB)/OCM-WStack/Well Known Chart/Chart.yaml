@@ -1,0 +1,9 @@
+apiVersion: v2
+appVersion: v1.0.0
+description: Well Known Service
+name: well-known-service
+version: 1.0.3
+dependencies:
+  - name: well-known-service
+    version: 1.0.3
+    repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack

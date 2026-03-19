@@ -1,0 +1,6 @@
+dependencies:
+- name: well-known-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+  version: 1.0.3
+digest: sha256:5a5dea681aa3dcc85b49df72ac5707be412a5fbdb6f19c12cefcb71e8ac503c0
+generated: "2026-02-03T10:42:59.686388367+01:00"
