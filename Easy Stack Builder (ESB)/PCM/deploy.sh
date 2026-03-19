@@ -11,7 +11,7 @@ CERT_PATH="$4"
 KEY_PATH="$5"   
 KUBE="$6"
 TLS_SECRET="xfsc-wildcard"
-REGISTRY_REPO="$7"  # docker.io/manifaridi/custom-webui
+REGISTRY_REPO="$7"  # docker.io/<username>/custom-webui
 REGISTRY_USERNAME="$8"
 REGISTRY_PASSWORD="$9"
 
