@@ -1,0 +1,6 @@
+dependencies:
+- name: configuration-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
+  version: 1.0.1
+digest: sha256:5e17422734cffcf40b346b05439e39e8dbbe0c850042b5a42a92a068ddbc3660
+generated: "2025-09-07T00:08:20.910862991+02:00"

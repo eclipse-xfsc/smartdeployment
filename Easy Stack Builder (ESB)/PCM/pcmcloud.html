@@ -1,0 +1,114 @@
+<!-- Editor UI for pcmcloud node -->
+<script type="text/x-red" data-template-name="pcmcloud">
+  <style>
+    .form-row { display:flex; align-items:center; margin-bottom:10px; }
+    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
+    .form-row input[type="text"],
+    .form-row input[type="password"] { flex:1; }
+  </style>
+
+  <div class="form-row">
+    <label for="node-input-instanceName">Instance name</label>
+    <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-ocmInstanceName">OCM instance name</label>
+    <input type="text" id="node-input-ocmInstanceName" placeholder="e.g. ocm-01">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-domainAddress">Domain</label>
+    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-kubeconfig">kubeconfig</label>
+    <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
+    <input type="hidden" id="node-input-kubeconfigContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-privateKey">TLS Private Key</label>
+    <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
+    <input type="hidden" id="node-input-privateKeyContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-certificate">TLS Certificate</label>
+    <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
+    <input type="hidden" id="node-input-certificateContent">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-registryRepository">Registry repository</label>
+    <input type="text" id="node-input-registryRepository" placeholder="e.g. ghcr.io/org/app">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-registryUserName">Registry username</label>
+    <input type="text" id="node-input-registryUserName" placeholder="e.g. ci-bot">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-registryPassword">Registry password</label>
+    <input type="password" id="node-input-registryPassword" placeholder="••••••••">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-name">Node label</label>
+    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
+  </div>
+</script>
+
+<script type="text/javascript">
+(function() {
+  function setupFile(fieldFile, fieldHidden) {
+    var inp = $("#node-input-" + fieldFile)[0];
+    if (!inp) return;
+    inp.addEventListener("change", function() {
+      var f = this.files && this.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        $("#node-input-" + fieldHidden).val(e.target.result);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+  RED.nodes.registerType('pcmcloud', {
+    category: 'FAPs',
+    color: '#c0deed',
+    icon: 'bridge.svg',
+    defaults: {
+      name: { value: "" },
+      instanceName: { value: "", required: true },
+      ocmInstanceName: { value: "", required: true },
+      domainAddress: { value: "", required: true },
+      certificateContent: { value: "", required: true },
+      privateKeyContent: { value: "", required: true },
+      kubeconfigContent: { value: "", required: true },
+      registryRepository: { value: "", required: true },
+      registryUserName: { value: "", required: true },
+      registryPassword: { value: "", required: true }
+    },
+    inputs: 1,
+    outputs: 1,
+    label: function() {
+      return this.name || this.instanceName || "PCMCloud";
+    },
+    oneditprepare: function() {
+      setupFile("kubeconfig", "kubeconfigContent");
+      setupFile("privateKey", "privateKeyContent");
+      setupFile("certificate", "certificateContent");
+    },
+    oneditsave: function() {
+      var domain = $("#node-input-domainAddress").val().trim();
+      if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
+        RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
+      }
+    }
+  });
+})();
+</script>

@@ -1,0 +1,6 @@
+dependencies:
+- name: account-service
+  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/pcm-cloud
+  version: 0.1.0-main
+digest: sha256:84694c4be3d59e5724b9cbe9eb5635686951e56bc910c4b94c725ba449c39531
+generated: "2025-09-07T00:08:58.509083102+02:00"
