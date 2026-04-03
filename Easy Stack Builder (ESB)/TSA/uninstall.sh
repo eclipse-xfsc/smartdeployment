@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NAMESPACE="${1:-}"
-KUBE="${2:-}"
+NAMESPACE="$1"
+KUBECONFIG="$2"
 
-[ -n "$NAMESPACE" ] || { echo "missing namespace" >&2; exit 1; }
-[ -n "$KUBE" ] || { echo "missing kubeconfig" >&2; exit 1; }
-
-export KUBECONFIG="$KUBE"
-
-kubectl delete namespace "$NAMESPACE" --ignore-not-found=true --wait=true
+for release in policy-service sdjwt signer universal-resolver vault nats redis; do
+  helm --kubeconfig "$KUBECONFIG" -n "$NAMESPACE" uninstall "$release" >/dev/null 2>&1 || true
+done
+kubectl --kubeconfig "$KUBECONFIG" delete namespace "$NAMESPACE" >/dev/null 2>&1 || true

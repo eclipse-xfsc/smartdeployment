@@ -1,101 +1,90 @@
 <script type="text/x-red" data-template-name="tsastack">
   <style>
     .form-row { display:flex; align-items:center; margin-bottom:10px; }
-    .form-row label { width:190px!important; margin-right:10px; text-align:right; }
-    .form-row input[type="text"],
-    .form-row input[type="email"],
-    .form-row input[type="password"] { flex:1; }
-    .form-row .checkbox-wrap { flex:1; display:flex; align-items:center; gap:8px; }
-    .hint { margin: 6px 0 14px 200px; color: #666; font-size: 12px; }
+    .form-row label { width:180px!important; margin-right:10px; text-align:right; }
+    .form-row input[type="text"] { flex:1; }
+    .tsa-note { margin-left:190px; border:1px solid #d5dde8; background:#f8fbff; padding:10px; color:#334155; line-height:1.45; }
+    .tsa-hidden { display:none; }
   </style>
 
   <div class="form-row">
-    <label for="node-input-instanceName">TSA namespace</label>
-    <input type="text" id="node-input-instanceName" placeholder="e.g. tsa-demo">
+    <label for="node-input-instanceName">Instance name</label>
+    <input type="text" id="node-input-instanceName" placeholder="e.g. tsastack">
   </div>
 
   <div class="form-row">
-    <label for="node-input-ocmwNamespace">OCMW namespace</label>
-    <input type="text" id="node-input-ocmwNamespace" placeholder="e.g. ocmwstack">
-  </div>
-  <div class="hint">Shared OCMW services such as Keycloak, signer, NATS, and resolver are reused from this namespace via cluster DNS.</div>
-
-  <div class="form-row">
-    <label for="node-input-domainAddress">Base domain</label>
-    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
-  </div>
-  <div class="hint">The deployer exposes the TSA entrypoints on one host: <code>&lt;tsa-namespace&gt;.&lt;base-domain&gt;</code>.</div>
-
-  <div class="form-row">
-    <label for="node-input-emailAddress">Email</label>
-    <input type="email" id="node-input-emailAddress" placeholder="optional">
+    <label for="node-input-domainAddress">Domain</label>
+    <input type="text" id="node-input-domainAddress" placeholder="e.g. example.com">
   </div>
 
   <div class="form-row">
-    <label for="node-input-ocmAddress">OCM address</label>
-    <input type="text" id="node-input-ocmAddress" placeholder="optional, defaults to https://cloud-wallet.&lt;base-domain&gt;">
+    <label for="node-input-policyRepoUrl">Policy repo URL</label>
+    <input type="text" id="node-input-policyRepoUrl" placeholder="https://github.com/eclipse-xfsc/rego-policies">
+  </div>
+
+  <div class="form-row">
+    <label for="node-input-policyRepoFolder">Policy repo folder</label>
+    <input type="text" id="node-input-policyRepoFolder" placeholder="optional subfolder">
   </div>
 
   <div class="form-row">
     <label for="node-input-kubeconfig">kubeconfig</label>
     <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
-    <input type="hidden" id="node-input-kubeconfigContent">
+    <textarea class="tsa-hidden" id="node-input-kubeconfigContent"></textarea>
   </div>
 
   <div class="form-row">
     <label for="node-input-privateKey">TLS private key</label>
     <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
-    <input type="hidden" id="node-input-privateKeyContent">
+    <textarea class="tsa-hidden" id="node-input-privateKeyContent"></textarea>
   </div>
 
   <div class="form-row">
     <label for="node-input-certificate">TLS certificate</label>
     <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
-    <input type="hidden" id="node-input-certificateContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryImagePrefix">Registry image prefix</label>
-    <input type="text" id="node-input-registryImagePrefix" placeholder="e.g. ghcr.io/myorg/tsa">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryUserName">Registry username</label>
-    <input type="text" id="node-input-registryUserName" placeholder="e.g. ci-bot">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryPassword">Registry password</label>
-    <input type="password" id="node-input-registryPassword" placeholder="••••••••">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-deployLegacyLogin">Deploy TSA login</label>
-    <div class="checkbox-wrap">
-      <input type="checkbox" id="node-input-deployLegacyLogin" style="width:auto;">
-      <span>Deploy the legacy TSA login flow and expose it under the shared TSA host.</span>
-    </div>
+    <textarea class="tsa-hidden" id="node-input-certificateContent"></textarea>
   </div>
 
   <div class="form-row">
     <label for="node-input-name">Node label</label>
     <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
   </div>
+
+  <div class="tsa-note">
+    This TSA deployer follows the same simple deployer style as the OCM-W-Stack node and reuses the TSA-related
+    services and values from that module: NATS, Redis, Vault, Universal Resolver, signer, SD-JWT, and policy-service.
+    It deploys the stack and validates the policy API at <code>https://policy.&lt;domain&gt;/v1/policies</code>.
+  </div>
 </script>
 
 <script type="text/javascript">
 (function() {
+  let pendingReads = 0;
+
+  function setDoneDisabled(disabled) {
+    $('.red-ui-button:contains("Done"), #node-dialog-ok').prop('disabled', disabled);
+  }
+
   function setupFile(fieldFile, fieldHidden) {
-    var inp = $("#node-input-" + fieldFile)[0];
-    if (!inp) return;
-    inp.addEventListener("change", function() {
-      var f = this.files && this.files[0];
-      if (!f) return;
-      var reader = new FileReader();
-      reader.onload = function(e) {
-        $("#node-input-" + fieldHidden).val(e.target.result);
+    const input = $("#node-input-" + fieldFile)[0];
+    if (!input) return;
+    input.addEventListener("change", function() {
+      const file = this.files && this.files[0];
+      if (!file) return;
+      pendingReads += 1;
+      setDoneDisabled(true);
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        $("#node-input-" + fieldHidden).val(evt.target.result);
+        pendingReads = Math.max(0, pendingReads - 1);
+        if (pendingReads === 0) setDoneDisabled(false);
       };
-      reader.readAsText(f);
+      reader.onerror = function() {
+        pendingReads = Math.max(0, pendingReads - 1);
+        if (pendingReads === 0) setDoneDisabled(false);
+        RED.notify('Could not read ' + file.name, 'error');
+      };
+      reader.readAsText(file);
     });
   }
 
@@ -104,24 +93,19 @@
     color: '#c0deed',
     icon: 'bridge.svg',
     defaults: {
-      name: { value: "" },
-      instanceName: { value: "", required: true },
-      ocmwNamespace: { value: "", required: true },
-      domainAddress: { value: "", required: true },
-      emailAddress: { value: "" },
-      ocmAddress: { value: "" },
-      certificateContent: { value: "", required: true },
-      privateKeyContent: { value: "", required: true },
-      kubeconfigContent: { value: "", required: true },
-      registryImagePrefix: { value: "", required: true },
-      registryUserName: { value: "", required: true },
-      registryPassword: { value: "", required: true },
-      deployLegacyLogin: { value: true }
+      name:               { value: "" },
+      instanceName:       { value: "", required: true },
+      domainAddress:      { value: "", required: true },
+      policyRepoUrl:      { value: "https://github.com/eclipse-xfsc/rego-policies", required: true },
+      policyRepoFolder:   { value: "" },
+      kubeconfigContent:  { value: "", required: true },
+      privateKeyContent:  { value: "", required: true },
+      certificateContent: { value: "", required: true }
     },
     inputs: 1,
     outputs: 1,
     label: function() {
-      return this.name || this.instanceName || 'TSA Stack';
+      return this.name || this.instanceName || 'tsastack';
     },
     oneditprepare: function() {
       setupFile('kubeconfig', 'kubeconfigContent');
@@ -129,9 +113,12 @@
       setupFile('certificate', 'certificateContent');
     },
     oneditsave: function() {
-      var domain = $("#node-input-domainAddress").val().trim();
-      if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
-        RED.notify("Base domain should be a bare hostname with no scheme or path.", "warning");
+      if (pendingReads > 0) {
+        RED.notify('Please wait until all selected files are loaded.', 'warning');
+      }
+      const domain = $('#node-input-domainAddress').val().trim();
+      if (domain.startsWith('http://') || domain.startsWith('https://') || domain.includes('/')) {
+        RED.notify('Domain should be a bare hostname (no scheme or path).', 'warning');
       }
     }
   });

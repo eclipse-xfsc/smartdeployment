@@ -1,19 +1,18 @@
 {
   "name": "orce-esb-tsastack",
-  "version": "0.2.0",
-  "description": "TSA stack deployer node that reuses shared OCMW services",
+  "version": "3.0.0",
+  "description": "Simple TSA deployer node based on the OCM-W-Stack TSA service setup - surgical ingress and validation fix",
   "dependencies": {
     "tmp": "^0.2.1"
   },
   "keywords": [
     "tsa",
-    "trust-services",
+    "trust-service-api",
+    "easy-stack-builder",
     "xfsc",
-    "node-red",
     "kubernetes",
-    "k8s",
     "helm",
-    "ocmw"
+    "node-red"
   ],
   "node-red": {
     "nodes": {
