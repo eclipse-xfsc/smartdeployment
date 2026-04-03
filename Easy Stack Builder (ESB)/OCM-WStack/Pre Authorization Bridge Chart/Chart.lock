@@ -1,6 +1,0 @@
-dependencies:
-- name: pre-authorization-bridge
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
-  version: 2.0.1
-digest: sha256:ff2e08876a87299a52feed88dd88da81beeb5200c378ad21200af556bc802d66
-generated: "2026-02-05T07:27:25.52262323+01:00"
