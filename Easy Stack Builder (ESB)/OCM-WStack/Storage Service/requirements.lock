@@ -1,6 +1,0 @@
-dependencies:
-- name: storage-service
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
-  version: 1.0.1
-digest: sha256:9969a8b5e9400c4950827533a134966884923ce5131272c9c8661be62e809003
-generated: "2026-02-02T12:36:41.087553212+01:00"
