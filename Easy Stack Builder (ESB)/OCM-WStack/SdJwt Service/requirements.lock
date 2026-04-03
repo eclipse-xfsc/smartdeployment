@@ -1,6 +1,0 @@
-dependencies:
-- name: sd-jwt-service
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
-  version: 1.0.0
-digest: sha256:d991995eccb84f66b0e6bc69d15e25c5963fa0a0a1b792b0ec8ace59ee788e42
-generated: "2026-02-02T13:26:47.188268796+01:00"
