@@ -1,6 +1,0 @@
-dependencies:
-- name: credential-verification-service
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
-  version: 1.0.2
-digest: sha256:85b9d9b1d44dce2518beb5970a8f6a4f794d3356afee39de44c1e5610976c335
-generated: "2026-02-03T10:42:50.337536362+01:00"
