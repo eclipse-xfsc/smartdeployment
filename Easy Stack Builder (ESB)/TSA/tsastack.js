@@ -8,18 +8,13 @@ module.exports = function(RED) {
     RED.nodes.createNode(this, config);
     const node = this;
 
-    const namespace = config.instanceName;
-    const ocmwNamespace = config.ocmwNamespace;
-    const domain = config.domainAddress;
-    const email = config.emailAddress || "";
-    const ocmAddress = config.ocmAddress || "";
-    const crtContent = config.certificateContent;
-    const keyContent = config.privateKeyContent;
     const kubeContent = config.kubeconfigContent;
-    const registryPrefix = config.registryImagePrefix;
-    const registryUser = config.registryUserName;
-    const registryPass = config.registryPassword;
-    const deployLegacyLogin = String(config.deployLegacyLogin) === 'true' || config.deployLegacyLogin === true;
+    const keyContent = config.privateKeyContent;
+    const crtContent = config.certificateContent;
+    const domain = config.domainAddress;
+    const namespace = config.instanceName;
+    const policyRepoUrl = config.policyRepoUrl || 'https://github.com/eclipse-xfsc/rego-policies';
+    const policyRepoFolder = config.policyRepoFolder || '';
 
     function writeTempFiles() {
       const kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
@@ -34,11 +29,22 @@ module.exports = function(RED) {
       return { kubeTmp, keyTmp, crtTmp };
     }
 
+    function parseOutput(stdout) {
+      const out = { tsaUrl: '', keyId: '', policyStatus: '', status: '' };
+      String(stdout || '').split(/\r?\n/).forEach((line) => {
+        if (line.startsWith('TSA_URL=')) out.tsaUrl = line.slice(8).trim();
+        if (line.startsWith('KEY_ID=')) out.keyId = line.slice(7).trim();
+        if (line.startsWith('POLICY_STATUS=')) out.policyStatus = line.slice(14).trim();
+        if (line.startsWith('STATUS=')) out.status = line.slice(7).trim();
+      });
+      return out;
+    }
+
     node.on('input', function(msg, send, done) {
       send = send || node.send;
 
-      if (!namespace || !ocmwNamespace || !domain || !crtContent || !keyContent || !kubeContent || !registryPrefix || !registryUser || !registryPass) {
-        const err = new Error('Missing required configuration');
+      if (!namespace || !domain || !kubeContent || !keyContent || !crtContent) {
+        const err = new Error('Missing required configuration (instanceName, domain, kubeconfig, key, certificate).');
         node.error(err.message, msg);
         node.status({ fill: 'red', shape: 'ring', text: 'missing config' });
         msg.payload = err.message;
@@ -60,26 +66,11 @@ module.exports = function(RED) {
       }
 
       const deployScript = path.join(__dirname, 'deploy.sh');
-      const args = [
-        namespace,
-        ocmwNamespace,
-        domain,
-        crtTmp.name,
-        keyTmp.name,
-        kubeTmp.name,
-        registryPrefix,
-        registryUser,
-        registryPass,
-        email,
-        ocmAddress,
-        deployLegacyLogin ? 'true' : 'false'
-      ];
+      const args = [namespace, domain, crtTmp.name, keyTmp.name, kubeTmp.name, policyRepoUrl, policyRepoFolder];
       const cmd = `bash ${JSON.stringify(deployScript)} ` + args.map(a => JSON.stringify(a)).join(' ');
 
-      node.log(`Executing: ${cmd}`);
       node.status({ fill: 'blue', shape: 'dot', text: 'deploying' });
-
-      exec(cmd, { cwd: __dirname, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
+      exec(cmd, { cwd: __dirname, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
         try { kubeTmp.removeCallback(); } catch (_) {}
         try { keyTmp.removeCallback(); } catch (_) {}
         try { crtTmp.removeCallback(); } catch (_) {}
@@ -94,8 +85,10 @@ module.exports = function(RED) {
           return;
         }
 
-        node.status({ fill: 'green', shape: 'dot', text: 'deployed' });
-        msg.payload = stdout || 'Deployment succeeded.';
+        const parsed = parseOutput(stdout);
+        msg.payload = parsed.tsaUrl ? parsed : (stdout || 'Deployment succeeded.');
+        msg.logs = stdout;
+        node.status({ fill: 'green', shape: 'dot', text: parsed.status || 'deployed' });
         send(msg);
         if (done) done();
       });
@@ -103,7 +96,6 @@ module.exports = function(RED) {
 
     node.on('close', function(removed, done) {
       if (!removed) return done();
-
       let kubeTmp;
       try {
         kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
@@ -114,14 +106,10 @@ module.exports = function(RED) {
       }
 
       const uninstallScript = path.join(__dirname, 'uninstall.sh');
-      const args = [ namespace, kubeTmp.name ];
+      const args = [namespace, kubeTmp.name];
       const cmd = `bash ${JSON.stringify(uninstallScript)} ` + args.map(a => JSON.stringify(a)).join(' ');
-      node.log(`Running uninstall: ${cmd}`);
-
-      exec(cmd, { cwd: __dirname, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      exec(cmd, { cwd: __dirname }, () => {
         try { kubeTmp.removeCallback(); } catch (_) {}
-        if (err) node.error(`uninstall failed: ${(stderr && stderr.trim()) || err.message}`);
-        else node.log(`uninstall output:\n${stdout}`);
         done();
       });
     });

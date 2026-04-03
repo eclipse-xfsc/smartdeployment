@@ -1,0 +1,26 @@
+vault:
+  global:
+    enabled: true
+  server:
+    enabled: true
+    dev: 
+      enabled: true
+      devRootToken: root
+
+    ha:
+      enabled: false
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    config:
+      backend:
+        file:
+          path: /vault/data
+      listener:
+        tcp:
+          address: "0.0.0.0:8200"
+          tls_disable: true
