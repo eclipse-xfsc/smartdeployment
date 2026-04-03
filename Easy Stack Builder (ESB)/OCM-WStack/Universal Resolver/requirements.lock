@@ -1,6 +1,0 @@
-dependencies:
-- name: universal-resolver
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/dev-ops
-  version: 0.1.7-latest
-digest: sha256:509036d66649982baba9ab8d5e3c38da75b5eb4bf3d07cccf2e9b57bc9adc550
-generated: "2026-02-02T13:08:36.989040934+01:00"
