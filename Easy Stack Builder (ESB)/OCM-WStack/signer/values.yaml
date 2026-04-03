@@ -3,7 +3,8 @@ replicaCount: 2
 image:
   repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa
   name: signer
-  tag: "v2.1.0"
+  tag: "v2.1.0" 
+  # tag should be updated to "v2.1.1" after eclipse pipeline fix
   pullPolicy: Always
 useConfigMap: false
 configMapName: my-configmap
@@ -50,20 +51,17 @@ signer:
       read: 10s
       write: 10s
 
-  #vault:
-  #  addr: http://vault.NAMESPACE.svc.cluster.local:8200
-  #  secret: vault
-  #  enginePath: /opt/plugins/hashicorp-vault-provider.so
-  #  enabled: true
+
   nats:
     enabled: true
     natsHost: nats://nats.NAMESPACE.svc.cluster.local:4222
-    topic: signer-topic
+    topic: sign
   sdjwt:
     url: http://sd-jwt-service.NAMESPACE.svc.cluster.local:3000
   engine:
     image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/crypto-provider-hashicorp-vault-plugin:v2.0.3
     address: 0.0.0.0:50051
+    clusterAdress: 127.0.0.1:50051
     pullPolicy: Always
     env:
       VAULT_ADRESS: http://vault.NAMESPACE.svc.cluster.local:8200

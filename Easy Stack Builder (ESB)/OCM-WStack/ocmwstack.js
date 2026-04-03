@@ -78,8 +78,18 @@ module.exports = function(RED) {
           return;
         }
 
+        const endpointInfo = {
+          didUrl: `https://cloud-wallet.${domain}/.well-known/did.json`,
+          "key-server": `https://auth-cloud-wallet.${domain}/`
+        };
+
         node.status({ fill: 'green', shape: 'dot', text: 'deployed' });
-        msg.payload = stdout || "Deployment succeeded.";
+        msg.payload = endpointInfo;
+        msg.deploymentOutput = stdout || "Deployment succeeded.";
+        if (stderr && stderr.trim()) {
+          msg.deploymentStderr = stderr.trim();
+        }
+        node.debug(`Deployment endpoints: ${JSON.stringify(endpointInfo)}`);
         send(msg);
         if (done) done();
       });

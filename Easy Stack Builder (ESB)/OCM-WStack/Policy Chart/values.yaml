@@ -68,11 +68,11 @@ policy:
     collection: policies
 
   addresses:
-    cache: http://cache:8080
+    cache: http://redis.NAMESPACE.svc.cluster.local:8080
     task: http://task:8080
     didResolver: http://didresolver:8080
     signer: http://signer:8080
-    NAMESPACE: https://gaiax.vereign.com/ocm
+    NAMESPACE: https://gaiax.vereign.com/NAMESPACE
 
 
   ingress:
@@ -82,7 +82,7 @@ policy:
       nginx.ingress.kubernetes.io/rewrite-target: /$2
     tlsEnabled: true
     frontendDomain: cloud-wallet.DOMAIN
-    frontendTlsSecretName: cert-manager-tls
+    frontendTlsSecretName: xfsc-wildcard
 
   memoryStorage:
     policiesRepo: https://gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/deployment.git

@@ -66,31 +66,6 @@ spec:
             value: {{ .Values.signer.http.timeout.write | quote }}
           - name: SDJWT_SERVICE_URL
             value: {{ .Values.signer.sdjwt.url }}
-        {{- if .Values.signer.vault }} 
-          {{- if .Values.signer.vault.enabled }} 
-          - name: VAULT_ADRESS
-            value: {{ .Values.signer.vault.addr | quote }}
-          - name: ENGINE_PATH
-            {{- if .Values.signer.vault.enginePath }}
-            value: {{ .Values.signer.vault.enginePath | quote }}
-            {{- else }}
-            value: /opt/plugins/hashicorp-vault-provider.so
-            {{- end }}
-          {{- if .Values.signer.vault.secret }}
-          - name: VAULT_TOKEN
-            valueFrom:
-              secretKeyRef:
-                name: {{ .Values.signer.vault.secret | quote }}
-                key: token
-          {{- end }}
-          {{- end }}
-          {{- end }}
-          {{- if .Values.signer.local }} 
-          {{- if .Values.signer.local.enabled }} 
-          - name: ENGINE_PATH
-            value: /opt/plugins/hashicorp-vault-provider.so
-          {{- end }}
-          {{- end }}
           {{- if .Values.signer.policy }}
           {{- if .Values.signer.policy.serviceEndpointPolicy }}
           - name: SERVICE_POLICY
@@ -110,6 +85,8 @@ spec:
             value: "nats"
           - name: NATS_TOPIC
             value: {{ .Values.signer.nats.topic }}
+          - name: CRYPTO_GRPC_ADDR
+            value: {{ .Values.signer.engine.clusterAdress }}
           {{- end }}
           {{- if .Values.secretEnv }}
           {{- range $key, $value := .Values.secretEnv }}
@@ -123,6 +100,24 @@ spec:
           {{ toYaml .Values.extraVars | indent 8 }}
           {{- end }}
         {{- end }}
+      - name: {{ template "app.name" . }}-crypto-engine
+        image: {{ .Values.signer.engine.image }}
+        env:
+          - name: CRYPTO_GRPC_ADDR
+            value: {{.Values.signer.engine.address }}
+        {{- range $key, $value := .Values.signer.engine.env }}
+          - name:  "{{ $key }}"
+            value: "{{ $value }}"
+        {{- end }}
+        {{- range $key, $value := .Values.signer.engine.secretEnv }}
+          - name: "{{ $key }}"
+            valueFrom:
+              secretKeyRef:
+                name: "{{ $value.name }}"
+                key: "{{ $value.key }}" 
+        {{- end }}
+
+
         ports:
         {{- if .Values.metrics.enabled }}
           - name: monitoring

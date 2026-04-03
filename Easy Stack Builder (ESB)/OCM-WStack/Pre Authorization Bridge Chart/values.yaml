@@ -11,10 +11,10 @@ pre-authorization-bridge:
      - host: cloud-wallet.DOMAIN
        paths:
          - path: /.well-known/openid-configuration
-           pathType: ImplementationSpecific
+           pathtype: Exact
            port: 8080
          - path: /token
-           pathType: ImplementationSpecific
+           pathtype: Exact
            port: 8080
    tls:
      - secretName: xfsc-wildcard
@@ -22,9 +22,9 @@ pre-authorization-bridge:
          - cloud-wallet.DOMAIN
   config:
     nats:
-      url: nats://nats.NAMESPACE.svc.cluster.local:4222
+      url: nats.NAMESPACE.svc.cluster.local:4222
       queuegroup: preauth
-      timeoutInSec: 10
+      timeoutInSec: 10s
     logLevel: debug
     servingPort: 8080
     database:
@@ -34,24 +34,17 @@ pre-authorization-bridge:
       port: 6379
       db: 0
       IsCluster: false
-    #oAuth:
-    #  serverUrl: https://auth-cloud-wallet.DOMAIN/realms/master/protocol/openid-connect/token
-    #  clientId: bridge
-    #  clientSecret: preauthbridge-oauth
     oAuth:
       signerTopic: sign
-      signerJwksUrl: http://tsa...
-      credentialEndpoint: http://.../credential
-      key: signKey
+      signerJwksUrl: http://signer.NAMESPACE.svc.cluster.local/v1/jwks
+      credentialEndpoint: http://signer.NAMESPACE.svc.cluster.local/v1/credential
+      key: signerkey
       namespace: NAMESPACE 
       groupid:
-      issuerKid: "did:web:dddddddddd#xxx"
+      issuerKid: "did:web:cloud-wallet.DOMAIN#signerkey"
     wellKnown:
       issuer: https://cloud-wallet.DOMAIN
       token_endpoint: https://cloud-wallet.DOMAIN/token
       jwks_uri: https://cloud-wallet.DOMAIN/.well-known/jwks.json
       grant_types_supported:
         - urn:ietf:params:oauth:grant-type:pre-authorized_code
-
-
-
