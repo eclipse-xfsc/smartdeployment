@@ -3,7 +3,7 @@
 set -euo pipefail
 
 
-# ./deploy.sh ocmnamespace domain FULLCHAINCERT keypath email KUECONFIG
+# ./deploy.sh ocmnamespace domain FULLCHAINCERT keypath email KUBECONFIG
 
 NAMESPACE="$1"
 DOMAIN="$2"

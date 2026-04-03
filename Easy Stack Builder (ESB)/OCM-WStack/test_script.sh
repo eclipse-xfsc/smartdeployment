@@ -1,0 +1,1 @@
+curl https://didlint.ownyourdata.eu/validate?did=did:web:cloud-wallet."${DOMAIN}" | grep "Conforms to W3C DID Spec v1.0"
