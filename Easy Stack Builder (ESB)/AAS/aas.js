@@ -1,26 +1,51 @@
 module.exports = function(RED) {
-  const { execFile } = require('child_process');
+  const { spawn } = require('child_process');
   const fs = require('fs');
-  const tmp = require('tmp');
   const path = require('path');
+  const tmp = require('tmp');
 
   function pickOutputValue(text, key) {
     const match = (text || '').match(new RegExp('^' + key + '=(.*)$', 'm'));
     return match ? match[1].trim() : '';
   }
 
-  function buildDeploymentPayload(stdout) {
-    return {
-      authServerUrl: pickOutputValue(stdout, 'AUTH_SERVER_URL'),
-      keyServerUrl: pickOutputValue(stdout, 'KEY_SERVER_URL'),
-      keycloakAdminUsername: pickOutputValue(stdout, 'KEYCLOAK_ADMIN_USERNAME'),
-      keycloakAdminPassword: pickOutputValue(stdout, 'KEYCLOAK_ADMIN_PASSWORD'),
-      iatToken: pickOutputValue(stdout, 'IAT_TOKEN')
-    };
+  function maskSecrets(text) {
+    return String(text || '')
+      .replace(/(password|secret|token)=([^\n]+)/gi, '$1=[masked]')
+      .replace(/(admin-password: )(.*)/gi, '$1[masked]')
+      .replace(/(client secret: )(.*)/gi, '$1[masked]');
   }
 
   function normalizeDbType(value) {
     return String(value || '').trim().toLowerCase() === 'external' ? 'external' : 'embedded';
+  }
+
+  function buildDeploymentPayload(stdout, domain) {
+    const aasAuthUrl = pickOutputValue(stdout, 'AAS_AUTH_URL') || pickOutputValue(stdout, 'AUTH_SERVER_URL');
+    const keyServerUrl = pickOutputValue(stdout, 'KEY_SERVER_URL');
+    const testUrl = pickOutputValue(stdout, 'TEST_URL') || (domain ? `https://test-server.${domain}/demo` : '');
+    const status = pickOutputValue(stdout, 'STATUS') || 'Deployed';
+    const diagnostics = {
+      keycloakAdminUsername: pickOutputValue(stdout, 'KEYCLOAK_ADMIN_USERNAME') || 'admin',
+      keycloakRealm: pickOutputValue(stdout, 'KEYCLOAK_REALM') || 'gaia-x',
+      initialAccessTokenSecret: pickOutputValue(stdout, 'INITIAL_ACCESS_TOKEN_SECRET') || 'aas-initial-access-token'
+    };
+
+    return {
+      payload: {
+        aasAuthUrl,
+        keyServerUrl,
+        testUrl,
+        status
+      },
+      diagnostics
+    };
+  }
+
+  function writeTempFile(prefix, postfix, content, mode) {
+    const tmpFile = tmp.fileSync({ prefix, postfix });
+    fs.writeFileSync(tmpFile.name, content, { encoding: 'utf8', mode });
+    return tmpFile;
   }
 
   function DeployNode(config) {
@@ -37,17 +62,24 @@ module.exports = function(RED) {
     const externalDbUsername = (config.externalDbUsername || '').trim();
     const externalDbPassword = typeof config.externalDbPassword === 'string' ? config.externalDbPassword : '';
 
-    function writeTempFiles() {
-      const kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
-      fs.writeFileSync(kubeTmp.name, kubeContent, { encoding: 'utf8' });
+    function runScript(scriptPath, args, msg, onDone) {
+      const child = spawn('bash', [scriptPath].concat(args), {
+        cwd: __dirname,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
 
-      const keyTmp = tmp.fileSync({ prefix: 'key-', postfix: '.key' });
-      fs.writeFileSync(keyTmp.name, keyContent, { encoding: 'utf8', mode: 0o600 });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
-      const crtTmp = tmp.fileSync({ prefix: 'crt-', postfix: '.crt' });
-      fs.writeFileSync(crtTmp.name, crtContent, { encoding: 'utf8' });
-
-      return { kubeTmp, keyTmp, crtTmp };
+      child.on('error', (err) => onDone(err, stdout, stderr));
+      child.on('close', (code) => {
+        if (code !== 0) {
+          return onDone(new Error((stderr || `script exited with code ${code}`).trim()), stdout, stderr);
+        }
+        return onDone(null, stdout, stderr);
+      });
     }
 
     node.on('input', function(msg, send, done) {
@@ -73,9 +105,13 @@ module.exports = function(RED) {
         return;
       }
 
-      let kubeTmp, keyTmp, crtTmp;
+      let kubeTmp;
+      let keyTmp;
+      let crtTmp;
       try {
-        ({ kubeTmp, keyTmp, crtTmp } = writeTempFiles());
+        kubeTmp = writeTempFile('kube-', '.yaml', kubeContent);
+        keyTmp = writeTempFile('key-', '.key', keyContent, 0o600);
+        crtTmp = writeTempFile('crt-', '.crt', crtContent);
       } catch (e) {
         node.error(`Failed to write temp files: ${e.message}`, msg);
         node.status({ fill: 'red', shape: 'ring', text: 'file error' });
@@ -85,7 +121,7 @@ module.exports = function(RED) {
         return;
       }
 
-      const deployScript = path.join(__dirname, 'deploy.sh');
+      const deployScript = path.join(__dirname, 'scripts', 'deploy.sh');
       const deployArgs = [
         suffix,
         domain,
@@ -98,13 +134,8 @@ module.exports = function(RED) {
         dbType === 'external' ? externalDbPassword : ''
       ];
 
-      node.log(`Executing deploy.sh for instance ${suffix} using ${dbType} database mode`);
       node.status({ fill: 'blue', shape: 'dot', text: `deploying (${dbType})` });
-
-      execFile('bash', [deployScript].concat(deployArgs), {
-        cwd: __dirname,
-        maxBuffer: 10 * 1024 * 1024
-      }, (err, stdout, stderr) => {
+      runScript(deployScript, deployArgs, msg, (err, stdout, stderr) => {
         try { kubeTmp.removeCallback(); } catch (_) {}
         try { keyTmp.removeCallback(); } catch (_) {}
         try { crtTmp.removeCallback(); } catch (_) {}
@@ -119,17 +150,17 @@ module.exports = function(RED) {
           return;
         }
 
-        const deploymentPayload = buildDeploymentPayload(stdout || '');
-        msg.payload = deploymentPayload;
-        msg.authServerUrl = deploymentPayload.authServerUrl;
-        msg.keyServerUrl = deploymentPayload.keyServerUrl;
-        msg.keycloakAdminUsername = deploymentPayload.keycloakAdminUsername;
-        msg.keycloakAdminPassword = deploymentPayload.keycloakAdminPassword;
-        msg.iatToken = deploymentPayload.iatToken;
+        const result = buildDeploymentPayload(stdout || '', domain);
+        msg.payload = result.payload;
+        msg.aasAuthUrl = result.payload.aasAuthUrl;
+        msg.keyServerUrl = result.payload.keyServerUrl;
+        msg.testUrl = result.payload.testUrl;
+        msg.status = result.payload.status;
+        msg.diagnostics = result.diagnostics;
         msg.dbType = dbType;
-        msg.deploymentLogs = stdout || 'Deployment succeeded.';
+        msg.deploymentLogs = maskSecrets(stdout || 'Deployment succeeded.');
 
-        node.status({ fill: 'green', shape: 'dot', text: 'deployed' });
+        node.status({ fill: 'green', shape: 'dot', text: result.payload.status || 'deployed' });
         send(msg);
         if (done) done();
       });
@@ -140,24 +171,17 @@ module.exports = function(RED) {
 
       let kubeTmp;
       try {
-        kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
-        fs.writeFileSync(kubeTmp.name, kubeContent, { encoding: 'utf8' });
+        kubeTmp = writeTempFile('kube-', '.yaml', kubeContent);
       } catch (err) {
         node.warn(`uninstall: failed to write kubeconfig temp file: ${err.message}`);
         return done();
       }
 
-      const uninstallScript = path.join(__dirname, 'uninstall.sh');
+      const uninstallScript = path.join(__dirname, 'scripts', 'uninstall.sh');
       const args = [suffix, kubeTmp.name];
-      node.log(`Running uninstall for instance ${suffix}`);
-
-      execFile('bash', [uninstallScript].concat(args), {
-        cwd: __dirname,
-        maxBuffer: 10 * 1024 * 1024
-      }, (err, stdout, stderr) => {
+      runScript(uninstallScript, args, {}, (err) => {
         try { kubeTmp.removeCallback(); } catch (_) {}
-        if (err) node.error(`uninstall failed: ${(stderr && stderr.trim()) || err.message}`);
-        else node.log(`uninstall output:\n${stdout}`);
+        if (err) node.error(`uninstall failed: ${err.message}`);
         done();
       });
     });

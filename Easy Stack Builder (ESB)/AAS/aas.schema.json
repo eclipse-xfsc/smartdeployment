@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FACIS AAS Builder Node",
+  "type": "object",
+  "description": "Input and output contract for the patched FACIS AAS Builder node.",
+  "properties": {
+    "instanceName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domainAddress": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kubeconfigContent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "privateKeyContent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "certificateContent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dbType": {
+      "type": "string",
+      "enum": [
+        "embedded",
+        "external"
+      ]
+    },
+    "externalDbUrl": {
+      "type": "string"
+    },
+    "externalDbUsername": {
+      "type": "string"
+    },
+    "externalDbPassword": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "instanceName",
+    "domainAddress",
+    "kubeconfigContent",
+    "privateKeyContent",
+    "certificateContent",
+    "dbType"
+  ],
+  "outputContract": {
+    "type": "object",
+    "required": [
+      "aasAuthUrl",
+      "keyServerUrl",
+      "testUrl",
+      "status"
+    ],
+    "properties": {
+      "aasAuthUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "keyServerUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "testUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "status": {
+        "type": "string"
+      },
+      "diagnostics": {
+        "type": "object"
+      }
+    }
+  },
+  "uiSections": [
+    "Instance Info",
+    "Cluster & Domain",
+    "Keycloak & Authentication",
+    "Verification"
+  ]
+}
