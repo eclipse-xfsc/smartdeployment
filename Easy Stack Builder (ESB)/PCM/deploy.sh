@@ -11,7 +11,7 @@ CERT_PATH="$4"
 KEY_PATH="$5"   
 KUBE="$6"
 TLS_SECRET="xfsc-wildcard"
-REGISTRY_REPO="$7"  # docker.io/<username>/custom-webui
+REGISTRY_REPO="$7"  # docker.io/manifaridi/custom-webui
 REGISTRY_USERNAME="$8"
 REGISTRY_PASSWORD="$9"
 
@@ -35,45 +35,55 @@ reown_from_chart() {
   helm dependency build "$chart_dir" >/dev/null 2>&1 || true
 
   # Reown resources rendered by the chart (namespaced + cluster-scoped)
-  helm template "$rel" "$chart_dir" -n "$ns" -o json \
+  helm template "$rel" "$chart_dir" -n "$ns" \
+  | yq -o=json eval-all '.' - 2>/dev/null \
   | jq -r '
-      .[]
-      | select(.kind != null and .metadata != null and .metadata.name != null)
+      select(.kind != null and .metadata != null and .metadata.name != null)
       | [.kind, (.metadata.namespace // ""), .metadata.name]
       | @tsv
     ' \
   | while IFS=$'\t' read -r kind rns name; do
+      [[ -z "$kind" || -z "$name" ]] && continue
+
       if [[ -z "$rns" ]]; then
         if kubectl get "$kind" "$name" >/dev/null 2>&1; then
           echo "Reowning $kind/$name (cluster-scoped)"
           kubectl annotate "$kind" "$name" \
             meta.helm.sh/release-name="$rel" \
-            meta.helm.sh/release-namespace="$ns" --overwrite || true
+            meta.helm.sh/release-namespace="$ns" \
+            --overwrite >/dev/null 2>&1 || true
           kubectl label "$kind" "$name" \
-            app.kubernetes.io/managed-by=Helm --overwrite || true
+            app.kubernetes.io/managed-by=Helm \
+            --overwrite >/dev/null 2>&1 || true
         fi
       else
         if kubectl -n "$rns" get "$kind" "$name" >/dev/null 2>&1; then
           echo "Reowning $kind/$rns/$name"
           kubectl -n "$rns" annotate "$kind" "$name" \
             meta.helm.sh/release-name="$rel" \
-            meta.helm.sh/release-namespace="$ns" --overwrite || true
+            meta.helm.sh/release-namespace="$ns" \
+            --overwrite >/dev/null 2>&1 || true
           kubectl -n "$rns" label "$kind" "$name" \
-            app.kubernetes.io/managed-by=Helm --overwrite || true
+            app.kubernetes.io/managed-by=Helm \
+            --overwrite >/dev/null 2>&1 || true
         fi
       fi
     done
 
-  # Extra sweep: cluster-scoped kinds that often block Helm installs
+  # Extra sweep: cluster-scoped kinds that often block helm upgrade --installs
   for kind in clusterrole clusterrolebinding validatingwebhookconfiguration mutatingwebhookconfiguration apiservice crd ingressclass priorityclass storageclass; do
     kubectl get "$kind" -o name 2>/dev/null \
     | grep -i "$rel" \
     | while read -r r; do
+        [[ -z "$r" ]] && continue
         echo "Reowning $kind $r (cluster-scoped sweep)"
         kubectl annotate "$r" \
           meta.helm.sh/release-name="$rel" \
-          meta.helm.sh/release-namespace="$ns" --overwrite || true
-        kubectl label "$r" app.kubernetes.io/managed-by=Helm --overwrite || true
+          meta.helm.sh/release-namespace="$ns" \
+          --overwrite >/dev/null 2>&1 || true
+        kubectl label "$r" \
+          app.kubernetes.io/managed-by=Helm \
+          --overwrite >/dev/null 2>&1 || true
       done
   done
 
@@ -82,11 +92,15 @@ reown_from_chart() {
     kubectl -n "$ns" get "$kind" -o name 2>/dev/null \
     | grep -i "$rel" \
     | while read -r r; do
+        [[ -z "$r" ]] && continue
         echo "Reowning $kind $ns/$r (namespaced sweep)"
         kubectl -n "$ns" annotate "$r" \
           meta.helm.sh/release-name="$rel" \
-          meta.helm.sh/release-namespace="$ns" --overwrite || true
-        kubectl -n "$ns" label "$r" app.kubernetes.io/managed-by=Helm --overwrite || true
+          meta.helm.sh/release-namespace="$ns" \
+          --overwrite >/dev/null 2>&1 || true
+        kubectl -n "$ns" label "$r" \
+          app.kubernetes.io/managed-by=Helm \
+          --overwrite >/dev/null 2>&1 || true
       done
   done
 }
@@ -101,7 +115,7 @@ reown_from_chart "./Account Service"             "account-service"       "$NAMES
 reown_from_chart "./Web-UI Service"              "web-ui-service"        "$NAMESPACE" || true
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Configuration Service/values.yaml"
-helm dependency build "./Configuration Service";helm install configuration-service "./Configuration Service" -n $NAMESPACE
+helm dependency build "./Configuration Service";helm upgrade --install configuration-service "./Configuration Service" -n $NAMESPACE
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Configuration Service/values.yaml"
 
 kubectl annotate ingressclass kong \
@@ -113,11 +127,11 @@ kubectl label ingressclass kong \
 
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Kong Service/values.yaml"
-helm dependency build "./Kong Service";helm install kong-service "./Kong Service" -n $NAMESPACE
+helm dependency build "./Kong Service";helm upgrade --install kong-service "./Kong Service" -n $NAMESPACE
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Kong Service/values.yaml"
 
 sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
-helm dependency build "./Plugin Discovery Service";helm install plugin-discovery-service "./Plugin Discovery Service" -n $NAMESPACE
+helm dependency build "./Plugin Discovery Service";helm upgrade --install plugin-discovery-service "./Plugin Discovery Service" -n $NAMESPACE
 sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
 
 export POSTGRES_ADMIN_PASSWORD=$(
@@ -160,7 +174,7 @@ CREATE TABLE IF NOT EXISTS accounts.user_connections (id SERIAL PRIMARY KEY, use
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"OCMNAMESPACE"'\>/'"$OCMNAMESPACE"'/g' "./Account Service/values.yaml"
-helm dependency build "./Account Service";helm install account-service "./Account Service" -n $NAMESPACE
+helm dependency build "./Account Service";helm upgrade --install account-service "./Account Service" -n $NAMESPACE
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"$OCMNAMESPACE"'\>/'"OCMNAMESPACE"'/g' "./Account Service/values.yaml"
@@ -217,7 +231,7 @@ kubectl create secret generic web-ui-basic-auth \
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Web-UI Service/values.yaml"
 sed -i "s|REGISTRY_REPO|${REGISTRY_REPO}|g" "./Web-UI Service/values.yaml"
-helm dependency build "./Web-UI Service";helm install web-ui-service "./Web-UI Service" -n $NAMESPACE --wait --timeout 5m --debug
+helm dependency build "./Web-UI Service";helm upgrade --install web-ui-service "./Web-UI Service" -n $NAMESPACE --wait --timeout 5m --debug
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Web-UI Service/values.yaml"
 sed -i "s|${REGISTRY_REPO}|REGISTRY_REPO|g" "./Web-UI Service/values.yaml"
 
