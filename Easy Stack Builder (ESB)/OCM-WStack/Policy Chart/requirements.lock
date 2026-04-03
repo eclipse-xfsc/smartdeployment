@@ -1,6 +1,0 @@
-dependencies:
-- name: policy
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa
-  version: 1.4.3
-digest: sha256:0ec784bc3fc81fb99e6bca89ecb68ae5bd26b11905e1b71bf47a2440f354a744
-generated: "2026-02-02T10:57:22.688675217+01:00"
