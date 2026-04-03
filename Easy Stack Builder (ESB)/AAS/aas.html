@@ -1,89 +1,110 @@
 
-<!-- Editor UI for AAS-Stack node -->
 <script type="text/x-red" data-template-name="AAS-Stack">
   <style>
+    .facis-tabs { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+    .facis-tab { border:1px solid #c7d2e2; background:#f5f8fc; padding:6px 12px; cursor:pointer; border-radius:4px; }
+    .facis-tab.active { background:#dbe8f6; font-weight:600; }
+    .facis-panel { display:none; padding:8px 0; }
+    .facis-panel.active { display:block; }
     .form-row { display:flex; align-items:center; margin-bottom:10px; }
-    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
+    .form-row label { width:190px !important; margin-right:10px; text-align:right; }
     .form-row input[type="text"],
     .form-row input[type="password"] { flex:1; }
     .db-mode-options { display:flex; gap:18px; flex-wrap:wrap; }
-    .db-mode-options label { width:auto!important; margin-right:0; text-align:left; }
+    .db-mode-options label { width:auto !important; margin-right:0; text-align:left; }
     .db-mode-options input[type="radio"] { width:auto; margin-right:6px; }
-    .form-help {
-      margin-left:170px;
-      color:#666;
-      font-size:12px;
-      line-height:1.4;
-    }
+    .form-help { margin-left:200px; color:#666; font-size:12px; line-height:1.4; }
+    .derived-note { margin-left:200px; background:#f8fafc; border:1px solid #e2e8f0; padding:10px; border-radius:4px; font-size:12px; color:#334155; }
   </style>
 
-  <div class="form-row">
-    <label for="node-input-instanceName">Instance name</label>
-    <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
+  <div class="facis-tabs">
+    <button type="button" class="facis-tab active" data-panel="aas-panel-instance">Instance Info</button>
+    <button type="button" class="facis-tab" data-panel="aas-panel-cluster">Cluster &amp; Domain</button>
+    <button type="button" class="facis-tab" data-panel="aas-panel-auth">Keycloak &amp; Authentication</button>
+    <button type="button" class="facis-tab" data-panel="aas-panel-verify">Verification</button>
   </div>
 
-  <div class="form-row">
-    <label for="node-input-domainAddress">Domain</label>
-    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-kubeconfig">kubeconfig</label>
-    <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
-    <input type="hidden" id="node-input-kubeconfigContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-privateKey">TLS Private Key</label>
-    <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
-    <input type="hidden" id="node-input-privateKeyContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-certificate">TLS Certificate</label>
-    <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
-    <input type="hidden" id="node-input-certificateContent">
-  </div>
-
-  <div class="form-row">
-    <label>Database</label>
-    <div class="db-mode-options">
-      <label for="node-input-dbType-embedded">
-        <input type="radio" id="node-input-dbType-embedded" name="node-input-dbType-choice" value="embedded">
-        Embedded deploy
-      </label>
-      <label for="node-input-dbType-external">
-        <input type="radio" id="node-input-dbType-external" name="node-input-dbType-choice" value="external">
-        External DB
-      </label>
-    </div>
-    <input type="hidden" id="node-input-dbType">
-  </div>
-
-  <div id="external-db-fields" style="display:none;">
+  <div id="aas-panel-instance" class="facis-panel active">
     <div class="form-row">
-      <label for="node-input-externalDbUrl">DB JDBC URL</label>
-      <input type="text" id="node-input-externalDbUrl" placeholder="jdbc:postgresql://db.example.com:5432/aas">
+      <label for="node-input-instanceName">Instance name</label>
+      <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
     </div>
-
     <div class="form-row">
-      <label for="node-input-externalDbUsername">DB Username</label>
-      <input type="text" id="node-input-externalDbUsername" placeholder="e.g. aas">
+      <label for="node-input-name">Node label</label>
+      <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
     </div>
-
-    <div class="form-row">
-      <label for="node-input-externalDbPassword">DB Password</label>
-      <input type="password" id="node-input-externalDbPassword" placeholder="Database password">
-    </div>
-
-    <div class="form-help">
-      Use a full PostgreSQL JDBC URL, for example <code>jdbc:postgresql://db.example.com:5432/aas</code>.
+    <div class="derived-note">
+      Package version: <strong>2.0.1</strong><br>
+      Output contract: <code>{ aasAuthUrl, keyServerUrl, testUrl, status }</code>
     </div>
   </div>
 
-  <div class="form-row">
-    <label for="node-input-name">Node label</label>
-    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
+  <div id="aas-panel-cluster" class="facis-panel">
+    <div class="form-row">
+      <label for="node-input-domainAddress">Domain</label>
+      <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
+    </div>
+    <div class="form-row">
+      <label for="node-input-kubeconfig">kubeconfig</label>
+      <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
+      <input type="hidden" id="node-input-kubeconfigContent">
+    </div>
+    <div class="form-row">
+      <label for="node-input-privateKey">TLS Private Key</label>
+      <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
+      <input type="hidden" id="node-input-privateKeyContent">
+    </div>
+    <div class="form-row">
+      <label for="node-input-certificate">TLS Certificate</label>
+      <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
+      <input type="hidden" id="node-input-certificateContent">
+    </div>
+    <div class="form-row">
+      <label>Database</label>
+      <div class="db-mode-options">
+        <label for="node-input-dbType-embedded">
+          <input type="radio" id="node-input-dbType-embedded" name="node-input-dbType-choice" value="embedded">
+          Embedded deploy
+        </label>
+        <label for="node-input-dbType-external">
+          <input type="radio" id="node-input-dbType-external" name="node-input-dbType-choice" value="external">
+          External DB
+        </label>
+      </div>
+      <input type="hidden" id="node-input-dbType">
+    </div>
+    <div id="external-db-fields" style="display:none;">
+      <div class="form-row">
+        <label for="node-input-externalDbUrl">DB JDBC URL</label>
+        <input type="text" id="node-input-externalDbUrl" placeholder="jdbc:postgresql://db.example.com:5432/aas">
+      </div>
+      <div class="form-row">
+        <label for="node-input-externalDbUsername">DB Username</label>
+        <input type="text" id="node-input-externalDbUsername" placeholder="e.g. aas">
+      </div>
+      <div class="form-row">
+        <label for="node-input-externalDbPassword">DB Password</label>
+        <input type="password" id="node-input-externalDbPassword" placeholder="Database password">
+      </div>
+      <div class="form-help">
+        Use a full PostgreSQL JDBC URL, for example <code>jdbc:postgresql://db.example.com:5432/aas</code>.
+      </div>
+    </div>
+  </div>
+
+  <div id="aas-panel-auth" class="facis-panel">
+    <div class="derived-note">
+      Keycloak realm is imported as <strong>gaia-x</strong>.<br>
+      Keycloak admin console will be exposed at <code>https://key-server.&lt;domain&gt;/admin</code>.<br>
+      Initial access token is stored in Kubernetes Secret <code>aas-initial-access-token</code> and is no longer emitted in node output.
+    </div>
+  </div>
+
+  <div id="aas-panel-verify" class="facis-panel">
+    <div class="derived-note">
+      Verification URL exposed to downstream nodes: <code>https://test-server.&lt;domain&gt;/demo</code><br>
+      The patched package adds a dedicated <code>test-server</code> ingress alias so ORCE receives the SRS output contract even though the upstream deployment remains centered on the auth-service image.
+    </div>
   </div>
 </script>
 
@@ -96,12 +117,18 @@
       var f = this.files && this.files[0];
       if (!f) return;
       var reader = new FileReader();
-      // Read as text so we preserve exact file contents (no base64/data: prefix)
       reader.onload = function(e) {
         $("#node-input-" + fieldHidden).val(e.target.result);
       };
       reader.readAsText(f);
     });
+  }
+
+  function activatePanel(panelId) {
+    $('.facis-tab').removeClass('active');
+    $('.facis-panel').removeClass('active');
+    $('.facis-tab[data-panel="' + panelId + '"]').addClass('active');
+    $('#' + panelId).addClass('active');
   }
 
   function currentDbType(context) {
@@ -117,9 +144,6 @@
     var normalized = (dbType === "external") ? "external" : "embedded";
     $("#node-input-dbType").val(normalized).trigger("change");
     $("#external-db-fields").toggle(normalized === "external");
-    $("#node-input-externalDbUrl").trigger("change");
-    $("#node-input-externalDbUsername").trigger("change");
-    $("#node-input-externalDbPassword").trigger("change");
   }
 
   function syncDbModeFromRadios() {
@@ -132,13 +156,13 @@
     color: '#c0deed',
     icon: 'bridge.svg',
     defaults: {
-      name:                { value: "" },
-      instanceName:        { value: "", required: true },
-      domainAddress:       { value: "", required: true },
-      kubeconfigContent:   { value: "", required: true },
-      privateKeyContent:   { value: "", required: true },
-      certificateContent:  { value: "", required: true },
-      dbType:              { value: "embedded", required: true },
+      name: { value: "" },
+      instanceName: { value: "", required: true },
+      domainAddress: { value: "", required: true },
+      kubeconfigContent: { value: "", required: true },
+      privateKeyContent: { value: "", required: true },
+      certificateContent: { value: "", required: true },
+      dbType: { value: "embedded", required: true },
       externalDbUrl: {
         value: "",
         validate: function(v) {
@@ -168,29 +192,25 @@
     inputs: 1,
     outputs: 1,
     label: function() {
-      return this.name || this.instanceName || "AAS-Stack";
+      return this.name || this.instanceName || 'AAS-Stack';
     },
     oneditprepare: function() {
-      setupFile("kubeconfig", "kubeconfigContent");
-      setupFile("privateKey", "privateKeyContent");
-      setupFile("certificate", "certificateContent");
-
+      setupFile('kubeconfig', 'kubeconfigContent');
+      setupFile('privateKey', 'privateKeyContent');
+      setupFile('certificate', 'certificateContent');
+      $('.facis-tab').on('click', function() { activatePanel($(this).data('panel')); });
       var dbType = currentDbType(this);
       $("#node-input-dbType-" + (dbType === "external" ? "external" : "embedded")).prop("checked", true);
       setDbModeVisibility(dbType);
-      $('input[name="node-input-dbType-choice"]').on("change", syncDbModeFromRadios);
+      $('input[name="node-input-dbType-choice"]').on('change', syncDbModeFromRadios);
     },
     oneditsave: function() {
-      // Persist DB type selected in the radio group.
       syncDbModeFromRadios();
-
-      // Light validation for common mistakes.
       var domain = $("#node-input-domainAddress").val().trim();
       if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
         RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
       }
-
-      if (currentDbType(this) === "external") {
+      if (currentDbType(this) === 'external') {
         var jdbcUrl = $("#node-input-externalDbUrl").val().trim();
         if (jdbcUrl && !/^jdbc:postgresql:\/\//i.test(jdbcUrl)) {
           RED.notify("External DB URL should be a PostgreSQL JDBC URL, for example jdbc:postgresql://host:5432/db.", "warning");

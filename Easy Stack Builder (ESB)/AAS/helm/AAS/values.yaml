@@ -1,0 +1,160 @@
+replicaCount: 1
+name: aas
+fullnameOverride: ""
+
+image:
+  repository: registry.gitlab.com/gaia-x/data-infrastructure-federation-services/authenticationauthorization
+  name: auth-service-image
+  tag: "latest"
+  sha: ""
+  pullPolicy: Always
+  pullSecrets: ""
+
+podAnnotations: {}
+
+# Plain env vars (non-secret)
+env:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres-postgresql:5432/aas"
+  SPRING_DATASOURCE_USERNAME: "aas"
+
+# Secret-backed env vars (secretKeyRef)
+secretEnv:
+  SPRING_DATASOURCE_PASSWORD:
+    name: aas-db-secret
+    key: password
+
+externalSecrets: false
+
+service:
+  port: 9000
+  type: ClusterIP
+
+server:
+  http:
+    port: 9000
+
+config:
+  profile: prod
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+  hosts:
+    - host: "auth-server.DOMAIN"
+      paths:
+        - path: /
+          port: 9000
+    - host: "test-server.DOMAIN"
+      paths:
+        - path: /
+          port: 9000
+  tls:
+    - secretName: TLS_SECRET
+      hosts:
+        - "auth-server.DOMAIN"
+        - "test-server.DOMAIN"
+
+secrets:
+  keys:
+    iat: "IAT_TOKEN"
+    jwk: "JWK_SECRET"
+  oidc:
+    username: "aas-app-oidc"
+    password: "{noop}secret"
+  siop:
+    username: "aas-app-siop"
+    password: "{noop}secret2"
+
+properties:
+  management:
+    endpoints:
+      web:
+        exposure:
+          include: health, info, metrics, prometheus
+  spring:
+    application:
+      name: auth-service
+    messages:
+      encoding: ISO-8859-1
+  logging:
+    level:
+      root: WARN
+      tsclaims: WARN
+      org.springframework.web: WARN
+      org.springframework.security: WARN
+      eu.gaiax.difs.aas: INFO
+      eu.gaiax.difs.aas.config.AuthorizationServerConfig: INFO
+  servlet:
+    session:
+      timeout: 10m
+  tomcat:
+    mbeanregistry:
+      enabled: true
+  aas:
+    cache:
+      size: 0
+      ttl: 5m
+    iam:
+      base-uri: https://key-server.DOMAIN
+      iat:
+        dcr-uri: "https://key-server.DOMAIN/realms/gaia-x/clients-registrations/openid-connect"
+        redirect-uri: "https://auth-server.DOMAIN/*"
+        secret: ${AAS_IAM_IAT_SECRET}
+      clients:
+        oidc:
+          id: "aas-app-oidc"
+          secret: "{noop}secret"
+          redirect-uris:
+            - "https://key-server.DOMAIN/realms/gaia-x/broker/ssi-oidc/endpoint"
+        siop:
+          id: "aas-app-siop"
+          secret: "{noop}secret2"
+          redirect-uris:
+            - "https://key-server.DOMAIN/realms/gaia-x/broker/ssi-siop/endpoint"
+    jwk:
+      length: 3072
+      secret: ${AAS_JWK_SECRET}
+    oidc:
+      issuer: https://auth-server.DOMAIN
+      static-scopes: "openid profile email"
+    siop:
+      clock-skew: 5s
+      issuer: https://self-issued.me/v2
+    scopes:
+      openid:
+        - sub
+        - iss
+        - auth_time
+      profile:
+        - name
+        - given_name
+        - family_name
+        - middle_name
+        - preferred_username
+        - gender
+        - birthdate
+        - updated_at
+      email:
+        - email
+        - email_verified
+    token:
+      ttl: 5m
+    tsa:
+      url: http://trustservice/api
+      repo: aisbl
+      group: example
+      version: 1.0
+      action: evaluation
+      delay: 500
+      duration: 5000
+      request:
+        count: 2
+      statuses:
+        GetLoginProofResult: ACCEPTED
+        GetIatProofResult: ACCEPTED
