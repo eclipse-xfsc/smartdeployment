@@ -1,6 +1,0 @@
-dependencies:
-- name: didcomm-connector
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
-  version: 0.1.0
-digest: sha256:1351c9e652d3f60aa3aecd665924d5f9ab6b50a7eb98fb5e44127b255a234c42
-generated: "2026-02-03T10:43:07.939172387+01:00"
