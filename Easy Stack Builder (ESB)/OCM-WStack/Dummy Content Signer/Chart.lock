@@ -1,6 +1,0 @@
-dependencies:
-- name: dummycontentsigner
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
-  version: 1.0.3-latest
-digest: sha256:1b1db4814027aeac705930be8b62cdf7eb9b5cd9e30472ee05f2e5d992dbd332
-generated: "2026-02-02T13:26:54.97966926+01:00"
