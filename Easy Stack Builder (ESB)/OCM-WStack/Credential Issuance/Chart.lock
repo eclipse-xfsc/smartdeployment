@@ -1,6 +1,0 @@
-dependencies:
-- name: issuance-service
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
-  version: 1.0.0
-digest: sha256:76e04fae874b764f10e95cab1a613bf5604c4cc9ff5325c761d9ed352f320b3f
-generated: "2026-02-03T10:42:35.641469992+01:00"
