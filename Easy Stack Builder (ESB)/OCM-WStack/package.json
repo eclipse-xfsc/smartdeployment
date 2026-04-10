@@ -1,29 +1,32 @@
 {
-    "name": "orce-esb-ocmwstack",
-    "version": "3.0.0",
-    "description": "OCM-W-Stack deployer node",
-    "dependencies": {
-        "tmp": "^0.2.1"
-    },
-    "keywords": [
-        "ocm",
-        "ocm-w-stack",
-        "easy",
-        "stack",
-        "builder",
-        "xfsc",
-        "faps",
-        "fap",
-        "kubernetes",
-        "k8s"
-    ],
-    "node-red": {
-        "nodes": {
-            "ocmwstack": "ocmwstack.js"
-        }
-    },
-    "engines": {
-        "node": ">=14.0.0",
-        "node-red": ">=3.0.0"
+  "name": "orce-esb-ocmwstack",
+  "version": "9.0.0",
+  "description": "OCM-W-Stack deployer node",
+  "dependencies": {
+    "tmp": "^0.2.1"
+  },
+  "scripts": {
+    "test": "./test/static-validate.sh"
+  },
+  "keywords": [
+    "ocm",
+    "ocm-w-stack",
+    "easy",
+    "stack",
+    "builder",
+    "xfsc",
+    "faps",
+    "fap",
+    "kubernetes",
+    "k8s"
+  ],
+  "node-red": {
+    "nodes": {
+      "ocmwstack": "ocmwstack.js"
     }
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "node-red": ">=3.0.0"
+  }
 }

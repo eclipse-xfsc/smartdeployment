@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OCM-W-Stack Output Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ocmUrl",
+    "keycloakUrl",
+    "clientSecret",
+    "externalIp",
+    "status"
+  ],
+  "properties": {
+    "ocmUrl": {
+      "type": "string",
+      "pattern": "^https://"
+    },
+    "keycloakUrl": {
+      "type": "string",
+      "pattern": "^https://"
+    },
+    "clientSecret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "externalIp": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Implemented"
+      ]
+    }
+  }
+}
