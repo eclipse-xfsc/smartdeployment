@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-tsastack",
-  "version": "3.0.0",
+  "version": "7.0.0",
   "description": "Simple TSA deployer node based on the OCM-W-Stack TSA service setup - surgical ingress and validation fix",
   "dependencies": {
     "tmp": "^0.2.1"
