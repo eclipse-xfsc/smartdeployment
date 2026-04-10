@@ -371,8 +371,7 @@ helm upgrade --install keycloak "$CHART_DIR/Keycloak" \
   --set keycloak.postgresql.primary.resources.limits.memory=512Mi \
   --set global.security.allowInsecureImages=true \
   --wait \
-  --timeout 30m \
-  --atomic
+  --timeout 30m
 
 KC_POD="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')"
 [ -n "$KC_POD" ] || die "keycloak pod not found"
