@@ -32,12 +32,7 @@ module.exports = function(RED) {
     };
 
     return {
-      payload: {
-        aasAuthUrl,
-        keyServerUrl,
-        testUrl,
-        status
-      },
+      payload: { aasAuthUrl, keyServerUrl, testUrl, status },
       diagnostics
     };
   }
@@ -46,6 +41,47 @@ module.exports = function(RED) {
     const tmpFile = tmp.fileSync({ prefix, postfix });
     fs.writeFileSync(tmpFile.name, content, { encoding: 'utf8', mode });
     return tmpFile;
+  }
+
+  function createLineReader(onLine) {
+    let buffer = '';
+    return (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop();
+      lines.forEach((line) => onLine(line));
+    };
+  }
+
+  function parseEventLine(line) {
+    if (!String(line || '').startsWith('EVENT_JSON=')) return null;
+    try { return JSON.parse(line.slice('EVENT_JSON='.length)); } catch (error) { return null; }
+  }
+
+  function runScriptStreaming(scriptPath, args, handlers, onDone) {
+    const child = spawn('bash', [scriptPath].concat(args), {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', createLineReader((line) => {
+      stdout += `${line}\n`;
+      if (handlers && typeof handlers.onStdoutLine === 'function') handlers.onStdoutLine(line);
+    }));
+    child.stderr.on('data', createLineReader((line) => {
+      stderr += `${line}\n`;
+      if (handlers && typeof handlers.onStderrLine === 'function') handlers.onStderrLine(line);
+    }));
+
+    child.on('error', (err) => onDone(err, stdout, stderr));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        return onDone(new Error((stderr || `script exited with code ${code}`).trim()), stdout, stderr);
+      }
+      return onDone(null, stdout, stderr);
+    });
   }
 
   function DeployNode(config) {
@@ -62,24 +98,10 @@ module.exports = function(RED) {
     const externalDbUsername = (config.externalDbUsername || '').trim();
     const externalDbPassword = typeof config.externalDbPassword === 'string' ? config.externalDbPassword : '';
 
-    function runScript(scriptPath, args, msg, onDone) {
-      const child = spawn('bash', [scriptPath].concat(args), {
-        cwd: __dirname,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-
-      let stdout = '';
-      let stderr = '';
-      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-
-      child.on('error', (err) => onDone(err, stdout, stderr));
-      child.on('close', (code) => {
-        if (code !== 0) {
-          return onDone(new Error((stderr || `script exited with code ${code}`).trim()), stdout, stderr);
-        }
-        return onDone(null, stdout, stderr);
-      });
+    function updateStatusFromEvent(event) {
+      const text = event && event.step ? `${event.phase}:${event.step}` : (event && event.phase) || 'deploying';
+      const fill = event && event.status === 'failed' ? 'red' : event && event.status === 'succeeded' ? 'green' : 'blue';
+      node.status({ fill, shape: fill === 'red' ? 'ring' : 'dot', text });
     }
 
     node.on('input', function(msg, send, done) {
@@ -121,7 +143,7 @@ module.exports = function(RED) {
         return;
       }
 
-      const deployScript = path.join(__dirname, 'scripts', 'deploy.sh');
+      const deployScript = path.join(__dirname, 'deploy.sh');
       const deployArgs = [
         suffix,
         domain,
@@ -133,18 +155,28 @@ module.exports = function(RED) {
         dbType === 'external' ? externalDbUsername : '',
         dbType === 'external' ? externalDbPassword : ''
       ];
+      const events = [];
 
       node.status({ fill: 'blue', shape: 'dot', text: `deploying (${dbType})` });
-      runScript(deployScript, deployArgs, msg, (err, stdout, stderr) => {
+      runScriptStreaming(deployScript, deployArgs, {
+        onStdoutLine: (line) => {
+          const event = parseEventLine(line);
+          if (event) {
+            events.push(event);
+            updateStatusFromEvent(event);
+          }
+        }
+      }, (err, stdout, stderr) => {
         try { kubeTmp.removeCallback(); } catch (_) {}
         try { keyTmp.removeCallback(); } catch (_) {}
         try { crtTmp.removeCallback(); } catch (_) {}
 
         if (err) {
-          const errorMsg = (stderr && stderr.trim()) || err.message;
+          const errorMsg = maskSecrets((stderr && stderr.trim()) || err.message);
           node.error(errorMsg, msg);
           node.status({ fill: 'red', shape: 'ring', text: 'deploy failed' });
           msg.payload = errorMsg;
+          msg.deploymentEvents = events;
           send(msg);
           if (done) done(err);
           return;
@@ -159,6 +191,7 @@ module.exports = function(RED) {
         msg.diagnostics = result.diagnostics;
         msg.dbType = dbType;
         msg.deploymentLogs = maskSecrets(stdout || 'Deployment succeeded.');
+        msg.deploymentEvents = events;
 
         node.status({ fill: 'green', shape: 'dot', text: result.payload.status || 'deployed' });
         send(msg);
@@ -177,11 +210,10 @@ module.exports = function(RED) {
         return done();
       }
 
-      const uninstallScript = path.join(__dirname, 'scripts', 'uninstall.sh');
+      const uninstallScript = path.join(__dirname, 'uninstall.sh');
       const args = [suffix, kubeTmp.name];
-      runScript(uninstallScript, args, {}, (err) => {
+      runScriptStreaming(uninstallScript, args, {}, () => {
         try { kubeTmp.removeCallback(); } catch (_) {}
-        if (err) node.error(`uninstall failed: ${err.message}`);
         done();
       });
     });
