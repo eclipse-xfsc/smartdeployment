@@ -12,6 +12,7 @@ spec:
       labels:
         app: frontend-app
     spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default "default" }}
       {{- if .Values.frontendContainer.imagePullSecret }}
       imagePullSecrets:
         - name: {{ .Values.frontendContainer.imagePullSecret }}
@@ -19,7 +20,7 @@ spec:
       containers:
         - name: frontend-container
           image: "{{ .Values.frontendContainer.image }}:{{ .Values.frontendContainer.tag }}"
-          imagePullPolicy: {{ .Values.frontendContainer.imagePullPolicy }}   
+          imagePullPolicy: {{ .Values.frontendContainer.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.frontendContainer.port }}
           env:
@@ -27,3 +28,5 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}

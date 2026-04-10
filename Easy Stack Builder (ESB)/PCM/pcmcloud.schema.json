@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FACIS PCM Builder Node",
+  "type": "object",
+  "description": "Input and output contract for the hardened PCM node.",
+  "properties": {
+    "instanceName": { "type": "string", "minLength": 1 },
+    "ocmInstanceName": { "type": "string", "minLength": 1 },
+    "domainAddress": { "type": "string", "minLength": 1 },
+    "certificateContent": { "type": "string", "minLength": 1 },
+    "privateKeyContent": { "type": "string", "minLength": 1 },
+    "kubeconfigContent": { "type": "string", "minLength": 1 },
+    "registryRepository": { "type": "string", "minLength": 1 },
+    "registryUserName": { "type": "string", "minLength": 1 },
+    "registryPassword": { "type": "string", "minLength": 1 },
+    "credentialType": { "type": "string", "minLength": 1 },
+    "issuerBinding": { "type": "string", "minLength": 1 },
+    "expirationDays": { "type": "string", "minLength": 1 },
+    "revocationMode": { "type": "string", "minLength": 1 },
+    "trustFrameworkId": { "type": "string", "minLength": 1 }
+  },
+  "required": [
+    "instanceName",
+    "ocmInstanceName",
+    "domainAddress",
+    "certificateContent",
+    "privateKeyContent",
+    "kubeconfigContent",
+    "registryRepository",
+    "registryUserName",
+    "registryPassword",
+    "credentialType",
+    "issuerBinding",
+    "expirationDays",
+    "revocationMode",
+    "trustFrameworkId"
+  ],
+  "outputContract": {
+    "type": "object",
+    "required": ["pcmUrl", "issuerId", "keycloakUrl", "clientSecret", "status"],
+    "properties": {
+      "pcmUrl": { "type": "string", "format": "uri" },
+      "issuerId": { "type": "string" },
+      "keycloakUrl": { "type": "string", "format": "uri" },
+      "clientSecret": { "type": "string" },
+      "status": { "type": "string" }
+    }
+  },
+  "uiSections": [
+    "Instance Info",
+    "Kubernetes & Domain",
+    "Registry & Security",
+    "Credential Policy"
+  ]
+}

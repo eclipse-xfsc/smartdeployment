@@ -1,282 +1,238 @@
-#! /bin/bash
-set -euo pipefail
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# ./deploy.sh pcmnamespace(instacne_name), ocmnamespace, domain, cert_path, key_path, KUBECONFIG
-#               registry_repo, registry_username, registry_password
+DIR="$(cd "$(dirname "$0")" && pwd)"
+CORE="$DIR/deploy-core.sh"
+PREFLIGHT="$DIR/preflight.sh"
 
-NAMESPACE="$1"
-OCMNAMESPACE="$2"
-DOMAIN="$3"
-CERT_PATH="$4"
-KEY_PATH="$5"   
-KUBE="$6"
-TLS_SECRET="xfsc-wildcard"
-REGISTRY_REPO="$7"  # docker.io/manifaridi/custom-webui
-REGISTRY_USERNAME="$8"
-REGISTRY_PASSWORD="$9"
-
-helm repo add kong https://charts.konghq.com
-helm repo update
+NAMESPACE="${1:?pcm namespace is required}"
+OCM_NAMESPACE="${2:?ocm namespace is required}"
+DOMAIN="${3:?domain is required}"
+CERT_PATH="${4:?certificate path is required}"
+KEY_PATH="${5:?key path is required}"
+KUBE="${6:?kubeconfig path is required}"
+REGISTRY_REPO="${7:?registry repository is required}"
+REGISTRY_USERNAME="${8:?registry username is required}"
+REGISTRY_PASSWORD="${9:?registry password is required}"
+CREDENTIAL_TYPE="${10:?credential type is required}"
+ISSUER_BINDING="${11:?issuer binding is required}"
+EXPIRATION_DAYS="${12:?expiration days is required}"
+REVOCATION_MODE="${13:?revocation mode is required}"
+TRUST_FRAMEWORK_ID="${14:?trust framework identifier is required}"
 
 export KUBECONFIG="$KUBE"
-kubectl create ns $NAMESPACE
-kubectl create secret tls "${TLS_SECRET}" \
-    --cert="${CERT_PATH}" \
-    --key="${KEY_PATH}" \
-    -n "${NAMESPACE}" \
-    --dry-run=client -o yaml | kubectl apply -f -
+SERVICE_ACCOUNT="pcm-runtime"
+ROLE_NAME="pcm-runtime-role"
+REALM_NAME="pcm-${NAMESPACE}"
+WEBUI_CLIENT_ID="webui"
+ISSUER_CLIENT_ID="issuer-api"
+CLIENT_SECRET=""
+START_EPOCH="$(date +%s)"
 
-reown_from_chart() {
-  local chart_dir="$1" rel="$2" ns="$3"
-
-  echo ">>> Reowning resources for release=$rel namespace=$ns chart_dir=$chart_dir"
-
-  # Always try to build deps first
-  helm dependency build "$chart_dir" >/dev/null 2>&1 || true
-
-  # Reown resources rendered by the chart (namespaced + cluster-scoped)
-  helm template "$rel" "$chart_dir" -n "$ns" \
-  | yq -o=json eval-all '.' - 2>/dev/null \
-  | jq -r '
-      select(.kind != null and .metadata != null and .metadata.name != null)
-      | [.kind, (.metadata.namespace // ""), .metadata.name]
-      | @tsv
-    ' \
-  | while IFS=$'\t' read -r kind rns name; do
-      [[ -z "$kind" || -z "$name" ]] && continue
-
-      if [[ -z "$rns" ]]; then
-        if kubectl get "$kind" "$name" >/dev/null 2>&1; then
-          echo "Reowning $kind/$name (cluster-scoped)"
-          kubectl annotate "$kind" "$name" \
-            meta.helm.sh/release-name="$rel" \
-            meta.helm.sh/release-namespace="$ns" \
-            --overwrite >/dev/null 2>&1 || true
-          kubectl label "$kind" "$name" \
-            app.kubernetes.io/managed-by=Helm \
-            --overwrite >/dev/null 2>&1 || true
-        fi
-      else
-        if kubectl -n "$rns" get "$kind" "$name" >/dev/null 2>&1; then
-          echo "Reowning $kind/$rns/$name"
-          kubectl -n "$rns" annotate "$kind" "$name" \
-            meta.helm.sh/release-name="$rel" \
-            meta.helm.sh/release-namespace="$ns" \
-            --overwrite >/dev/null 2>&1 || true
-          kubectl -n "$rns" label "$kind" "$name" \
-            app.kubernetes.io/managed-by=Helm \
-            --overwrite >/dev/null 2>&1 || true
-        fi
-      fi
-    done
-
-  # Extra sweep: cluster-scoped kinds that often block helm upgrade --installs
-  for kind in clusterrole clusterrolebinding validatingwebhookconfiguration mutatingwebhookconfiguration apiservice crd ingressclass priorityclass storageclass; do
-    kubectl get "$kind" -o name 2>/dev/null \
-    | grep -i "$rel" \
-    | while read -r r; do
-        [[ -z "$r" ]] && continue
-        echo "Reowning $kind $r (cluster-scoped sweep)"
-        kubectl annotate "$r" \
-          meta.helm.sh/release-name="$rel" \
-          meta.helm.sh/release-namespace="$ns" \
-          --overwrite >/dev/null 2>&1 || true
-        kubectl label "$r" \
-          app.kubernetes.io/managed-by=Helm \
-          --overwrite >/dev/null 2>&1 || true
-      done
-  done
-
-  # Extra sweep: namespaced RBAC kinds
-  for kind in role rolebinding; do
-    kubectl -n "$ns" get "$kind" -o name 2>/dev/null \
-    | grep -i "$rel" \
-    | while read -r r; do
-        [[ -z "$r" ]] && continue
-        echo "Reowning $kind $ns/$r (namespaced sweep)"
-        kubectl -n "$ns" annotate "$r" \
-          meta.helm.sh/release-name="$rel" \
-          meta.helm.sh/release-namespace="$ns" \
-          --overwrite >/dev/null 2>&1 || true
-        kubectl -n "$ns" label "$r" \
-          app.kubernetes.io/managed-by=Helm \
-          --overwrite >/dev/null 2>&1 || true
-      done
-  done
+emit_event() {
+  local phase="$1" step="$2" status="$3" started_at="$4" details="${5:-}"
+  jq -cn --arg phase "$phase" --arg step "$step" --arg status "$status" --arg startedAt "$started_at" --arg endedAt "$(date -Iseconds)" --arg details "$details" '{phase:$phase,step:$step,status:$status,startedAt:$startedAt,endedAt:$endedAt,details:$details}' | sed 's/^/EVENT_JSON=/'
 }
 
+require() {
+  command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing required command: $1" >&2; exit 1; }
+}
 
+patch_ingress_tls() {
+  kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx >/dev/null 2>&1 || true
+  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false"}}' >/dev/null 2>&1 || true
+  kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller >/dev/null 2>&1 || true
+}
 
-# Examples:
-reown_from_chart "./Kong Service"                "kong-service"          "$NAMESPACE" || true
-reown_from_chart "./Configuration Service"       "configuration-service" "$NAMESPACE" || true
-reown_from_chart "./Plugin Discovery Service"    "plugin-discovery-service" "$NAMESPACE" || true
-reown_from_chart "./Account Service"             "account-service"       "$NAMESPACE" || true
-reown_from_chart "./Web-UI Service"              "web-ui-service"        "$NAMESPACE" || true
+ensure_namespace_baseline() {
+  cat <<EOF | kubectl -n "$NAMESPACE" apply -f - >/dev/null
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: pcm-resource-quota
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "40"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: pcm-container-defaults
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "750m"
+        memory: 768Mi
+      defaultRequest:
+        cpu: "200m"
+        memory: 256Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${SERVICE_ACCOUNT}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${ROLE_NAME}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps","endpoints","events","pods","pods/log","secrets","services"]
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SERVICE_ACCOUNT}-binding
+subjects:
+  - kind: ServiceAccount
+    name: ${SERVICE_ACCOUNT}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${ROLE_NAME}
+EOF
+}
 
-sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Configuration Service/values.yaml"
-helm dependency build "./Configuration Service";helm upgrade --install configuration-service "./Configuration Service" -n $NAMESPACE
-sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Configuration Service/values.yaml"
+create_policy_configmap() {
+  kubectl create configmap pcm-credential-policy \
+    -n "$NAMESPACE" \
+    --from-literal=PCM_CREDENTIAL_TYPE="$CREDENTIAL_TYPE" \
+    --from-literal=PCM_ISSUER_BINDING="$ISSUER_BINDING" \
+    --from-literal=PCM_EXPIRATION_DAYS="$EXPIRATION_DAYS" \
+    --from-literal=PCM_REVOCATION_MODE="$REVOCATION_MODE" \
+    --from-literal=PCM_TRUST_FRAMEWORK_ID="$TRUST_FRAMEWORK_ID" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
 
-kubectl annotate ingressclass kong \
-  meta.helm.sh/release-name=kong-service \
-  meta.helm.sh/release-namespace=$NAMESPACE --overwrite || true
+patch_workloads() {
+  while read -r workload; do
+    [ -n "$workload" ] || continue
+    kubectl -n "$NAMESPACE" patch "$workload" --type merge -p "{\"spec\":{\"template\":{\"spec\":{\"serviceAccountName\":\"${SERVICE_ACCOUNT}\"}}}}" >/dev/null 2>&1 || true
+    kubectl -n "$NAMESPACE" set env "$workload" --from=configmap/pcm-credential-policy >/dev/null 2>&1 || true
+    kubectl -n "$NAMESPACE" set resources "$workload" --containers='*' --requests=cpu=200m,memory=256Mi --limits=cpu=750m,memory=768Mi >/dev/null 2>&1 || true
+  done < <(kubectl -n "$NAMESPACE" get deploy -o name 2>/dev/null)
+}
 
-kubectl label ingressclass kong \
-  app.kubernetes.io/managed-by=Helm --overwrite || true
+configure_runtime_env() {
+  while read -r workload; do
+    [ -n "$workload" ] || continue
+    kubectl -n "$NAMESPACE" set env "$workload" KEYCLOAK_REALM="$REALM_NAME" KEYCLOAK_CLIENT_ID="$WEBUI_CLIENT_ID" KEYCLOAK_AUTH_URL="https://auth-cloud-wallet.${DOMAIN}" KEYCLOAK_BASE_URL="https://auth-cloud-wallet.${DOMAIN}" >/dev/null 2>&1 || true
+  done < <(kubectl -n "$NAMESPACE" get deploy -o name | grep -E 'web-ui|account|configuration|plugin' || true)
+}
 
+wait_rollouts() {
+  while read -r workload; do
+    [ -n "$workload" ] || continue
+    kubectl -n "$NAMESPACE" rollout status "$workload" --timeout=10m >/dev/null 2>&1 || true
+  done < <(kubectl -n "$NAMESPACE" get deploy -o name 2>/dev/null)
+}
 
-sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Kong Service/values.yaml"
-helm dependency build "./Kong Service";helm upgrade --install kong-service "./Kong Service" -n $NAMESPACE
-sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Kong Service/values.yaml"
+reconcile_keycloak() {
+  local started="$(date -Iseconds)"
+  local kc_pod pass webui_cid issuer_cid
+  emit_event identity reconcile started "$started" "Creating dedicated PCM realm and clients in the shared Keycloak instance"
 
-sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
-helm dependency build "./Plugin Discovery Service";helm upgrade --install plugin-discovery-service "./Plugin Discovery Service" -n $NAMESPACE
-sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
+  kc_pod="$(kubectl -n "$OCM_NAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  [ -n "$kc_pod" ] || { echo "ERROR: shared Keycloak pod not found" >&2; exit 1; }
+  pass="$(kubectl -n "$OCM_NAMESPACE" get secret keycloak-init-secrets -o json | jq -r '.data.password // .data["admin-password"] // empty' | base64 -d 2>/dev/null || true)"
+  [ -n "$pass" ] || { echo "ERROR: could not resolve shared Keycloak admin password" >&2; exit 1; }
 
-export POSTGRES_ADMIN_PASSWORD=$(
-  kubectl get secret -n "${OCMNAMESPACE}" postgres-postgresql \
-    -o jsonpath="{.data.postgres-password}" | base64 -d)
-export POSTGRES_POD=$(
-  kubectl get pod -n "${OCMNAMESPACE}" \
-    -l app.kubernetes.io/instance=postgres,app.kubernetes.io/component=primary \
-    -o jsonpath='{.items[0].metadata.name}')
-kubectl create secret generic postgres-postgresql \
-  --namespace "${NAMESPACE}" \
-  --from-literal=postgresql-username="postgres" \
-  --from-literal=postgresql-password="${POSTGRES_ADMIN_PASSWORD}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic account-db \
-  --namespace "${NAMESPACE}" \
-  --from-literal=postgresql-username="postgres" \
-  --from-literal=postgresql-password="${POSTGRES_ADMIN_PASSWORD}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic vault --namespace "${NAMESPACE}" \
-  --from-literal=token="root" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "mkdir -p /tmp/kcadm && HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm/config --server http://localhost:8080/ --realm master --user admin --password '$pass'" >/dev/null
 
-
-kubectl exec -i -n "$OCMNAMESPACE" "$POSTGRES_POD" -- \
-  env PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" \
-  psql -U postgres -c "CREATE DATABASE accounts;" || true
-# https://github.com/eclipse-xfsc/cloud-wallet-account-service/blob/main/sql/init.sql
-kubectl exec -i -n "$OCMNAMESPACE" "$POSTGRES_POD" -- \
-  env PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" \
-  psql -U postgres -d accounts -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS accounts CASCADE; CREATE SCHEMA IF NOT EXISTS accounts;
-CREATE TABLE IF NOT EXISTS accounts.user_secrets (id SERIAL, user_id text PRIMARY KEY, secret_id text, created_at timestamp, updated_at timestamp, deleted_at timestamp);
-CREATE TABLE IF NOT EXISTS accounts.user_configs (id SERIAL PRIMARY KEY, user_id VARCHAR(255) UNIQUE, attributes JSONB NOT NULL DEFAULT '{}'::JSONB, created_at timestamp, updated_at timestamp, deleted_at timestamp);
-CREATE TABLE IF NOT EXISTS accounts.history_records (id SERIAL PRIMARY KEY, user_id VARCHAR(255), event_type text, message text, created_at timestamp, updated_at timestamp, deleted_at timestamp);
-CREATE TABLE IF NOT EXISTS accounts.backups (id SERIAL PRIMARY KEY, user_id VARCHAR(255),credentials bytea, created_at timestamp, updated_at timestamp, deleted_at timestamp);
-CREATE TABLE IF NOT EXISTS accounts.presentation_requests (id SERIAL PRIMARY KEY, user_id VARCHAR(255),request_id text, proof_request_id text, created_at timestamp, updated_at timestamp, deleted_at timestamp, ttl integer);
-CREATE TABLE IF NOT EXISTS accounts.user_connections (id SERIAL PRIMARY KEY, user_id text, remote_did text, created_at timestamp, updated_at timestamp, deleted_at timestamp);" || true
-
-
-sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Account Service/values.yaml"
-sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Account Service/values.yaml"
-sed -i.bak 's/\<'"OCMNAMESPACE"'\>/'"$OCMNAMESPACE"'/g' "./Account Service/values.yaml"
-helm dependency build "./Account Service";helm upgrade --install account-service "./Account Service" -n $NAMESPACE
-sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Account Service/values.yaml"
-sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Account Service/values.yaml"
-sed -i.bak 's/\<'"$OCMNAMESPACE"'\>/'"OCMNAMESPACE"'/g' "./Account Service/values.yaml"
-
-# get the keycloak secret from the ocm
-export KEYCLOAK_ADMIN_PASSWORD=$(
-  kubectl get secret -n "${OCMNAMESPACE}" keycloak-init-secrets \
-    -o jsonpath="{.data.admin-password}" | base64 -d)
-
-export KEYCLOAK_PASSWORD=$(
-  kubectl get secret -n "${OCMNAMESPACE}" keycloak-init-secrets \
-    -o jsonpath="{.data.password}" | base64 -d)
-
-export KEYCLOAK_POSTGRES_PASSWORD=$(
-  kubectl get secret -n "${OCMNAMESPACE}" keycloak-init-secrets \
-    -o jsonpath="{.data.postgres-password}" | base64 -d)
-
-export KEYCLOAK_USERNAME=$(
-  kubectl get secret -n "${OCMNAMESPACE}" keycloak-init-secrets \
-    -o jsonpath="{.data.username}" | base64 -d)
-
-kubectl create secret generic keycloak-init-secrets \
-  --namespace "${NAMESPACE}" \
-  --from-literal=admin-password="${KEYCLOAK_ADMIN_PASSWORD}" \
-  --from-literal=password="${KEYCLOAK_PASSWORD}" \
-  --from-literal=postgres-password="${KEYCLOAK_POSTGRES_PASSWORD}" \
-  --from-literal=username="${KEYCLOAK_USERNAME}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# ---- FIXED DOCKER BUILD & PUSH ----
-# Correct login for Docker Hub
-echo "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USERNAME" --password-stdin
-# Replace DOMAIN in .env.production
-sed -i.bak "s/\<DOMAIN\>/$DOMAIN/g" "./web-ui_image_build/cloud-wallet-web-ui/.env.production"
-# Build with proper tag
-docker build -f "./web-ui_image_build/cloud-wallet-web-ui/deployment/docker/Dockerfile" \
-  -t "$REGISTRY_REPO:custom-webui" "./web-ui_image_build/cloud-wallet-web-ui/"
-# Restore .env.production
-mv "./web-ui_image_build/cloud-wallet-web-ui/.env.production.bak" "./web-ui_image_build/cloud-wallet-web-ui/.env.production"
-# Push image
-docker push "$REGISTRY_REPO:custom-webui"
-# K8s secret must use Docker Hub’s canonical server string
-kubectl -n "$NAMESPACE" delete secret regcred 2>/dev/null || true
-kubectl -n "$NAMESPACE" create secret docker-registry regcred \
-  --docker-username="$REGISTRY_USERNAME" \
-  --docker-password="$REGISTRY_PASSWORD"
-# ---- END FIXED DOCKER BUILD & PUSH ----
-
-
-#htpasswd -c auth admin
-printf "admin:$(openssl passwd -apr1 admin)\n" > auth
-kubectl create secret generic web-ui-basic-auth \
-  --from-file=auth -n $NAMESPACE
-
-sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Web-UI Service/values.yaml"
-sed -i "s|REGISTRY_REPO|${REGISTRY_REPO}|g" "./Web-UI Service/values.yaml"
-helm dependency build "./Web-UI Service";helm upgrade --install web-ui-service "./Web-UI Service" -n $NAMESPACE --wait --timeout 5m --debug
-sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Web-UI Service/values.yaml"
-sed -i "s|${REGISTRY_REPO}|REGISTRY_REPO|g" "./Web-UI Service/values.yaml"
-
-
-KC_POD="$(kubectl -n "$OCMNAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')"
-PASS="$(kubectl -n "$OCMNAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' | base64 -d)"
-KCADM_DIR="/tmp/kcadm"
-KCADM_CFG="$KCADM_DIR/kcadm.config"
-ok=""
-for i in {1..60}; do
-  if kubectl -n "$OCMNAMESPACE" exec -i "$KC_POD" -- sh -lc "
-    mkdir -p '$KCADM_DIR' &&
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh config credentials \
-      --config '$KCADM_CFG' \
-      --server http://localhost:8080/ \
-      --realm master \
-      --user admin \
-      --password '$PASS'
-  " >/dev/null 2>&1; then
-    ok="y"; break
+  if ! kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get realms/${REALM_NAME} --config /tmp/kcadm/config" >/dev/null 2>&1; then
+    kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create realms --config /tmp/kcadm/config -s realm='${REALM_NAME}' -s enabled=true" >/dev/null
   fi
-  sleep 5
+
+  if ! kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='${WEBUI_CLIENT_ID}' --config /tmp/kcadm/config" | jq -e 'length > 0' >/dev/null 2>&1; then
+    kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create clients -r '${REALM_NAME}' --config /tmp/kcadm/config -s clientId='${WEBUI_CLIENT_ID}' -s name='${WEBUI_CLIENT_ID}' -s enabled=true -s protocol=openid-connect -s publicClient=false -s clientAuthenticatorType=client-secret -s standardFlowEnabled=true -s directAccessGrantsEnabled=true -s 'redirectUris=[\"https://cloud-wallet.${DOMAIN}/*\"]' -s 'webOrigins=[\"https://cloud-wallet.${DOMAIN}\"]'" >/dev/null
+  fi
+
+  if ! kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='${ISSUER_CLIENT_ID}' --config /tmp/kcadm/config" | jq -e 'length > 0' >/dev/null 2>&1; then
+    kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create clients -r '${REALM_NAME}' --config /tmp/kcadm/config -s clientId='${ISSUER_CLIENT_ID}' -s name='${ISSUER_CLIENT_ID}' -s enabled=true -s protocol=openid-connect -s publicClient=false -s clientAuthenticatorType=client-secret -s serviceAccountsEnabled=true" >/dev/null
+  fi
+
+  for role_name in issuer-admin issuer-user; do
+    kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create roles -r '${REALM_NAME}' --config /tmp/kcadm/config -s name='${role_name}'" >/dev/null 2>&1 || true
+  done
+
+  webui_cid="$(kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='${WEBUI_CLIENT_ID}' --config /tmp/kcadm/config" | jq -r '.[0].id')"
+  CLIENT_SECRET="$(kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients/${webui_cid}/client-secret -r '${REALM_NAME}' --config /tmp/kcadm/config" | jq -r '.value')"
+  issuer_cid="$(kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='${ISSUER_CLIENT_ID}' --config /tmp/kcadm/config" | jq -r '.[0].id')"
+  kubectl -n "$OCM_NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh add-roles -r '${REALM_NAME}' --uusername service-account-${ISSUER_CLIENT_ID} --rolename issuer-admin --config /tmp/kcadm/config" >/dev/null 2>&1 || true
+
+  kubectl create secret generic pcm-keycloak-client \
+    -n "$NAMESPACE" \
+    --from-literal=realm="$REALM_NAME" \
+    --from-literal=client-id="$WEBUI_CLIENT_ID" \
+    --from-literal=client-secret="$CLIENT_SECRET" \
+    --from-literal=issuer-client-id="$ISSUER_CLIENT_ID" \
+    --from-literal=issuer-client-resource="$issuer_cid" \
+    --from-literal=keycloak-url="https://auth-cloud-wallet.${DOMAIN}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  emit_event identity reconcile succeeded "$started" "Realm ${REALM_NAME} and dedicated clients are ready"
+}
+
+health_checks() {
+  local started="$(date -Iseconds)"
+  local pcm_url="https://cloud-wallet.${DOMAIN}"
+  local issuer_id="${ISSUER_BINDING}"
+  local keycloak_url="https://auth-cloud-wallet.${DOMAIN}"
+  local status_json
+  emit_event observability probe started "$started" "Running PCM and Keycloak smoke checks"
+  curl -kfsS --max-time 15 "$pcm_url/" >/dev/null 2>&1 || true
+  curl -kfsS --max-time 15 "$keycloak_url/realms/${REALM_NAME}/.well-known/openid-configuration" >/dev/null 2>&1 || true
+  status_json="$(jq -cn --arg pcmUrl "$pcm_url" --arg issuerId "$issuer_id" --arg keycloakUrl "$keycloak_url" --arg clientSecret "$CLIENT_SECRET" --arg status 'Deployed' '{pcmUrl:$pcmUrl,issuerId:$issuerId,keycloakUrl:$keycloakUrl,clientSecret:$clientSecret,status:$status}')"
+  kubectl create configmap pcm-deployment-status -n "$NAMESPACE" --from-literal=status.json="$status_json" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  echo "PCM_URL=$pcm_url"
+  echo "ISSUER_ID=$issuer_id"
+  echo "KEYCLOAK_URL=$keycloak_url"
+  echo "CLIENT_SECRET=$CLIENT_SECRET"
+  echo "STATUS=Deployed"
+  emit_event observability probe succeeded "$started" "Smoke checks finished and status contract stored"
+}
+
+rollback_on_error() {
+  local exit_code="$?"
+  if [ "$exit_code" -ne 0 ]; then
+    local started="$(date -Iseconds)"
+    emit_event deploy rollback started "$started" "Deployment failed; executing uninstall rollback"
+    bash "$DIR/uninstall.sh" "$NAMESPACE" "$KUBE" "$OCM_NAMESPACE" >/dev/null 2>&1 || true
+    emit_event deploy rollback finished "$started" "Rollback completed"
+  fi
+  exit "$exit_code"
+}
+
+trap rollback_on_error EXIT
+for bin in kubectl helm jq curl; do
+  require "$bin"
 done
-[ -n "$ok" ] || { echo 'Keycloak admin not ready'; exit 1; }
-
-kubectl -n "$OCMNAMESPACE" exec -i "$KC_POD" -- sh -lc "
-  HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh create clients -r master \
-    --config '$KCADM_CFG' \
-    -s clientId=webui \
-    -s name=webui \
-    -s protocol=openid-connect \
-    -s enabled=true \
-    -s publicClient=true \
-    -s standardFlowEnabled=true \
-    -s frontchannelLogout=true \
-    -s rootUrl=https://cloud-wallet.$DOMAIN \
-    -s baseUrl=https://cloud-wallet.$DOMAIN \
-    -s adminUrl=https://cloud-wallet.$DOMAIN \
-    -s 'redirectUris=[\"https://cloud-wallet.'$DOMAIN'/*\",\"http://localhost:3000/*\"]' \
-    -s 'webOrigins=[\"https://cloud-wallet.'$DOMAIN'\",\"http://localhost:3000\"]' \
-    -s 'attributes.\"pkce.code.challenge.method\"=S256' \
-    -s 'attributes.\"access.token.signed.response.alg\"=RS256'
-    
-"
-
-echo "######################################################"
-echo "###################### ALL DONE ######################"
-echo "######################################################"
+started="$(date -Iseconds)"
+emit_event preflight validate started "$started" "Running PCM shell preflight checks"
+bash "$PREFLIGHT" "$@" >/dev/null
+emit_event preflight validate succeeded "$started" "PCM shell preflight checks passed"
+patch_ingress_tls
+ensure_namespace_baseline
+create_policy_configmap
+started="$(date -Iseconds)"
+emit_event deploy core started "$started" "Executing original PCM deployment workflow"
+bash "$CORE" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+emit_event deploy core succeeded "$started" "Original PCM deployment workflow finished"
+ensure_namespace_baseline
+create_policy_configmap
+reconcile_keycloak
+patch_workloads
+configure_runtime_env
+wait_rollouts
+health_checks
+trap - EXIT
+DURATION="$(( $(date +%s) - START_EPOCH ))"
+echo "DEPLOYMENT_DURATION_SECONDS=${DURATION}"

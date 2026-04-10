@@ -1,6 +1,6 @@
 {
     "name": "orce-esb-pcmcloud",
-    "version": "3.0.0",
+    "version": "5.0.0",
     "description": "PCMCloud deployer node",
     "dependencies": {
         "tmp": "^0.2.1"
