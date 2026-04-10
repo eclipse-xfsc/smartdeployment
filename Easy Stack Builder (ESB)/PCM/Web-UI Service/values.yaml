@@ -8,6 +8,17 @@ frontendContainer:
   imagePullPolicy: Always
   port: 3000
 
+serviceAccount:
+  name: pcm-runtime
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
 env:
   NEXT_PUBLIC_API_URL: "https://cloud-wallet.DOMAIN/api"
   NEXT_PUBLIC_ENV_URL: "https://cloud-wallet.DOMAIN/"

@@ -1,80 +1,116 @@
-<!-- Editor UI for pcmcloud node -->
 <script type="text/x-red" data-template-name="pcmcloud">
   <style>
-    .form-row { display:flex; align-items:center; margin-bottom:10px; }
-    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
-    .form-row input[type="text"],
-    .form-row input[type="password"] { flex:1; }
+    .esb-section { border: 1px solid #d5dde8; border-radius: 6px; padding: 12px 14px 6px; margin-bottom: 14px; }
+    .esb-section legend { font-weight: 600; padding: 0 6px; }
+    .form-row { display: flex; align-items: center; margin-bottom: 10px; }
+    .form-row label { width: 190px !important; margin-right: 10px; text-align: right; }
+    .form-row input[type="text"], .form-row input[type="password"], .form-row input[type="number"] { flex: 1; }
+    .esb-note { margin-left: 200px; color: #4b5563; font-size: 12px; margin-bottom: 10px; }
   </style>
 
-  <div class="form-row">
-    <label for="node-input-instanceName">Instance name</label>
-    <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
-  </div>
+  <fieldset class="esb-section">
+    <legend>Instance Info</legend>
+    <div class="form-row">
+      <label for="node-input-instanceName">PCM instance name</label>
+      <input type="text" id="node-input-instanceName" placeholder="e.g. pcm-01">
+    </div>
+    <div class="form-row">
+      <label for="node-input-ocmInstanceName">OCM instance name</label>
+      <input type="text" id="node-input-ocmInstanceName" placeholder="e.g. ocm-01">
+    </div>
+    <div class="form-row">
+      <label for="node-input-name">Node label</label>
+      <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
+    </div>
+  </fieldset>
 
-  <div class="form-row">
-    <label for="node-input-ocmInstanceName">OCM instance name</label>
-    <input type="text" id="node-input-ocmInstanceName" placeholder="e.g. ocm-01">
-  </div>
+  <fieldset class="esb-section">
+    <legend>Kubernetes &amp; Domain</legend>
+    <div class="form-row">
+      <label for="node-input-domainAddress">Domain</label>
+      <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
+    </div>
+    <div class="form-row">
+      <label for="node-input-kubeconfig">kubeconfig</label>
+      <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
+      <input type="hidden" id="node-input-kubeconfigContent">
+    </div>
+    <div class="form-row">
+      <label for="node-input-privateKey">TLS Private Key</label>
+      <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
+      <input type="hidden" id="node-input-privateKeyContent">
+    </div>
+    <div class="form-row">
+      <label for="node-input-certificate">TLS Certificate</label>
+      <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
+      <input type="hidden" id="node-input-certificateContent">
+    </div>
+    <div class="esb-note">Deployment validates the kubeconfig, cluster reachability, and the supplied TLS key/certificate pair before running the PCM workflow.</div>
+  </fieldset>
 
-  <div class="form-row">
-    <label for="node-input-domainAddress">Domain</label>
-    <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
-  </div>
+  <fieldset class="esb-section">
+    <legend>Registry &amp; Security</legend>
+    <div class="form-row">
+      <label for="node-input-registryRepository">Registry repository</label>
+      <input type="text" id="node-input-registryRepository" placeholder="e.g. ghcr.io/org/app">
+    </div>
+    <div class="form-row">
+      <label for="node-input-registryUserName">Registry username</label>
+      <input type="text" id="node-input-registryUserName" placeholder="e.g. ci-bot">
+    </div>
+    <div class="form-row">
+      <label for="node-input-registryPassword">Registry password</label>
+      <input type="password" id="node-input-registryPassword" placeholder="••••••••">
+    </div>
+    <div class="esb-note">Registry access is preflight-checked before image build and push. A dedicated Keycloak realm/client is reconciled automatically after deployment.</div>
+  </fieldset>
 
-  <div class="form-row">
-    <label for="node-input-kubeconfig">kubeconfig</label>
-    <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
-    <input type="hidden" id="node-input-kubeconfigContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-privateKey">TLS Private Key</label>
-    <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
-    <input type="hidden" id="node-input-privateKeyContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-certificate">TLS Certificate</label>
-    <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
-    <input type="hidden" id="node-input-certificateContent">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryRepository">Registry repository</label>
-    <input type="text" id="node-input-registryRepository" placeholder="e.g. ghcr.io/org/app">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryUserName">Registry username</label>
-    <input type="text" id="node-input-registryUserName" placeholder="e.g. ci-bot">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-registryPassword">Registry password</label>
-    <input type="password" id="node-input-registryPassword" placeholder="••••••••">
-  </div>
-
-  <div class="form-row">
-    <label for="node-input-name">Node label</label>
-    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
-  </div>
+  <fieldset class="esb-section">
+    <legend>Credential Policy</legend>
+    <div class="form-row">
+      <label for="node-input-credentialType">Credential type</label>
+      <input type="text" id="node-input-credentialType" placeholder="e.g. EmployeeCredential">
+    </div>
+    <div class="form-row">
+      <label for="node-input-issuerBinding">Issuer binding</label>
+      <input type="text" id="node-input-issuerBinding" placeholder="e.g. issuer-pcm-01">
+    </div>
+    <div class="form-row">
+      <label for="node-input-expirationDays">Expiration days</label>
+      <input type="number" id="node-input-expirationDays" min="1" step="1" placeholder="e.g. 30">
+    </div>
+    <div class="form-row">
+      <label for="node-input-revocationMode">Revocation mode</label>
+      <input type="text" id="node-input-revocationMode" placeholder="e.g. status-list">
+    </div>
+    <div class="form-row">
+      <label for="node-input-trustFrameworkId">Trust framework ID</label>
+      <input type="text" id="node-input-trustFrameworkId" placeholder="e.g. eidas-v1">
+    </div>
+    <div class="esb-note">These policy settings are projected into a ConfigMap and injected into the deployed PCM workloads for runtime visibility.</div>
+  </fieldset>
 </script>
 
 <script type="text/javascript">
 (function() {
+  var reserved = ['default', 'kube-system', 'kube-public', 'kube-node-lease', 'ingress-nginx', 'cert-manager'];
+
   function setupFile(fieldFile, fieldHidden) {
-    var inp = $("#node-input-" + fieldFile)[0];
-    if (!inp) return;
-    inp.addEventListener("change", function() {
-      var f = this.files && this.files[0];
-      if (!f) return;
+    var input = $('#node-input-' + fieldFile)[0];
+    if (!input) return;
+    input.addEventListener('change', function() {
+      var file = this.files && this.files[0];
+      if (!file) return;
       var reader = new FileReader();
-      reader.onload = function(e) {
-        $("#node-input-" + fieldHidden).val(e.target.result);
+      reader.onload = function(evt) {
+        $('#node-input-' + fieldHidden).val(evt.target.result);
       };
-      reader.readAsText(f);
+      reader.readAsText(file);
     });
+  }
+
+  function isBareDomain(domain) {
+    return /^([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$/.test(domain || '') && !/^https?:\/\//.test(domain || '') && (domain || '').indexOf('/') === -1;
   }
 
   RED.nodes.registerType('pcmcloud', {
@@ -82,31 +118,40 @@
     color: '#c0deed',
     icon: 'bridge.svg',
     defaults: {
-      name: { value: "" },
-      instanceName: { value: "", required: true },
-      ocmInstanceName: { value: "", required: true },
-      domainAddress: { value: "", required: true },
-      certificateContent: { value: "", required: true },
-      privateKeyContent: { value: "", required: true },
-      kubeconfigContent: { value: "", required: true },
-      registryRepository: { value: "", required: true },
-      registryUserName: { value: "", required: true },
-      registryPassword: { value: "", required: true }
+      name: { value: '' },
+      instanceName: { value: '', required: true },
+      ocmInstanceName: { value: '', required: true },
+      domainAddress: { value: '', required: true },
+      certificateContent: { value: '', required: true },
+      privateKeyContent: { value: '', required: true },
+      kubeconfigContent: { value: '', required: true },
+      registryRepository: { value: '', required: true },
+      registryUserName: { value: '', required: true },
+      registryPassword: { value: '', required: true },
+      credentialType: { value: 'EmployeeCredential', required: true },
+      issuerBinding: { value: 'issuer-default', required: true },
+      expirationDays: { value: '30', required: true },
+      revocationMode: { value: 'status-list', required: true },
+      trustFrameworkId: { value: 'facis-trust-framework', required: true }
     },
     inputs: 1,
     outputs: 1,
     label: function() {
-      return this.name || this.instanceName || "PCMCloud";
+      return this.name || this.instanceName || 'PCMCloud';
     },
     oneditprepare: function() {
-      setupFile("kubeconfig", "kubeconfigContent");
-      setupFile("privateKey", "privateKeyContent");
-      setupFile("certificate", "certificateContent");
+      setupFile('kubeconfig', 'kubeconfigContent');
+      setupFile('privateKey', 'privateKeyContent');
+      setupFile('certificate', 'certificateContent');
     },
     oneditsave: function() {
-      var domain = $("#node-input-domainAddress").val().trim();
-      if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
-        RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
+      var namespace = ($('#node-input-instanceName').val() || '').trim();
+      var domain = ($('#node-input-domainAddress').val() || '').trim();
+      if (reserved.indexOf(namespace) !== -1) {
+        RED.notify('Reserved Kubernetes namespaces are not allowed as PCM instance names.', 'warning');
+      }
+      if (!isBareDomain(domain)) {
+        RED.notify('Domain should be a bare FQDN without scheme or path.', 'warning');
       }
     }
   });
