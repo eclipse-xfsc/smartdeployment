@@ -41,7 +41,7 @@ spec:
         {{- if .Values.useSecretRef }}
         envFrom:
           - secretRef:
-            name: {{ .Values.secretRefName }}
+              name: {{ .Values.secretRefName }}
         {{- else if .Values.useConfigMap }}
         envFrom:
           - configMapRef:
@@ -49,11 +49,11 @@ spec:
         {{- else }}
         env:
           - name: VERSION
-            value: {{ .Values.signer.version}}
+            value: {{ .Values.signer.version | quote }}
           - name: LOG_LEVEL
-            value: {{ .Values.log.level | default "INFO" }}
+            value: {{ .Values.log.level | default "INFO" | quote }}
           - name: LOG_ENCODING
-            value: {{ .Values.log.encoding | default "json" }}
+            value: {{ .Values.log.encoding | default "json" | quote }}
           - name: HTTP_HOST
             value: {{ .Values.signer.http.host | quote }}
           - name: HTTP_PORT
@@ -65,7 +65,7 @@ spec:
           - name: HTTP_WRITE_TIMEOUT
             value: {{ .Values.signer.http.timeout.write | quote }}
           - name: SDJWT_SERVICE_URL
-            value: {{ .Values.signer.sdjwt.url }}
+            value: {{ .Values.signer.sdjwt.url | quote }}
           {{- if .Values.signer.policy }}
           {{- if .Values.signer.policy.serviceEndpointPolicy }}
           - name: SERVICE_POLICY
@@ -84,27 +84,28 @@ spec:
           - name: CLOUDEVENTPROVIDER_MESSAGING_PROTOCOL
             value: "nats"
           - name: NATS_TOPIC
-            value: {{ .Values.signer.nats.topic }}
+            value: {{ .Values.signer.nats.topic | quote }}
           - name: CRYPTO_GRPC_ADDR
-            value: {{ .Values.signer.engine.clusterAdress }}
+            value: {{ .Values.signer.engine.clusterAdress | quote }}
           {{- end }}
           {{- if .Values.secretEnv }}
           {{- range $key, $value := .Values.secretEnv }}
           - name: "{{ $key }}"
             valueFrom:
-              secretRef:
+              secretKeyRef:
                 name: "{{ $value.name }}"
+                key: "{{ $value.key }}"
           {{- end }}
           {{- end }}
           {{- if .Values.extraVars }}
-          {{ toYaml .Values.extraVars | indent 8 }}
+{{ toYaml .Values.extraVars | nindent 10 }}
           {{- end }}
         {{- end }}
       - name: {{ template "app.name" . }}-crypto-engine
         image: {{ .Values.signer.engine.image }}
         env:
           - name: CRYPTO_GRPC_ADDR
-            value: {{.Values.signer.engine.address }}
+            value: {{ .Values.signer.engine.address | quote }}
         {{- range $key, $value := .Values.signer.engine.env }}
           - name:  "{{ $key }}"
             value: "{{ $value }}"

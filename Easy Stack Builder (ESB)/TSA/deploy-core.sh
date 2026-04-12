@@ -8,6 +8,9 @@ KEY_PATH="$4"
 KUBE="$5"
 POLICY_REPO_URL="${6:-https://github.com/eclipse-xfsc/rego-policies}"
 POLICY_REPO_FOLDER="${7:-}"
+EIDAS_MODE="${8:-false}"
+TRUST_KEY_PATH="${9:-}"
+TRUST_CHAIN_PATH="${10:-}"
 TLS_SECRET="xfsc-wildcard"
 
 export KUBECONFIG="$KUBE"
@@ -57,6 +60,40 @@ wait_for_pod_ready() {
   local pod_name="$1"
   local timeout="${2:-180s}"
   kubectl -n "$NAMESPACE" wait --for=condition=Ready "pod/${pod_name}" --timeout="$timeout" >/dev/null 2>&1 || true
+}
+
+wait_for_rollout() {
+  local kind="$1"
+  local pattern="$2"
+  local timeout="${3:-180s}"
+  local name=""
+  for _ in $(seq 1 60); do
+    name="$(find_workload "$kind" "$pattern")"
+    [ -n "$name" ] && break
+    sleep 2
+  done
+  [ -n "$name" ] || return 0
+  if [ "$kind" = "deploy" ] || [ "$kind" = "deployment" ]; then
+    kubectl -n "$NAMESPACE" rollout status "deploy/${name}" --timeout="$timeout" >/dev/null 2>&1 || true
+  elif [ "$kind" = "statefulset" ] || [ "$kind" = "sts" ]; then
+    kubectl -n "$NAMESPACE" rollout status "statefulset/${name}" --timeout="$timeout" >/dev/null 2>&1 || true
+  fi
+}
+
+create_external_name_alias() {
+  local alias_name="$1"
+  local target_service="$2"
+  [ -n "$target_service" ] || return 0
+  [ "$alias_name" = "$target_service" ] && return 0
+  cat <<EOF_ALIAS | kubectl -n "$NAMESPACE" apply -f - >/dev/null
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${alias_name}
+spec:
+  type: ExternalName
+  externalName: ${target_service}.${NAMESPACE}.svc.cluster.local
+EOF_ALIAS
 }
 
 for bin in helm kubectl openssl jq; do
@@ -114,19 +151,24 @@ mark_stage_success "Vault release submitted"
 set_stage resolver "Installing universal resolver"
 helm dependency build "./Universal Resolver" >/dev/null
 helm upgrade --install universal-resolver "./Universal Resolver" --namespace "$NAMESPACE" >/dev/null
+wait_for_rollout deploy '^universal-resolver' 180s
+create_external_name_alias didresolver "$(find_workload svc '^universal-resolver')"
 mark_stage_success "Universal resolver release submitted"
 
 set_stage signer "Installing signer"
 render_values "./signer/values.yaml" "$WORKDIR/signer-values.yaml"
 helm dependency build "./signer" >/dev/null
 helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "$WORKDIR/signer-values.yaml" >/dev/null
-kubectl -n "$NAMESPACE" get deploy signer >/dev/null 2>&1 && kubectl -n "$NAMESPACE" set env deployment/signer VAULT_ADDR="https://vault.${NAMESPACE}.svc:8200" TRANSIT_MOUNT_PATH=transit TRANSIT_KEY_NAME=SDJWTCredential >/dev/null || true
+kubectl -n "$NAMESPACE" get deploy signer >/dev/null 2>&1 && kubectl -n "$NAMESPACE" set env deployment/signer VAULT_ADDR="http://vault.${NAMESPACE}.svc.cluster.local:8200" VAULT_ADRESS="http://vault.${NAMESPACE}.svc.cluster.local:8200" TRANSIT_MOUNT_PATH=transit TRANSIT_KEY_NAME=SDJWTCredential ENGINE_PATH="/opt/plugins/hashicorp-vault-provider.so" >/dev/null || true
+wait_for_rollout deploy '^signer$' 240s
 mark_stage_success "Signer release submitted"
 
 set_stage sdjwt "Installing SD-JWT service"
 render_values "./SdJwt Service/values.yaml" "$WORKDIR/sdjwt-values.yaml"
 helm dependency build "./SdJwt Service" >/dev/null
 helm upgrade --install sdjwt "./SdJwt Service" --namespace "$NAMESPACE" -f "$WORKDIR/sdjwt-values.yaml" >/dev/null
+create_external_name_alias sd-jwt-service "$(find_workload svc 'sdjwt\|sd-jwt')"
+wait_for_rollout deploy 'sdjwt\|sd-jwt' 240s
 mark_stage_success "SD-JWT release submitted"
 
 set_stage policy "Installing policy service"
@@ -151,7 +193,7 @@ done
 [ -n "$POLICY_DEPLOY" ] || { echo "policy deployment not found" >&2; exit 1; }
 [ -n "$POLICY_SVC" ] || { echo "policy service not found" >&2; exit 1; }
 
-kubectl -n "$NAMESPACE" rollout status "deploy/${POLICY_DEPLOY}" --timeout=120s >/dev/null 2>&1 || true
+kubectl -n "$NAMESPACE" rollout status "deploy/${POLICY_DEPLOY}" --timeout=240s >/dev/null 2>&1 || true
 
 cat <<EOF_ING | kubectl apply -f - >/dev/null
 apiVersion: networking.k8s.io/v1
@@ -159,6 +201,9 @@ kind: Ingress
 metadata:
   name: policy-public
   namespace: ${NAMESPACE}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
 spec:
   ingressClassName: nginx
   tls:

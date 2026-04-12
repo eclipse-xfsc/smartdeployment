@@ -3,8 +3,7 @@ replicaCount: 2
 image:
   repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa
   name: signer
-  tag: "v2.1.0" 
-  # tag should be updated to "v2.1.1" after eclipse pipeline fix
+  tag: "v2.1.0"
   pullPolicy: Always
 useConfigMap: false
 configMapName: my-configmap
@@ -50,8 +49,6 @@ signer:
       idle: 120s
       read: 10s
       write: 10s
-
-
   nats:
     enabled: true
     natsHost: nats://nats.NAMESPACE.svc.cluster.local:4222
@@ -66,7 +63,7 @@ signer:
     env:
       VAULT_ADRESS: http://vault.NAMESPACE.svc.cluster.local:8200
     secretEnv:
-      VAULT_TOKEN: 
+      VAULT_TOKEN:
         name: vault
         key: token
 
@@ -76,23 +73,13 @@ istio:
   injection:
     pod: false
 
-env:
-  - name: SDJWT_SERVICE_URL
-    value: "http://sd-jwt-service.NAMESPACE.svc.cluster.local:3000"
-  - name: VAULT_ADRESS
-    value: "http://vault.NAMESPACE.svc.cluster.local:8200"
+extraVars:
   - name: ENGINE_PATH
     value: "/opt/plugins/hashicorp-vault-provider.so"
-  - name: CLOUDEVENTPROVIDER_MESSAGING_NATS_URL
-    value: "nats://nats.NAMESPACE.svc.cluster.local:4222"
-  - name: NATS_HOST
-    value: "nats://nats.NAMESPACE.svc.cluster.local:4222"
-  - name: CLOUDEVENTPROVIDER_MESSAGING_PROTOCOL
-    value: "nats"
-  - name: NATS_TOPIC
-    value: "signer-topic"
   - name: VAULT_ADDR
-    value: "https://vault.NAMESPACE.svc:8200"
+    value: "http://vault.NAMESPACE.svc.cluster.local:8200"
+  - name: VAULT_ADRESS
+    value: "http://vault.NAMESPACE.svc.cluster.local:8200"
   - name: TRANSIT_MOUNT_PATH
     value: "transit"
   - name: TRANSIT_KEY_NAME

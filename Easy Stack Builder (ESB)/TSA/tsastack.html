@@ -7,6 +7,7 @@
     .form-row input[type="text"] { flex: 1; }
     .tsa-note { margin-left: 200px; color: #4b5563; font-size: 12px; margin-bottom: 10px; }
     .tsa-hidden { display: none; }
+    .tsa-checkbox { width: auto !important; margin-right: 8px; }
   </style>
 
   <fieldset class="esb-section">
@@ -22,7 +23,7 @@
   </fieldset>
 
   <fieldset class="esb-section">
-    <legend>Domain &amp; Cluster</legend>
+    <legend>Cluster &amp; Domain</legend>
     <div class="form-row">
       <label for="node-input-domainAddress">Domain</label>
       <input type="text" id="node-input-domainAddress" placeholder="e.g. example.com">
@@ -46,7 +47,7 @@
   </fieldset>
 
   <fieldset class="esb-section">
-    <legend>Policy Source</legend>
+    <legend>Trust Configuration</legend>
     <div class="form-row">
       <label for="node-input-policyRepoUrl">Policy repo URL</label>
       <input type="text" id="node-input-policyRepoUrl" placeholder="https://github.com/eclipse-xfsc/rego-policies">
@@ -55,11 +56,22 @@
       <label for="node-input-policyRepoFolder">Policy repo folder</label>
       <input type="text" id="node-input-policyRepoFolder" placeholder="optional subfolder">
     </div>
-  </fieldset>
-
-  <fieldset class="esb-section">
-    <legend>Security &amp; Identity</legend>
-    <div class="tsa-note">The hardened TSA flow deploys compatibility endpoints for auth-server, key-server, and test-server, provisions a dedicated Keycloak realm with authentication clients, and publishes the required /demo verification endpoint.</div>
+    <div class="form-row">
+      <label for="node-input-eidasCompliance">eIDAS validation</label>
+      <input class="tsa-checkbox" type="checkbox" id="node-input-eidasCompliance">
+      <span>Request eIDAS-compatible validation mode</span>
+    </div>
+    <div class="form-row">
+      <label for="node-input-trustKey">Signing key (optional)</label>
+      <input type="file" id="node-input-trustKey" accept=".pem,.key,.jwk,.json,.txt">
+      <textarea class="tsa-hidden" id="node-input-trustKeyContent"></textarea>
+    </div>
+    <div class="form-row">
+      <label for="node-input-trustChain">Certificate chain (optional)</label>
+      <input type="file" id="node-input-trustChain" accept=".pem,.crt,.cer,.txt">
+      <textarea class="tsa-hidden" id="node-input-trustChainContent"></textarea>
+    </div>
+    <div class="tsa-note">The TSA flow deploys the trust-policy API and its signing dependencies, publishes the policy administration endpoint, stores the requested eIDAS flag in cluster configuration, and can persist optional PEM/JWK trust material for the runtime.</div>
   </fieldset>
 </script>
 
@@ -109,6 +121,9 @@
       domainAddress: { value: '', required: true },
       policyRepoUrl: { value: 'https://github.com/eclipse-xfsc/rego-policies', required: true },
       policyRepoFolder: { value: '' },
+      eidasCompliance: { value: false },
+      trustKeyContent: { value: '' },
+      trustChainContent: { value: '' },
       kubeconfigContent: { value: '', required: true },
       privateKeyContent: { value: '', required: true },
       certificateContent: { value: '', required: true }
@@ -122,6 +137,8 @@
       setupFile('kubeconfig', 'kubeconfigContent');
       setupFile('privateKey', 'privateKeyContent');
       setupFile('certificate', 'certificateContent');
+      setupFile('trustKey', 'trustKeyContent');
+      setupFile('trustChain', 'trustChainContent');
     },
     oneditsave: function() {
       var namespace = ($('#node-input-instanceName').val() || '').trim();

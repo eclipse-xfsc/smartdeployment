@@ -16,14 +16,17 @@ bash -n "$ROOT/uninstall-core.sh"
 bash -n "$ROOT/preflight.sh"
 node --check "$ROOT/tsastack.js"
 python3 -m json.tool "$ROOT/tsastack.schema.json" >/dev/null
-if command -v helm >/dev/null 2>&1; then
-  helm template keycloak "$ROOT/Keycloak" >/dev/null
-fi
-grep -q 'AAS_AUTH_URL=' "$ROOT/deploy.sh"
-grep -q 'KEY_SERVER_URL=' "$ROOT/deploy.sh"
-grep -q 'curl -kfsS' "$ROOT/deploy.sh"
-grep -q 'Security' "$ROOT/tsastack.html"
-grep -q 'aasAuthUrl' "$ROOT/tsastack.js"
+
+grep -q 'TSA_URL=' "$ROOT/deploy.sh"
+grep -q 'KEY_ID=' "$ROOT/deploy.sh"
+grep -q 'POLICY_STATUS=' "$ROOT/deploy.sh"
+grep -q 'tsaUrl' "$ROOT/tsastack.js"
+grep -q 'trustKeyContent' "$ROOT/tsastack.js"
+grep -q 'eIDAS validation' "$ROOT/tsastack.html"
+grep -q 'tsa-runtime-config' "$ROOT/deploy.sh"
+grep -q 'ENGINE_PATH' "$ROOT/deploy-core.sh"
 grep -q 'EVENT_JSON=' "$ROOT/deploy.sh"
+! grep -q 'AAS_AUTH_URL=' "$ROOT/deploy.sh"
+! grep -q 'aasAuthUrl' "$ROOT/tsastack.js"
 
 echo '[OK] TSA static validation passed'
