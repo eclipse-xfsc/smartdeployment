@@ -181,19 +181,48 @@ Before deployment, provide the following in the node UI:
 
 ```text
 .
-├── orce-esb-pcmcloud-0.0.3.tgz
+├── Account Service
+│   ├── charts
+│   │   └── account-service-0.1.0-main.tgz
+│   ├── Chart.yaml
+│   └── values.yaml
+├── auth
+├── Configuration Service
+│   ├── Chart.yaml
+│   └── values.yaml
+├── deploy-core.sh
+├── deploy.sh
+├── docImages
+│   ├── step1.jpg
+│   ├── step2.jpg
+│   └── step3_pcm.jpg
+├── Kong Service
+│   ├── Chart.yaml
+│   └── values.yaml
+├── orce-esb-pcmcloud-6.0.0.tgz
 ├── package.json
 ├── pcmcloud.html
 ├── pcmcloud.js
-├── deploy.sh
+├── pcmcloud.schema.json
+├── Plugin Discovery Service
+│   ├── charts
+│   │   └── plugin-discovery-0.1.1-main.tgz
+│   ├── Chart.yaml
+│   └── values.yaml
+├── preflight.sh
+├── README.md
+├── test
+│   └── static-validate.sh
+├── uninstall-core.sh
 ├── uninstall.sh
-├── Kong Service/
-├── Configuration Service/
-├── Plugin Discovery Service/
-├── Account Service/
-├── Web-UI Service/
-└── web-ui_image_build/
-    └── cloud-wallet-web-ui/
+└── Web-UI Service
+    ├── Chart.yaml
+    ├── templates
+    │   ├── deployment.yaml
+    │   ├── ingress.yaml
+    │   └── service.yaml
+    └── values.yaml
+
 ```
 
 - **package.json**  
