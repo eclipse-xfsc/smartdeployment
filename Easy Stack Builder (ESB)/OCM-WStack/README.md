@@ -154,35 +154,108 @@ Before you deploy, provide the following values in the node UI:
 
 ```text
 .
-├── Cert-Manager/
-├── Cluster-Issuer/
-├── Credential Issuance/
-├── Credential Retrieval/
-├── Credential Verification Service Chart/
-├── Didcomm/
-├── Dummy Content Signer/
-├── Keycloak/
-├── Nats Chart/
-├── Policies/
-├── Policy Chart/
-├── Pre Authorization Bridge Chart/
-├── Redis/
-├── Reverse Proxy/
-├── SdJwt Service/
-├── Status List Service Chart/
-├── Storage Service/
-├── Universal Resolver/
-├── Vault/
-├── Well Known Chart/
-├── Well Known Ingress Rules/
-├── signer/
-├── .gitkeep
+├── Cert-Manager
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Cluster-Issuer
+│   ├── Chart.yaml
+│   ├── templates
+│   │   └── clusterissuer.yaml
+│   └── values.yaml
+├── Credential Issuance
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Credential Retrieval
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Credential Verification Service Chart
+│   ├── Chart.yaml
+│   └── values.yaml
 ├── deploy.sh
+├── Didcomm
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Dummy Content Signer
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Keycloak
+│   ├── charts
+│   │   └── keycloak-18.0.2.tgz
+│   ├── Chart.yaml
+│   ├── templates
+│   │   └── secret.yaml
+│   └── values.yaml
+├── Nats Chart
+│   ├── Chart.yaml
+│   └── values.yaml
 ├── ocmwstack.html
 ├── ocmwstack.js
-├── orce-esb-ocmwstack-1.0.0.tgz
+├── orce-esb-ocmwstack-10.0.0.tgz
 ├── package.json
-└── uninstall.sh
+├── Policies
+│   ├── didDoc
+│   │   └── 1.0
+│   │       └── policy.rego
+│   ├── didProvisioning
+│   │   └── 1.0
+│   │       ├── data.json
+│   │       └── policy.rego
+│   └── termsOfUse
+│       └── 1.0
+│           ├── data.json
+│           └── policy.rego
+├── Policy Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Pre Authorization Bridge Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+├── preflight.sh
+├── Redis
+│   └── values.yaml
+├── Reverse Proxy
+│   └── nginx.conf
+├── schema
+│   └── ocm-output.schema.json
+├── SdJwt Service
+│   ├── Chart.yaml
+│   └── values.yaml
+├── signer
+│   ├── Chart.yaml
+│   ├── ci
+│   │   └── argocd.yaml
+│   ├── templates
+│   │   ├── deployment.yaml
+│   │   ├── _helpers.tpl
+│   │   ├── hpa.yaml
+│   │   ├── ingress.yaml
+│   │   └── service.yaml
+│   └── values.yaml
+├── Status List Service Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Storage Service
+│   ├── Chart.yaml
+│   └── values.yaml
+├── test
+│   └── static-validate.sh
+├── test_script.sh
+├── uninstall.sh
+├── Universal Resolver
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Vault
+│   ├── Chart.yaml
+│   └── values.yaml
+├── Well Known Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+└── Well Known Ingress Rules
+    ├── Chart.yaml
+    ├── templates
+    │   └── ingress.yaml
+    └── values.yaml
+
 ```
 
 - **deploy.sh**  
