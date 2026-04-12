@@ -1,13 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "FACIS TSA Builder Node",
+  "title": "TSA Builder Node",
   "type": "object",
-  "description": "Input and output contract for the hardened TSA node.",
+  "description": "Input and output contract for the FACIS TSA builder node aligned to the TSA SRS.",
   "properties": {
     "instanceName": { "type": "string", "minLength": 1 },
     "domainAddress": { "type": "string", "minLength": 1 },
     "policyRepoUrl": { "type": "string", "minLength": 1 },
     "policyRepoFolder": { "type": "string" },
+    "eidasCompliance": { "type": "boolean", "default": false },
+    "trustKeyContent": { "type": "string" },
+    "trustChainContent": { "type": "string" },
     "kubeconfigContent": { "type": "string", "minLength": 1 },
     "privateKeyContent": { "type": "string", "minLength": 1 },
     "certificateContent": { "type": "string", "minLength": 1 }
@@ -22,17 +25,17 @@
   ],
   "outputContract": {
     "type": "object",
-    "required": ["aasAuthUrl", "keyServerUrl", "status"],
+    "required": ["tsaUrl", "keyId", "policyStatus", "status"],
     "properties": {
-      "aasAuthUrl": { "type": "string", "format": "uri" },
-      "keyServerUrl": { "type": "string", "format": "uri" },
+      "tsaUrl": { "type": "string", "format": "uri" },
+      "keyId": { "type": "string" },
+      "policyStatus": { "type": "string" },
       "status": { "type": "string" }
     }
   },
   "uiSections": [
     "Instance Info",
-    "Domain & Cluster",
-    "Policy Source",
-    "Security & Identity"
+    "Cluster & Domain",
+    "Trust Configuration"
   ]
 }

@@ -30,6 +30,24 @@ module.exports = function(RED) {
     return /^([A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$/.test(domain) && !domain.startsWith('http://') && !domain.startsWith('https://') && !domain.includes('/');
   }
 
+  function normalizeBoolean(value) {
+    if (typeof value === 'boolean') return value;
+    return /^(true|1|yes|on)$/i.test(String(value || '').trim());
+  }
+
+  function looksLikePem(content) {
+    return /BEGIN (RSA |EC |)?PRIVATE KEY|BEGIN PUBLIC KEY|BEGIN CERTIFICATE/.test(String(content || ''));
+  }
+
+  function looksLikeJwk(content) {
+    try {
+      const parsed = JSON.parse(String(content || ''));
+      return Boolean(parsed && (parsed.kty || (Array.isArray(parsed.keys) && parsed.keys.length > 0)));
+    } catch (error) {
+      return false;
+    }
+  }
+
   function validateLocalConfig(config) {
     const errors = [];
     const namespace = String(config.instanceName || '').trim();
@@ -38,6 +56,8 @@ module.exports = function(RED) {
     const key = String(config.privateKeyContent || '');
     const cert = String(config.certificateContent || '');
     const policyRepoUrl = String(config.policyRepoUrl || '').trim();
+    const trustKey = String(config.trustKeyContent || '');
+    const trustChain = String(config.trustChainContent || '');
 
     if (!namespace) errors.push('Instance name is required.');
     if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace)) errors.push('Instance name must be a valid Kubernetes namespace.');
@@ -46,24 +66,29 @@ module.exports = function(RED) {
     if (!/(apiVersion:|clusters:|contexts:|current-context:)/m.test(kube)) errors.push('kubeconfig content is missing expected YAML sections.');
     if (!/BEGIN CERTIFICATE/.test(cert)) errors.push('TLS certificate must be PEM encoded.');
     if (!/BEGIN (RSA |EC |)?PRIVATE KEY/.test(key)) errors.push('TLS private key must be PEM encoded.');
+    if (!policyRepoUrl) errors.push('Policy repo URL is required.');
     if (policyRepoUrl && !/^https?:\/\//.test(policyRepoUrl)) errors.push('Policy repo URL must use http(s).');
+    if (trustKey && !(looksLikePem(trustKey) || looksLikeJwk(trustKey))) errors.push('Trust signing key must be PEM or JWK/JWKS JSON when provided.');
+    if (trustChain && !/BEGIN CERTIFICATE/.test(trustChain)) errors.push('Trust certificate chain must be PEM encoded when provided.');
+
     return errors;
   }
 
   function validateOutputContract(payload) {
-    ['aasAuthUrl', 'keyServerUrl', 'status'].forEach((key) => {
+    ['tsaUrl', 'keyId', 'policyStatus', 'status'].forEach((key) => {
       if (!payload[key] || typeof payload[key] !== 'string') throw new Error(`Output contract validation failed: missing ${key}`);
     });
-    if (!/^https:\/\//.test(payload.aasAuthUrl) || !/^https:\/\//.test(payload.keyServerUrl) ) {
-      throw new Error('Output contract validation failed: URLs must be https:// URLs.');
+    if (!/^https:\/\//.test(payload.tsaUrl)) {
+      throw new Error('Output contract validation failed: tsaUrl must be an https:// URL.');
     }
     return payload;
   }
 
   function buildPayload(stdout, domain) {
     return validateOutputContract({
-      aasAuthUrl: pickOutputValue(stdout, 'AAS_AUTH_URL') || `https://auth-server.${domain}`,
-      keyServerUrl: pickOutputValue(stdout, 'KEY_SERVER_URL') || `https://key-server.${domain}`,
+      tsaUrl: pickOutputValue(stdout, 'TSA_URL') || `https://policy.${domain}/v1/policies`,
+      keyId: pickOutputValue(stdout, 'KEY_ID') || 'SDJWTCredential',
+      policyStatus: pickOutputValue(stdout, 'POLICY_STATUS') || 'Ready',
       status: pickOutputValue(stdout, 'STATUS') || 'Deployed'
     });
   }
@@ -127,11 +152,18 @@ module.exports = function(RED) {
         return;
       }
 
-      let kubeTmp; let keyTmp; let crtTmp;
+      let kubeTmp; let keyTmp; let crtTmp; let trustKeyTmp; let trustChainTmp;
       try {
         kubeTmp = writeTempFile('kube-', '.yaml', config.kubeconfigContent);
         keyTmp = writeTempFile('key-', '.key', config.privateKeyContent, 0o600);
         crtTmp = writeTempFile('crt-', '.crt', config.certificateContent);
+        if (String(config.trustKeyContent || '').trim()) {
+          const postfix = looksLikeJwk(config.trustKeyContent) ? '.json' : '.pem';
+          trustKeyTmp = writeTempFile('trust-key-', postfix, config.trustKeyContent, 0o600);
+        }
+        if (String(config.trustChainContent || '').trim()) {
+          trustChainTmp = writeTempFile('trust-chain-', '.pem', config.trustChainContent);
+        }
       } catch (error) {
         node.error(`Failed to write temp files: ${error.message}`, msg);
         node.status({ fill: 'red', shape: 'ring', text: 'file error' });
@@ -148,7 +180,10 @@ module.exports = function(RED) {
         keyTmp.name,
         kubeTmp.name,
         String(config.policyRepoUrl || 'https://github.com/eclipse-xfsc/rego-policies').trim(),
-        String(config.policyRepoFolder || '').trim()
+        String(config.policyRepoFolder || '').trim(),
+        normalizeBoolean(config.eidasCompliance) ? 'true' : 'false',
+        trustKeyTmp ? trustKeyTmp.name : '',
+        trustChainTmp ? trustChainTmp.name : ''
       ];
       const events = [];
       const preflightScript = path.join(__dirname, 'preflight.sh');
@@ -157,9 +192,11 @@ module.exports = function(RED) {
       node.status({ fill: 'blue', shape: 'dot', text: 'preflight' });
       runScriptStreaming(preflightScript, args, {}, (preflightError) => {
         if (preflightError) {
-          try { kubeTmp.removeCallback(); } catch (_) {}
-          try { keyTmp.removeCallback(); } catch (_) {}
-          try { crtTmp.removeCallback(); } catch (_) {}
+          [kubeTmp, keyTmp, crtTmp, trustKeyTmp, trustChainTmp].forEach((file) => {
+            if (file && typeof file.removeCallback === 'function') {
+              try { file.removeCallback(); } catch (_) {}
+            }
+          });
           node.error(preflightError.message, msg);
           node.status({ fill: 'red', shape: 'ring', text: 'preflight failed' });
           msg.payload = preflightError.message;
@@ -178,9 +215,11 @@ module.exports = function(RED) {
             }
           }
         }, (error, stdout, stderr) => {
-          try { kubeTmp.removeCallback(); } catch (_) {}
-          try { keyTmp.removeCallback(); } catch (_) {}
-          try { crtTmp.removeCallback(); } catch (_) {}
+          [kubeTmp, keyTmp, crtTmp, trustKeyTmp, trustChainTmp].forEach((file) => {
+            if (file && typeof file.removeCallback === 'function') {
+              try { file.removeCallback(); } catch (_) {}
+            }
+          });
 
           if (error) {
             const errorMessage = maskSecrets((stderr && stderr.trim()) || error.message);
@@ -196,9 +235,12 @@ module.exports = function(RED) {
           try {
             const payload = buildPayload(stdout, config.domainAddress.trim());
             msg.payload = payload;
-            msg.aasAuthUrl = payload.aasAuthUrl;
-            msg.keyServerUrl = payload.keyServerUrl;
+            msg.tsaUrl = payload.tsaUrl;
+            msg.keyId = payload.keyId;
+            msg.policyStatus = payload.policyStatus;
             msg.status = payload.status;
+            msg.eidasValidationRequested = normalizeBoolean(config.eidasCompliance);
+            msg.trustMaterialProvided = Boolean(trustKeyTmp || trustChainTmp);
             msg.logs = maskSecrets(stdout);
             msg.deploymentEvents = events;
             if (stderr && stderr.trim()) msg.deploymentStderr = maskSecrets(stderr.trim());

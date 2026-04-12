@@ -21,14 +21,15 @@ cleanup_keycloak() {
 }
 
 cleanup_namespace_objects() {
-  kubectl -n "$NAMESPACE" delete ingress key-server-public --ignore-not-found >/dev/null 2>&1 || true
-  kubectl -n "$NAMESPACE" delete secret tsa-keycloak-client preauthbridge-redis vault xfsc-wildcard --ignore-not-found >/dev/null 2>&1 || true
-  kubectl -n "$NAMESPACE" delete configmap tsa-deployment-status --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete ingress policy-public key-server-public --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete secret tsa-keycloak-client preauthbridge-redis vault xfsc-wildcard tsa-trust-materials --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete configmap tsa-deployment-status tsa-runtime-config --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete serviceaccount tsa-runtime --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete role tsa-runtime-role --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete rolebinding tsa-runtime-binding --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete resourcequota tsa-resource-quota --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete limitrange tsa-container-defaults --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete service didresolver sd-jwt-service --ignore-not-found >/dev/null 2>&1 || true
 }
 
 delete_namespace_forcefully() {
@@ -44,7 +45,7 @@ delete_namespace_forcefully() {
 }
 
 cleanup_keycloak
-for release in key-server auth-server policy-service sdjwt signer universal-resolver vault nats redis; do
+for release in policy-service sdjwt signer universal-resolver vault nats redis key-server auth-server; do
   helm -n "$NAMESPACE" uninstall "$release" >/dev/null 2>&1 || true
 done
 cleanup_namespace_objects

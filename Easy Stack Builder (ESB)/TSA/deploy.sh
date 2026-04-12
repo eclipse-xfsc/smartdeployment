@@ -12,15 +12,26 @@ KEY_PATH="${4:?key path is required}"
 KUBE="${5:?kubeconfig path is required}"
 POLICY_REPO_URL="${6:-https://github.com/eclipse-xfsc/rego-policies}"
 POLICY_REPO_FOLDER="${7:-}"
+EIDAS_MODE_RAW="${8:-false}"
+TRUST_KEY_PATH="${9:-}"
+TRUST_CHAIN_PATH="${10:-}"
 
 export KUBECONFIG="$KUBE"
 SERVICE_ACCOUNT="tsa-runtime"
 ROLE_NAME="tsa-runtime-role"
-REALM_NAME="tsa-${NAMESPACE}"
-CLIENT_SECRET=""
 START_EPOCH="$(date +%s)"
 CURRENT_STEP="deploy"
 CURRENT_STEP_STARTED="$(date -Iseconds)"
+CORE_STDOUT_FILE=""
+TRUST_MATERIALS_AVAILABLE="false"
+
+normalize_bool() {
+  case "${1:-false}" in
+    true|TRUE|1|yes|YES|on|ON) echo "true" ;;
+    *) echo "false" ;;
+  esac
+}
+EIDAS_MODE="$(normalize_bool "$EIDAS_MODE_RAW")"
 
 emit_event() {
   local phase="$1" step="$2" status="$3" started_at="$4" details="${5:-}"
@@ -33,11 +44,6 @@ require() {
 
 ensure_namespace_exists() {
   kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE" >/dev/null
-}
-
-render_values() {
-  local src="$1" dst="$2"
-  sed "s|NAMESPACE|${NAMESPACE}|g; s|DOMAIN|${DOMAIN}|g" "$src" > "$dst"
 }
 
 patch_ingress_tls() {
@@ -109,126 +115,124 @@ report_step_error() {
 }
 trap report_step_error ERR
 
-deploy_auth_server() {
-  local started="$(date -Iseconds)"
-  local values_file
-  CURRENT_STEP="auth-server"
-  CURRENT_STEP_STARTED="$started"
-  emit_event deploy auth-server started "$started" "Deploying Keycloak-backed auth-server"
-  values_file="$(mktemp)"
-  sed "s|auth-cloud-wallet.DOMAIN|auth-server.${DOMAIN}|g; s|DOMAIN|${DOMAIN}|g" "$DIR/Keycloak/values.yaml" > "$values_file"
-  helm dependency build "$DIR/Keycloak" >/dev/null 2>&1 || true
-  helm upgrade --install auth-server "$DIR/Keycloak" \
-    --namespace "$NAMESPACE" \
-    -f "$values_file" \
-    --set keycloak.auth.adminUser=admin \
-    --set keycloak.image.registry=docker.io \
-    --set keycloak.image.repository=bitnamilegacy/keycloak \
-    --set global.security.allowInsecureImages=true >/dev/null
-  rm -f "$values_file"
-  emit_event deploy auth-server succeeded "$started" "auth-server is deployed"
+pick_output_value() {
+  local key="$1"
+  local file="$2"
+  awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, "", $0); print $0; exit}' "$file" 2>/dev/null || true
 }
 
-deploy_key_server() {
-  local started="$(date -Iseconds)"
-  local values_file
-  CURRENT_STEP="key-server"
-  CURRENT_STEP_STARTED="$started"
-  emit_event deploy key-server started "$started" "Deploying key-server compatibility signer"
-  values_file="$(mktemp)"
-  render_values "$DIR/signer/values.yaml" "$values_file"
-  printf '\nnameOverride: key-server\n' >> "$values_file"
-  helm dependency build "$DIR/signer" >/dev/null 2>&1 || true
-  helm upgrade --install key-server "$DIR/signer" --namespace "$NAMESPACE" -f "$values_file" >/dev/null
-  rm -f "$values_file"
-  cat <<EOF_ING | kubectl -n "$NAMESPACE" apply -f - >/dev/null
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: key-server-public
-spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - key-server.${DOMAIN}
-      secretName: xfsc-wildcard
-  rules:
-    - host: key-server.${DOMAIN}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: key-server
-                port:
-                  number: 8080
-EOF_ING
-  emit_event deploy key-server succeeded "$started" "key-server compatibility endpoint is deployed"
+find_deployment() {
+  local pattern="$1"
+  kubectl -n "$NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep "$pattern" | head -n1 || true
 }
 
+wait_deployment_rollout() {
+  local deployment_name="$1"
+  local timeout="${2:-180s}"
+  if [ -n "$deployment_name" ]; then
+    kubectl -n "$NAMESPACE" rollout status "deploy/${deployment_name}" --timeout="$timeout" >/dev/null 2>&1 || true
+  fi
+}
 
-reconcile_keycloak() {
+persist_runtime_config() {
   local started="$(date -Iseconds)"
-  local kc_pod="" pass="" oidc_cid="" ready=""
-  CURRENT_STEP="identity"
+  CURRENT_STEP="config"
   CURRENT_STEP_STARTED="$started"
-  emit_event identity reconcile started "$started" "Creating TSA Keycloak realm and authentication clients"
+  emit_event config persist started "$started" "Persisting TSA runtime configuration"
+  kubectl create configmap tsa-runtime-config \
+    -n "$NAMESPACE" \
+    --from-literal=POLICY_REPO_URL="$POLICY_REPO_URL" \
+    --from-literal=POLICY_REPO_FOLDER="$POLICY_REPO_FOLDER" \
+    --from-literal=EIDAS_VALIDATION="$EIDAS_MODE" \
+    --from-literal=TSA_POLICY_URL="https://policy.${DOMAIN}/v1/policies" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  emit_event config persist succeeded "$started" "TSA runtime configuration stored"
+}
 
-  for _ in $(seq 1 36); do
-    kc_pod="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    pass="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o json 2>/dev/null | jq -r '.data.password // .data["admin-password"] // empty' | base64 -d 2>/dev/null || true)"
-    if [ -n "$kc_pod" ] && [ -n "$pass" ] && kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "mkdir -p /tmp/kcadm && HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm/config --server http://localhost:8080/ --realm master --user admin --password '$pass'" >/dev/null 2>&1; then
-      ready="yes"
-      break
-    fi
-    sleep 5
-  done
+persist_trust_materials() {
+  local started="$(date -Iseconds)"
+  CURRENT_STEP="trust-material"
+  CURRENT_STEP_STARTED="$started"
 
-  if [ -z "$ready" ]; then
-    echo "WARN: auth-server Keycloak admin API is not ready yet; keeping the namespace for inspection" >&2
-    emit_event identity reconcile failed "$started" "auth-server Keycloak admin API is not ready yet; continuing without realm bootstrap"
+  if [ -z "$TRUST_KEY_PATH" ] && [ -z "$TRUST_CHAIN_PATH" ]; then
+    emit_event trust material skipped "$started" "No optional signing key or certificate chain was provided"
     return 0
   fi
 
-  if ! kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get realms/${REALM_NAME} --config /tmp/kcadm/config" >/dev/null 2>&1; then
-    kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create realms --config /tmp/kcadm/config -s realm='${REALM_NAME}' -s enabled=true" >/dev/null 2>&1 || {
-      emit_event identity reconcile failed "$started" "Failed to create TSA realm ${REALM_NAME}; continuing"
-      return 0
-    }
+  emit_event trust material started "$started" "Persisting optional TSA trust material"
+  local create_args=(kubectl create secret generic tsa-trust-materials -n "$NAMESPACE")
+  if [ -n "$TRUST_KEY_PATH" ]; then
+    create_args+=(--from-file=signing-key="$TRUST_KEY_PATH")
   fi
-  for client_name in ssi-oidc ssi-siop; do
-    if ! kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='${client_name}' --config /tmp/kcadm/config" | jq -e 'length > 0' >/dev/null 2>&1; then
-      kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create clients -r '${REALM_NAME}' --config /tmp/kcadm/config -s clientId='${client_name}' -s name='${client_name}' -s enabled=true -s protocol=openid-connect -s publicClient=false -s clientAuthenticatorType=client-secret -s standardFlowEnabled=true -s directAccessGrantsEnabled=true" >/dev/null 2>&1 || true
-    fi
-  done
-  for role_name in verifier operator; do
-    kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh create roles -r '${REALM_NAME}' --config /tmp/kcadm/config -s name='${role_name}'" >/dev/null 2>&1 || true
-  done
-  oidc_cid="$(kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients -r '${REALM_NAME}' -q clientId='ssi-oidc' --config /tmp/kcadm/config" | jq -r '.[0].id // empty')"
-  if [ -n "$oidc_cid" ]; then
-    CLIENT_SECRET="$(kubectl -n "$NAMESPACE" exec "$kc_pod" -- sh -lc "HOME=/tmp/kcadm /opt/bitnami/keycloak/bin/kcadm.sh get clients/${oidc_cid}/client-secret -r '${REALM_NAME}' --config /tmp/kcadm/config" | jq -r '.value // empty')"
+  if [ -n "$TRUST_CHAIN_PATH" ]; then
+    create_args+=(--from-file=certificate-chain="$TRUST_CHAIN_PATH")
   fi
-  kubectl create secret generic tsa-keycloak-client -n "$NAMESPACE" --from-literal=realm="$REALM_NAME" --from-literal=client-id='ssi-oidc' --from-literal=client-secret="$CLIENT_SECRET" --from-literal=keycloak-url="https://auth-server.${DOMAIN}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
-  emit_event identity reconcile succeeded "$started" "TSA realm ${REALM_NAME} and clients are ready"
+  create_args+=(--dry-run=client -o yaml)
+  "${create_args[@]}" | kubectl apply -f - >/dev/null
+  TRUST_MATERIALS_AVAILABLE="true"
+  emit_event trust material succeeded "$started" "Optional TSA trust material stored in Kubernetes Secret"
 }
 
-health_checks() {
+propagate_runtime_config() {
   local started="$(date -Iseconds)"
-  local aas_auth_url="https://auth-server.${DOMAIN}"
-  local key_server_url="https://key-server.${DOMAIN}"
-  local status_json
+  local policy_dep signer_dep
+  CURRENT_STEP="config-rollout"
+  CURRENT_STEP_STARTED="$started"
+  emit_event config rollout started "$started" "Propagating runtime configuration into TSA workloads"
+
+  policy_dep="$(find_deployment '^policy')"
+  signer_dep="$(find_deployment '^signer$')"
+
+  if [ -n "$policy_dep" ]; then
+    kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" --from=configmap/tsa-runtime-config >/dev/null 2>&1 || true
+    if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
+      kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null 2>&1 || true
+    fi
+    wait_deployment_rollout "$policy_dep" 240s
+  fi
+
+  if [ -n "$signer_dep" ]; then
+    kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" --from=configmap/tsa-runtime-config >/dev/null 2>&1 || true
+    if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
+      kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null 2>&1 || true
+    fi
+    wait_deployment_rollout "$signer_dep" 240s
+  fi
+
+  emit_event config rollout succeeded "$started" "Runtime configuration propagated to TSA workloads"
+}
+
+publish_status_contract() {
+  local started="$(date -Iseconds)"
+  local tsa_url key_id policy_status status_json
   CURRENT_STEP="observability"
   CURRENT_STEP_STARTED="$started"
-  emit_event observability probe started "$started" "Running auth-server and key-server smoke checks"
-  curl -kfsS --max-time 15 "$aas_auth_url/realms/${REALM_NAME}/.well-known/openid-configuration" >/dev/null 2>&1 || true
-  curl -kfsS --max-time 15 "$key_server_url/" >/dev/null 2>&1 || true
-  status_json="$(jq -cn --arg aasAuthUrl "$aas_auth_url" --arg keyServerUrl "$key_server_url" --arg status 'Deployed' '{aasAuthUrl:$aasAuthUrl,keyServerUrl:$keyServerUrl,status:$status}')"
+  emit_event observability probe started "$started" "Publishing TSA status contract"
+
+  tsa_url="$(pick_output_value TSA_URL "$CORE_STDOUT_FILE")"
+  key_id="$(pick_output_value KEY_ID "$CORE_STDOUT_FILE")"
+  policy_status="$(pick_output_value POLICY_STATUS "$CORE_STDOUT_FILE")"
+
+  [ -n "$tsa_url" ] || tsa_url="https://policy.${DOMAIN}/v1/policies"
+  [ -n "$key_id" ] || key_id="SDJWTCredential"
+  [ -n "$policy_status" ] || policy_status="Ready"
+
+  curl -kfsS --max-time 15 "$tsa_url" >/dev/null 2>&1 || true
+
+  status_json="$(jq -cn \
+    --arg tsaUrl "$tsa_url" \
+    --arg keyId "$key_id" \
+    --arg policyStatus "$policy_status" \
+    --arg status 'Deployed' \
+    --arg eidasValidation "$EIDAS_MODE" \
+    '{tsaUrl:$tsaUrl,keyId:$keyId,policyStatus:$policyStatus,status:$status,eidasValidation:$eidasValidation}')"
   kubectl create configmap tsa-deployment-status -n "$NAMESPACE" --from-literal=status.json="$status_json" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo "AAS_AUTH_URL=$aas_auth_url"
-  echo "KEY_SERVER_URL=$key_server_url"
+
+  echo "TSA_URL=$tsa_url"
+  echo "KEY_ID=$key_id"
+  echo "POLICY_STATUS=$policy_status"
   echo "STATUS=Deployed"
-  emit_event observability probe succeeded "$started" "Smoke checks finished and status contract stored"
+  emit_event observability probe succeeded "$started" "TSA status contract stored"
 }
 
 rollback_on_error() {
@@ -237,11 +241,12 @@ rollback_on_error() {
     local started="$(date -Iseconds)"
     emit_event deploy rollback skipped "$started" "Deployment failed; preserving namespace for inspection"
   fi
+  [ -n "$CORE_STDOUT_FILE" ] && rm -f "$CORE_STDOUT_FILE" || true
   exit "$exit_code"
 }
 trap rollback_on_error EXIT
 
-for bin in kubectl helm jq curl; do
+for bin in kubectl jq curl awk; do
   require "$bin"
 done
 
@@ -255,20 +260,22 @@ emit_event preflight validate succeeded "$started" "TSA shell preflight checks p
 patch_ingress_tls
 ensure_namespace_exists
 ensure_namespace_baseline
+persist_runtime_config
+persist_trust_materials
 
 started="$(date -Iseconds)"
 CURRENT_STEP="core"
 CURRENT_STEP_STARTED="$started"
-emit_event deploy core started "$started" "Executing original TSA deployment workflow"
-bash "$CORE" "$@"
-emit_event deploy core succeeded "$started" "Original TSA deployment workflow finished"
+emit_event deploy core started "$started" "Executing TSA deployment workflow"
+CORE_STDOUT_FILE="$(mktemp -t tsa-core-stdout-XXXXXX)"
+bash "$CORE" "$@" | tee "$CORE_STDOUT_FILE"
+emit_event deploy core succeeded "$started" "TSA deployment workflow finished"
 
 ensure_namespace_baseline
-deploy_auth_server
-deploy_key_server
-reconcile_keycloak
-health_checks
+propagate_runtime_config
+publish_status_contract
 
 trap - EXIT
+[ -n "$CORE_STDOUT_FILE" ] && rm -f "$CORE_STDOUT_FILE" || true
 DURATION="$(( $(date +%s) - START_EPOCH ))"
 echo "DEPLOYMENT_DURATION_SECONDS=${DURATION}"
