@@ -267,17 +267,59 @@ Before deployment, provide the following values in the node editor:
 
 ```text
 .
+├── deploy-core.sh
 ├── deploy.sh
+├── helm-render.txt
+├── Keycloak
+│   ├── charts
+│   │   └── keycloak-18.0.2.tgz
+│   ├── Chart.yaml
+│   ├── templates
+│   │   └── secret.yaml
+│   └── values.yaml
+├── Nats Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+├── orce-esb-tsastack-12.0.0.tgz
 ├── package.json
+├── Policy Chart
+│   ├── Chart.yaml
+│   └── values.yaml
+├── preflight.sh
+├── Redis
+│   └── values.yaml
+├── SdJwt Service
+│   ├── Chart.yaml
+│   └── values.yaml
+├── signer
+│   ├── Chart.yaml
+│   ├── ci
+│   │   └── argocd.yaml
+│   ├── templates
+│   │   ├── deployment.yaml
+│   │   ├── _helpers.tpl
+│   │   ├── hpa.yaml
+│   │   ├── ingress.yaml
+│   │   └── service.yaml
+│   └── values.yaml
+├── test
+│   └── static-validate.sh
 ├── tsastack.html
 ├── tsastack.js
+├── tsastack.schema.json
+├── uninstall-core.sh
 ├── uninstall.sh
-└── templates/
-    └── mongo-init.js
+├── Universal Resolver
+│   ├── Chart.yaml
+│   └── values.yaml
+└── Vault
+    ├── Chart.yaml
+    └── values.yaml
+
 ```
 
 - **deploy.sh**  
-  Main deployment entry point. It validates inputs, ensures required cluster components exist, discovers shared OCM services, creates TLS and registry secrets, builds and pushes TSA component images, deploys MongoDB/Redis, bootstraps Keycloak, applies the TSA workloads and ingress, and runs smoke tests.
+  Main deployment entry point. It validates inputs, ensures required cluster components exist, discovers shared OCM services, creates TLS and registry secrets, builds and pushes TSA component images, deploys Redis, bootstraps Keycloak, applies the TSA workloads and ingress, and runs smoke tests.
 
 - **uninstall.sh**  
   Removes the TSA instance by deleting the target namespace.
@@ -291,8 +333,6 @@ Before deployment, provide the following values in the node editor:
 - **tsastack.html**  
   ORCE frontend/editor definition. It exposes the configuration form for namespace names, domain, kubeconfig, TLS material, registry settings, optional OCM/email values, and the legacy login toggle.
 
-- **templates/mongo-init.js**  
-  Seed script used during deployment to initialize MongoDB collections and example data for policy, task, and infohub databases.
 
 ---
 
