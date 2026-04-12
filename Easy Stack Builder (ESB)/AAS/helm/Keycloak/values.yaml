@@ -1,4 +1,11 @@
 keycloak:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "3"
+      memory: "4Gi"
   image:
     registry: docker.io
     repository: bitnamilegacy/keycloak

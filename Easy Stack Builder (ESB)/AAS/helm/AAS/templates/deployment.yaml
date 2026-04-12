@@ -85,4 +85,8 @@ spec:
               port: {{ .Values.server.http.port }}
             initialDelaySeconds: 60
             periodSeconds: 30
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       restartPolicy: Always

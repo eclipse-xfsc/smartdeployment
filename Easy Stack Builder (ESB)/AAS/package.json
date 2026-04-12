@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-aasstack",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "FACIS-patched AAS deployer node with structured outputs and masked secrets (hotfix: keycloak memory/resources) (hotfix: keycloak memory/resources)",
   "dependencies": {
     "tmp": "^0.2.1"
