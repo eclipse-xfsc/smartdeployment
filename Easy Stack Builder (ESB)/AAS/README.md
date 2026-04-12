@@ -242,13 +242,39 @@ Before deployment, provide the following values in the node editor:
 
 ```text
 .
-├── AAS/
-├── Keycloak/
 ├── aas.html
 ├── aas.js
+├── aas.schema.json
 ├── deploy.sh
+├── helm
+│   ├── AAS
+│   │   ├── Chart.yaml
+│   │   ├── templates
+│   │   │   ├── deployment.yaml
+│   │   │   ├── _helpers.tpl
+│   │   │   ├── ingress.yaml
+│   │   │   ├── secret-keys.yaml
+│   │   │   ├── secret-oidc.yaml
+│   │   │   ├── secret-siop.yaml
+│   │   │   ├── service.yaml
+│   │   │   └── spring-config.yaml
+│   │   └── values.yaml
+│   └── Keycloak
+│       ├── Chart.yaml
+│       ├── realm
+│       │   └── gaia-x-realm.json
+│       ├── templates
+│       │   └── secret.yaml
+│       └── values.yaml
+├── orce-esb-aasstack-6.0.0.tgz
 ├── package.json
+├── scripts
+│   ├── deploy.sh
+│   └── uninstall.sh
+├── test
+│   └── static-validate.sh
 └── uninstall.sh
+
 ```
 
 - **AAS/**  
