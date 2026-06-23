@@ -437,6 +437,10 @@ helm upgrade --install keycloak "./Keycloak" \
   --set keycloak.image.registry=docker.io \
   --set keycloak.image.repository=bitnamilegacy/keycloak \
   --set global.security.allowInsecureImages=true \
+  --set keycloak.resources.requests.cpu=500m \
+  --set keycloak.resources.requests.memory=768Mi \
+  --set keycloak.resources.limits.cpu=1500m \
+  --set keycloak.resources.limits.memory=1536Mi \
   --wait
 mv ./Keycloak/values.yaml.bak ./Keycloak/values.yaml
 
