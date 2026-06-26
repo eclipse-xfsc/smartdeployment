@@ -220,7 +220,7 @@ spec:
               service:
                 name: ${POLICY_SVC}
                 port:
-                  number: 8080
+                  number: 8222
 EOF_ING
 mark_stage_success "Policy service is exposed"
 
