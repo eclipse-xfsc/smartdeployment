@@ -43,7 +43,7 @@ CERTFILE=$4
 PVTKEYFILE=$5
 
 # Defaults
-IMAGE_TAG="1.0.8"
+IMAGE_TAG="2.0.13"
 USERNAME=""
 PASSWORD=""
 
@@ -286,7 +286,7 @@ spec:
       serviceAccountName: xfsc-orce-sa
       containers:
       - name: orce
-        image: leanea/facis-xfsc-orce:${IMAGE_TAG}
+        image: ecofacis/xfsc-orce:${IMAGE_TAG}
         ports:
         - containerPort: 1880
         volumeMounts:
