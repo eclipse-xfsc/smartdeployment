@@ -46,7 +46,7 @@ policy:
     runAsUid: 0
     runAsGid: 0
   service:
-    port: 8080
+    port: 8222
 
   policy:
     nats:

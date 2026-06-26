@@ -50,6 +50,7 @@ patch_ingress_tls() {
   kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx >/dev/null 2>&1 || true
   kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
   kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false","allow-snippet-annotations":"true"}}' >/dev/null 2>&1 || true
+  kubectl -n ingress-nginx patch svc ingress-nginx-controller -p '{"spec":{"externalTrafficPolicy":"Cluster"}}' >/dev/null 2>&1 || true
 }
 
 ensure_namespace_baseline() {
