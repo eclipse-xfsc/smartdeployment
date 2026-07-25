@@ -10,7 +10,6 @@ module.exports = function(RED) {
         RED.nodes.createNode(this, config);
         const node = this;
 
-        // تنظیمات و مقادیر پیش‌فرض
         const kubeContent = config.kubeconfigContent;
         const keyContent  = config.privateKeyContent;
         const crtContent  = config.certificateContent;
@@ -22,10 +21,8 @@ module.exports = function(RED) {
         const newUser     = config.newUser;
         const newPass     = config.newPass;
 
-        // ذخیره‌ی آخرین clientSecret پس از deploy
         let storedClientSecret = null;
 
-        // تابع نوشتن فایل‌های موقت
         function writeTempFiles() {
             const kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
             fs.writeFileSync(kubeTmp.name, kubeContent);
@@ -36,7 +33,6 @@ module.exports = function(RED) {
             return { kubeTmp, keyTmp, crtTmp };
         }
 
-        // تابع دریافت توکن مدیریت
         function getAdminToken(callback) {
             const tokenUrl = `https://${domain}/${urlPath}/key-server/realms/master/protocol/openid-connect/token`;
             request.post({
@@ -52,7 +48,6 @@ module.exports = function(RED) {
             });
         }
 
-        // تابع دریافت توکن API با استفاده از storedClientSecret
         function getApiToken(msg, callback) {
             const tokenUrl = `https://${domain}/${urlPath}/key-server/realms/gaia-x/protocol/openid-connect/token`;
             const secret = msg.clientSecret || storedClientSecret;
@@ -74,7 +69,6 @@ module.exports = function(RED) {
             });
         }
 
-        // تابع ارسال درخواست(fc-service)
         function callFcService(token, topic, method, data, callback) {
             const baseUrl = `https://${domain}/${urlPath}/fcservice`;
             const opts = {
@@ -92,7 +86,6 @@ module.exports = function(RED) {
         }
 
         node.on('input', function(msg) {
-            // اگر msg.topic تعریف شده باشه => API call
             if (typeof msg.topic === 'string' && msg.topic.trim() !== '') {
                 getApiToken(msg, (err, apiToken) => {
                     if (err) {
@@ -111,7 +104,6 @@ module.exports = function(RED) {
                 return;
             }
 
-            // بخش Deploy
             let kubeTmp, keyTmp, crtTmp;
             try {
                 ({ kubeTmp, keyTmp, crtTmp } = writeTempFiles());
@@ -137,7 +129,6 @@ module.exports = function(RED) {
                     node.send(msg);
                     return;
                 }
-                // پارس خروجی
                 const res = {};
                 stdout.split(/\r?\n/).forEach(line => {
                     let m;
@@ -151,7 +142,6 @@ module.exports = function(RED) {
                 node.fcServiceUrl      = res.fcServiceUrl;
                 node.keycloakUrl       = res.keycloakUrl;
                 node.clientSecret      = res.clientSecret;
-                // ذخیره در حافظه نود
                 storedClientSecret = res.clientSecret;
 
                 node.log(`Deployment result: ${JSON.stringify(res)}`);
@@ -164,7 +154,6 @@ module.exports = function(RED) {
 
         node.on('close', function(removed, done) {
             if (removed) {
-                // فقط نیاز به kubeconfig داریم
                 let kubeTmp;
                 try {
                     kubeTmp = tmp.fileSync({ prefix: 'kube-', postfix: '.yaml' });
@@ -179,7 +168,6 @@ module.exports = function(RED) {
                 const cmd = `bash ${JSON.stringify(uninstallScript)} ` + args.map(a => JSON.stringify(a)).join(' ');
                 node.log(`🔄 Running uninstall: ${cmd}`);
                 exec(cmd, { cwd: __dirname }, (err, stdout, stderr) => {
-                    // پاک کردن temp kubeconfig
                     try { kubeTmp.removeCallback(); } catch (_) {}
                     if (err) {
                         node.error(`uninstall failed: ${stderr||err.message}`);
@@ -201,7 +189,6 @@ module.exports = function(RED) {
         if (!node) {
             return res.status(404).send({ error: "Node not found" });
         }
-        // این مقادیر را از خود کانفیگ نود می‌خوانیم:
         var cfg = {
             ingressExternalIp: node.ingressExternalIp || "",
             fcServiceUrl:      node.fcServiceUrl      || "",
