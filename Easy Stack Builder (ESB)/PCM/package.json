@@ -1,30 +1,30 @@
 {
-    "name": "orce-esb-pcmcloud",
-    "version": "6.0.0",
-    "description": "PCMCloud deployer node",
-    "dependencies": {
-        "tmp": "^0.2.1"
-    },
-    "keywords": [
-        "pcm",
-        "pcmcloud",
-        "cloud",
-        "easy",
-        "stack",
-        "builder",
-        "xfsc",
-        "faps",
-        "fap",
-        "kubernetes",
-        "k8s"
-    ],
-    "node-red": {
-        "nodes": {
-            "ocmwstack": "pcmcloud.js"
-        }
-    },
-    "engines": {
-        "node": ">=14.0.0",
-        "node-red": ">=3.0.0"
+  "name": "orce-esb-pcmcloud",
+  "version": "6.0.2",
+  "description": "PCMCloud deployer node with explicit ingress-nginx opt-in controls and executable health-only BDD evidence tooling",
+  "dependencies": {
+    "tmp": "^0.2.1"
+  },
+  "keywords": [
+    "pcm",
+    "pcmcloud",
+    "cloud",
+    "easy",
+    "stack",
+    "builder",
+    "xfsc",
+    "faps",
+    "fap",
+    "kubernetes",
+    "k8s"
+  ],
+  "node-red": {
+    "nodes": {
+      "ocmwstack": "pcmcloud.js"
     }
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "node-red": ">=3.0.0"
+  }
 }

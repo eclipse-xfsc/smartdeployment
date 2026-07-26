@@ -20,6 +20,38 @@ helm repo update
 
 export KUBECONFIG="$KUBE"
 kubectl create ns $NAMESPACE
+
+# NF-5: generate credentials once, persist them in Kubernetes, and reuse on redeployment.
+ESB_CREDENTIAL_NAMESPACE="${NAMESPACE:-${NAMESPACE:-default}}"
+ESB_GENERATED_SECRET_NAME='esb-pcm-generated-credentials'
+kubectl get namespace "$ESB_CREDENTIAL_NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$ESB_CREDENTIAL_NAMESPACE" >/dev/null
+if ! kubectl -n "$ESB_CREDENTIAL_NAMESPACE" get secret "$ESB_GENERATED_SECRET_NAME" >/dev/null 2>&1; then
+  kubectl -n "$ESB_CREDENTIAL_NAMESPACE" create secret generic "$ESB_GENERATED_SECRET_NAME" \
+    --from-literal=account-service-config-vault-tokenname="$(openssl rand -hex 24)" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+fi
+ESB_GENERATED_CREDENTIAL_0="$(kubectl -n "$ESB_CREDENTIAL_NAMESPACE" get secret "$ESB_GENERATED_SECRET_NAME" -o 'go-template={{index .data "account-service-config-vault-tokenname"}}' | base64 --decode)"
+[[ -n "${ESB_GENERATED_CREDENTIAL_0}" ]] || { printf 'Missing generated credential key account-service-config-vault-tokenname\n' >&2; exit 1; }
+ESB_GENERATED_VALUES_FILE="$(mktemp)"
+chmod 600 "$ESB_GENERATED_VALUES_FILE"
+cat >"$ESB_GENERATED_VALUES_FILE" <<EOF_ESB_GENERATED_VALUES
+account-service:
+  config:
+    vault:
+      tokenName: "${ESB_GENERATED_CREDENTIAL_0}"
+EOF_ESB_GENERATED_VALUES
+esb_cleanup_esb_generated_values_file() {
+  rm -f "${ESB_GENERATED_VALUES_FILE:-}"
+}
+esb_previous_exit_trap="$(trap -p EXIT)"
+if [[ -n "$esb_previous_exit_trap" ]]; then
+  esb_previous_exit_trap="${esb_previous_exit_trap#trap -- '}"
+  esb_previous_exit_trap="${esb_previous_exit_trap%' EXIT}"
+  trap "$esb_previous_exit_trap; esb_cleanup_esb_generated_values_file" EXIT
+else
+  trap esb_cleanup_esb_generated_values_file EXIT
+fi
+
 kubectl create secret tls "${TLS_SECRET}" \
     --cert="${CERT_PATH}" \
     --key="${KEY_PATH}" \
@@ -70,7 +102,7 @@ reown_from_chart() {
       fi
     done
 
-  # Extra sweep: cluster-scoped kinds that often block helm upgrade --installs
+  # Extra sweep: cluster-scoped kinds that often block helm upgrade --installs --values "${ESB_GENERATED_VALUES_FILE}"
   for kind in clusterrole clusterrolebinding validatingwebhookconfiguration mutatingwebhookconfiguration apiservice crd ingressclass priorityclass storageclass; do
     kubectl get "$kind" -o name 2>/dev/null \
     | grep -i "$rel" \
@@ -115,7 +147,7 @@ reown_from_chart "./Account Service"             "account-service"       "$NAMES
 reown_from_chart "./Web-UI Service"              "web-ui-service"        "$NAMESPACE" || true
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Configuration Service/values.yaml"
-helm dependency build "./Configuration Service";helm upgrade --install configuration-service "./Configuration Service" -n $NAMESPACE
+helm dependency build "./Configuration Service";helm upgrade --install configuration-service "./Configuration Service" -n $NAMESPACE --values "${ESB_GENERATED_VALUES_FILE}"
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Configuration Service/values.yaml"
 
 kubectl annotate ingressclass kong \
@@ -127,11 +159,11 @@ kubectl label ingressclass kong \
 
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Kong Service/values.yaml"
-helm dependency build "./Kong Service";helm upgrade --install kong-service "./Kong Service" -n $NAMESPACE
+helm dependency build "./Kong Service";helm upgrade --install kong-service "./Kong Service" -n $NAMESPACE --values "${ESB_GENERATED_VALUES_FILE}"
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Kong Service/values.yaml"
 
 sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
-helm dependency build "./Plugin Discovery Service";helm upgrade --install plugin-discovery-service "./Plugin Discovery Service" -n $NAMESPACE
+helm dependency build "./Plugin Discovery Service";helm upgrade --install plugin-discovery-service "./Plugin Discovery Service" -n $NAMESPACE --values "${ESB_GENERATED_VALUES_FILE}"
 sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Plugin Discovery Service/values.yaml"
 
 export POSTGRES_ADMIN_PASSWORD=$(
@@ -152,7 +184,7 @@ kubectl create secret generic account-db \
   --from-literal=postgresql-password="${POSTGRES_ADMIN_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic vault --namespace "${NAMESPACE}" \
-  --from-literal=token="root" \
+  --from-literal=token="${TSA_VAULT_TOKEN}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 
@@ -174,7 +206,7 @@ CREATE TABLE IF NOT EXISTS accounts.user_connections (id SERIAL PRIMARY KEY, use
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"PCMNAMESPACE"'\>/'"$NAMESPACE"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"OCMNAMESPACE"'\>/'"$OCMNAMESPACE"'/g' "./Account Service/values.yaml"
-helm dependency build "./Account Service";helm upgrade --install account-service "./Account Service" -n $NAMESPACE
+helm dependency build "./Account Service";helm upgrade --install account-service "./Account Service" -n $NAMESPACE --values "${ESB_GENERATED_VALUES_FILE}"
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"$NAMESPACE"'\>/'"PCMNAMESPACE"'/g' "./Account Service/values.yaml"
 sed -i.bak 's/\<'"$OCMNAMESPACE"'\>/'"OCMNAMESPACE"'/g' "./Account Service/values.yaml"
@@ -224,14 +256,11 @@ kubectl -n "$NAMESPACE" create secret docker-registry regcred \
 # ---- END FIXED DOCKER BUILD & PUSH ----
 
 
-#htpasswd -c auth admin
 printf "admin:$(openssl passwd -apr1 admin)\n" > auth
-kubectl create secret generic web-ui-basic-auth \
-  --from-file=auth -n $NAMESPACE
 
 sed -i.bak 's/\<'"DOMAIN"'\>/'"$DOMAIN"'/g' "./Web-UI Service/values.yaml"
 sed -i "s|REGISTRY_REPO|${REGISTRY_REPO}|g" "./Web-UI Service/values.yaml"
-helm dependency build "./Web-UI Service";helm upgrade --install web-ui-service "./Web-UI Service" -n $NAMESPACE --wait --timeout 5m --debug
+helm dependency build "./Web-UI Service";helm upgrade --install web-ui-service "./Web-UI Service" -n $NAMESPACE --wait --timeout 5m --debug --values "${ESB_GENERATED_VALUES_FILE}"
 sed -i.bak 's/\<'"$DOMAIN"'\>/'"DOMAIN"'/g' "./Web-UI Service/values.yaml"
 sed -i "s|${REGISTRY_REPO}|REGISTRY_REPO|g" "./Web-UI Service/values.yaml"
 

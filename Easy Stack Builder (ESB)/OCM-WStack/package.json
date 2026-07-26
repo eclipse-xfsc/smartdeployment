@@ -1,12 +1,15 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "10.1.0",
+  "version": "10.1.8",
   "description": "OCM-W-Stack deployer node",
   "dependencies": {
     "tmp": "^0.2.1"
   },
   "scripts": {
-    "test": "./test/static-validate.sh"
+    "test": "./test/static-validate.sh",
+    "test:runtime": "./test/runtime-health.sh",
+    "test:bdd": "./test/bdd/run.sh",
+    "test:evidence": "./test/evidence/collect-runtime-evidence.sh"
   },
   "keywords": [
     "ocm",

@@ -1,3 +1,17 @@
+
+function buildDeploymentEnv(config) {
+    const env = Object.assign({}, process.env);
+    const cfg = config || {};
+    env.MANAGE_INGRESS_NGINX = cfg.manageIngressNginx ? "true" : "false";
+    env.ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION = cfg.allowIngressAdmissionWebhookDeletion ? "true" : "false";
+    if (typeof cfg.caBundle === "string" && cfg.caBundle.trim()) {
+        env.ESB_CA_BUNDLE_B64 = Buffer.from(cfg.caBundle, "utf8").toString("base64");
+    } else {
+        delete env.ESB_CA_BUNDLE_B64;
+    }
+    return env;
+}
+
 module.exports = function(RED) {
   const { spawn } = require('child_process');
   const fs = require('fs');
@@ -95,7 +109,8 @@ module.exports = function(RED) {
   }
 
   function runScriptStreaming(scriptPath, args, handlers, callback) {
-    const child = spawn('bash', [scriptPath].concat(args), { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('bash', [scriptPath].concat(args), {
+            env: buildDeploymentEnv(config), cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const onStdout = createLineReader((line) => {

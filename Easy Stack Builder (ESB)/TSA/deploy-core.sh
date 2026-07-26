@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-NAMESPACE="$1"
-DOMAIN="$2"
-CERT_PATH="$3"
-KEY_PATH="$4"
-KUBE="$5"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
+
+NAMESPACE="${1:?namespace is required}"
+DOMAIN="${2:?domain is required}"
+CERT_PATH="${3:?certificate path is required}"
+KEY_PATH="${4:?key path is required}"
+KUBE="${5:?kubeconfig path is required}"
 POLICY_REPO_URL="${6:-https://github.com/eclipse-xfsc/rego-policies}"
 POLICY_REPO_FOLDER="${7:-}"
 EIDAS_MODE="${8:-false}"
@@ -56,28 +59,24 @@ ensure_tool() {
   command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $1" >&2; exit 1; }
 }
 
-wait_for_pod_ready() {
-  local pod_name="$1"
-  local timeout="${2:-180s}"
-  kubectl -n "$NAMESPACE" wait --for=condition=Ready "pod/${pod_name}" --timeout="$timeout" >/dev/null 2>&1 || true
-}
+wait_for_vault_cli() {
+  local token="$1"
+  local timeout_seconds="${2:-180}"
+  local deadline=$(( $(date +%s) + timeout_seconds ))
 
-wait_for_rollout() {
-  local kind="$1"
-  local pattern="$2"
-  local timeout="${3:-180s}"
-  local name=""
-  for _ in $(seq 1 60); do
-    name="$(find_workload "$kind" "$pattern")"
-    [ -n "$name" ] && break
-    sleep 2
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if printf '%s\n' "$token" | kubectl -n "$NAMESPACE" exec -i vault-0 -- sh -ceu \
+      'IFS= read -r VAULT_TOKEN; export VAULT_TOKEN VAULT_ADDR=http://127.0.0.1:8200; vault secrets list -format=json >/dev/null' \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 5
   done
-  [ -n "$name" ] || return 0
-  if [ "$kind" = "deploy" ] || [ "$kind" = "deployment" ]; then
-    kubectl -n "$NAMESPACE" rollout status "deploy/${name}" --timeout="$timeout" >/dev/null 2>&1 || true
-  elif [ "$kind" = "statefulset" ] || [ "$kind" = "sts" ]; then
-    kubectl -n "$NAMESPACE" rollout status "statefulset/${name}" --timeout="$timeout" >/dev/null 2>&1 || true
-  fi
+
+  echo "Vault CLI did not become usable within ${timeout_seconds}s" >&2
+  kubectl -n "$NAMESPACE" get pod vault-0 -o wide >&2 || true
+  kubectl -n "$NAMESPACE" describe pod vault-0 >&2 || true
+  return 1
 }
 
 create_external_name_alias() {
@@ -101,7 +100,8 @@ for bin in helm kubectl openssl jq; do
 done
 
 WORKDIR="$(mktemp -d -t tsa-simple-XXXXXX)"
-trap 'rm -rf "$WORKDIR"' EXIT
+cleanup() { rm -rf "$WORKDIR"; }
+trap cleanup EXIT
 
 helm repo add bitnami https://charts.bitnami.com/bitnami >/dev/null 2>&1 || true
 helm repo add hashicorp https://helm.releases.hashicorp.com >/dev/null 2>&1 || true
@@ -121,7 +121,6 @@ mark_stage_success "Namespace bootstrap finished"
 set_stage nats "Installing NATS messaging"
 helm dependency build "./Nats Chart" >/dev/null
 helm upgrade --install nats "./Nats Chart" --namespace "$NAMESPACE" -f "./Nats Chart/values.yaml" >/dev/null
-wait_for_pod_ready nats-0 180s
 mark_stage_success "NATS release submitted"
 
 set_stage redis "Installing Redis cache"
@@ -131,7 +130,6 @@ helm upgrade --install redis \
   --set image.registry=docker.io \
   --set image.repository=bitnamilegacy/redis \
   --set global.security.allowInsecureImages=true >/dev/null
-wait_for_pod_ready redis-master-0 180s
 mark_stage_success "Redis release submitted"
 
 set_stage vault "Installing Vault"
@@ -139,19 +137,50 @@ kubectl delete clusterrolebinding vault-agent-injector-binding >/dev/null 2>&1 |
 kubectl delete clusterrolebinding vault-server-binding >/dev/null 2>&1 || true
 kubectl delete mutatingwebhookconfiguration vault-agent-injector-cfg >/dev/null 2>&1 || true
 kubectl delete clusterrole vault-agent-injector-clusterrole >/dev/null 2>&1 || true
+
+# Reuse the namespace-scoped token on redeploy; generate a cryptographically secure
+# token only when the Secret does not exist yet. The token is never logged or passed
+# as a command-line literal.
+VAULT_ROOT_TOKEN=""
+VAULT_TOKEN_B64="$(kubectl -n "$NAMESPACE" get secret vault -o jsonpath='{.data.token}' 2>/dev/null || true)"
+if [ -n "$VAULT_TOKEN_B64" ]; then
+  VAULT_ROOT_TOKEN="$(printf '%s' "$VAULT_TOKEN_B64" | openssl base64 -d -A 2>/dev/null || true)"
+fi
+if [ "${#VAULT_ROOT_TOKEN}" -lt 32 ]; then
+  VAULT_ROOT_TOKEN="$(openssl rand -hex 32)"
+fi
+unset VAULT_TOKEN_B64
+
+VAULT_TOKEN_FILE="$WORKDIR/vault-token"
+VAULT_VALUES_FILE="$WORKDIR/vault-generated-values.yaml"
+printf '%s' "$VAULT_ROOT_TOKEN" > "$VAULT_TOKEN_FILE"
+chmod 600 "$VAULT_TOKEN_FILE"
+printf 'vault:\n  server:\n    dev:\n      devRootToken: "%s"\n' "$VAULT_ROOT_TOKEN" > "$VAULT_VALUES_FILE"
+chmod 600 "$VAULT_VALUES_FILE"
+
+kubectl create secret generic vault \
+  --namespace "$NAMESPACE" \
+  --from-file=token="$VAULT_TOKEN_FILE" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
 helm dependency build "./Vault" >/dev/null
-helm upgrade --install vault "./Vault" --namespace "$NAMESPACE" -f "./Vault/values.yaml" --set "server.dev.enabled=true" --wait --timeout 12m >/dev/null
-kubectl create secret generic vault --namespace "$NAMESPACE" --from-literal=token="root" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-wait_for_pod_ready vault-0 180s
-VAULT_ENV='VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root'
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable transit || true" >/dev/null 2>&1 || true
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault write -f transit/keys/SDJWTCredential type=ecdsa-p256" >/dev/null 2>&1 || true
+helm upgrade --install vault "./Vault" \
+  --namespace "$NAMESPACE" \
+  -f "./Vault/values.yaml" \
+  -f "$VAULT_VALUES_FILE" \
+  --set "server.dev.enabled=true" >/dev/null
+wait_for_vault_cli "$VAULT_ROOT_TOKEN" 180
+
+printf '%s\n' "$VAULT_ROOT_TOKEN" | kubectl -n "$NAMESPACE" exec -i vault-0 -- sh -ceu \
+  'IFS= read -r VAULT_TOKEN; export VAULT_TOKEN VAULT_ADDR=http://127.0.0.1:8200; if ! vault secrets list -format=json | grep -q transit/; then vault secrets enable transit; fi' >/dev/null
+printf '%s\n' "$VAULT_ROOT_TOKEN" | kubectl -n "$NAMESPACE" exec -i vault-0 -- sh -ceu \
+  'IFS= read -r VAULT_TOKEN; export VAULT_TOKEN VAULT_ADDR=http://127.0.0.1:8200; vault read transit/keys/SDJWTCredential >/dev/null 2>&1 || vault write -f transit/keys/SDJWTCredential type=ecdsa-p256' >/dev/null
+unset VAULT_ROOT_TOKEN
 mark_stage_success "Vault release submitted"
 
 set_stage resolver "Installing universal resolver"
 helm dependency build "./Universal Resolver" >/dev/null
 helm upgrade --install universal-resolver "./Universal Resolver" --namespace "$NAMESPACE" >/dev/null
-wait_for_rollout deploy '^universal-resolver' 180s
 create_external_name_alias didresolver "$(find_workload svc '^universal-resolver')"
 mark_stage_success "Universal resolver release submitted"
 
@@ -159,8 +188,8 @@ set_stage signer "Installing signer"
 render_values "./signer/values.yaml" "$WORKDIR/signer-values.yaml"
 helm dependency build "./signer" >/dev/null
 helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "$WORKDIR/signer-values.yaml" >/dev/null
-kubectl -n "$NAMESPACE" get deploy signer >/dev/null 2>&1 && kubectl -n "$NAMESPACE" set env deployment/signer VAULT_ADDR="http://vault.${NAMESPACE}.svc.cluster.local:8200" VAULT_ADRESS="http://vault.${NAMESPACE}.svc.cluster.local:8200" TRANSIT_MOUNT_PATH=transit TRANSIT_KEY_NAME=SDJWTCredential ENGINE_PATH="/opt/plugins/hashicorp-vault-provider.so" >/dev/null || true
-wait_for_rollout deploy '^signer$' 240s
+kubectl -n "$NAMESPACE" get deployment signer >/dev/null
+kubectl -n "$NAMESPACE" set env deployment/signer VAULT_ADDR="http://vault.${NAMESPACE}.svc.cluster.local:8200" VAULT_ADRESS="http://vault.${NAMESPACE}.svc.cluster.local:8200" TRANSIT_MOUNT_PATH=transit TRANSIT_KEY_NAME=SDJWTCredential ENGINE_PATH="/opt/plugins/hashicorp-vault-provider.so" >/dev/null
 mark_stage_success "Signer release submitted"
 
 set_stage sdjwt "Installing SD-JWT service"
@@ -168,7 +197,6 @@ render_values "./SdJwt Service/values.yaml" "$WORKDIR/sdjwt-values.yaml"
 helm dependency build "./SdJwt Service" >/dev/null
 helm upgrade --install sdjwt "./SdJwt Service" --namespace "$NAMESPACE" -f "$WORKDIR/sdjwt-values.yaml" >/dev/null
 create_external_name_alias sd-jwt-service "$(find_workload svc 'sdjwt\|sd-jwt')"
-wait_for_rollout deploy 'sdjwt\|sd-jwt' 240s
 mark_stage_success "SD-JWT release submitted"
 
 set_stage policy "Installing policy service"
@@ -183,7 +211,7 @@ helm upgrade --install policy-service "./Policy Chart" \
 
 POLICY_DEPLOY=""
 POLICY_SVC=""
-for _ in $(seq 1 60); do
+for _ in $(seq 1 15); do
   [ -n "$POLICY_DEPLOY" ] || POLICY_DEPLOY="$(find_workload deploy '^policy')"
   [ -n "$POLICY_SVC" ] || POLICY_SVC="$(find_workload svc '^policy')"
   [ -n "$POLICY_DEPLOY" ] && [ -n "$POLICY_SVC" ] && break
@@ -192,8 +220,6 @@ done
 
 [ -n "$POLICY_DEPLOY" ] || { echo "policy deployment not found" >&2; exit 1; }
 [ -n "$POLICY_SVC" ] || { echo "policy service not found" >&2; exit 1; }
-
-kubectl -n "$NAMESPACE" rollout status "deploy/${POLICY_DEPLOY}" --timeout=240s >/dev/null 2>&1 || true
 
 cat <<EOF_ING | kubectl apply -f - >/dev/null
 apiVersion: networking.k8s.io/v1
@@ -227,4 +253,4 @@ mark_stage_success "Policy service is exposed"
 echo "TSA_URL=https://policy.${DOMAIN}/v1/policies"
 echo "KEY_ID=SDJWTCredential"
 echo "POLICY_STATUS=Ready"
-echo "STATUS=Deployed"
+echo "CORE_STATUS=Ready"

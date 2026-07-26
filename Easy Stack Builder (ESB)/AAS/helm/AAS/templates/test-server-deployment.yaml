@@ -1,0 +1,55 @@
+{{- if .Values.testServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-server
+  labels:
+    app.kubernetes.io/name: test-server
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.testServer.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: test-server
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: test-server
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: test-server
+          image: "{{ .Values.testServer.image.repository }}:{{ .Values.testServer.image.tag }}"
+          imagePullPolicy: {{ .Values.testServer.image.pullPolicy }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "prod"
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI
+              value: {{ .Values.testServer.oidc.issuerUri | quote }}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEMO_APP_OIDC_CLIENT_ID
+              value: {{ .Values.testServer.oidc.clientId | quote }}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_DEMO_APP_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.testServer.oidc.clientSecretName | quote }}
+                  key: {{ .Values.testServer.oidc.clientSecretKey | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.testServer.service.port }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.testServer.resources | nindent 12 }}
+{{- end }}

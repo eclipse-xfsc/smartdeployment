@@ -26,6 +26,5 @@ cleanup_keycloak
 for release in web-ui-service account-service plugin-discovery-service configuration-service kong-service; do
   helm -n "$NAMESPACE" uninstall "$release" >/dev/null 2>&1 || true
 done
-kubectl -n "$NAMESPACE" delete secret postgres-postgresql account-db vault keycloak-init-secrets pcm-keycloak-client regcred web-ui-basic-auth xfsc-wildcard --ignore-not-found >/dev/null 2>&1 || true
 kubectl -n "$NAMESPACE" delete configmap pcm-credential-policy pcm-deployment-status --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete ns "$NAMESPACE" --ignore-not-found=true --wait=true >/dev/null 2>&1 || true
