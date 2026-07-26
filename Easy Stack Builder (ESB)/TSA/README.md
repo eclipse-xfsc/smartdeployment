@@ -379,3 +379,30 @@ base64
 
 This project is licensed under the Apache License 2.0.  
 See the [LICENSE](../LICENSE) file for details.
+
+---
+
+## QA remediation controls (12.1.4)
+
+### Optional shared ingress-nginx change
+
+The **Modify ingress-nginx** editor checkbox is disabled by default. When disabled, the TSA deployer does not create, patch, or otherwise modify the shared `ingress-nginx` namespace, controller ConfigMap, or controller Service. Enable it only when the operator has explicit authorization for cluster-wide ingress-controller changes.
+
+### Fail-closed Kubernetes Service readiness acceptance
+
+After Helm deployment and configuration propagation, the deployer executes the BDD health pack in `test/bdd/run-bdd.sh`. The pack invokes `test/runtime-health.sh` and checks only Kubernetes Service readiness:
+
+- the TSA namespace is reachable;
+- every non-`ExternalName` Service with a selector has at least one ready EndpointSlice or legacy Endpoints address.
+
+No rollout watcher, `kubectl wait`, ingress, DNS, TLS, HTTP, authentication, policy, signing, credential, or TSA business-workflow test is executed. A missing Service backend returns a non-zero exit code, and the `Deployed` output is not published.
+
+### Runtime evidence
+
+Each deployment generates JSON and Markdown health/BDD results, Service readiness details, and local Kubernetes Service/Pod/event diagnostics. The compact acceptance bundle (`runtime-health`, BDD results, and Service readiness TSV) is persisted in the TSA namespace as the `tsa-runtime-evidence` ConfigMap. Large diagnostic snapshots remain temporary and are not copied into ConfigMap annotations. Requirement-to-test mapping is documented in `test/TRACEABILITY_MATRIX.md`.
+
+## Kubernetes Service readiness acceptance (12.1.8)
+
+The post-deployment acceptance gate now checks only Kubernetes Service readiness, matching the deployer-only test scope. It dynamically lists every non-`ExternalName` Service with a selector in the TSA namespace and requires at least one ready EndpointSlice or legacy Endpoints address for each Service.
+
+The check exits immediately when all Services have ready backends and is globally bounded to five minutes. It does not run rollout watchers, `kubectl wait`, ingress/DNS/TLS/HTTP probes, authentication checks, policy operations, signing operations, or other TSA business workflows. The outer process `timeout` wrapper was also removed so a healthy deployment cannot be killed by an unrelated timer.

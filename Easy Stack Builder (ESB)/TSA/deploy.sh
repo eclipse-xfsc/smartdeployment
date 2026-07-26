@@ -15,6 +15,7 @@ POLICY_REPO_FOLDER="${7:-}"
 EIDAS_MODE_RAW="${8:-false}"
 TRUST_KEY_PATH="${9:-}"
 TRUST_CHAIN_PATH="${10:-}"
+PATCH_INGRESS_NGINX_RAW="${11:-false}"
 
 export KUBECONFIG="$KUBE"
 SERVICE_ACCOUNT="tsa-runtime"
@@ -23,7 +24,9 @@ START_EPOCH="$(date +%s)"
 CURRENT_STEP="deploy"
 CURRENT_STEP_STARTED="$(date -Iseconds)"
 CORE_STDOUT_FILE=""
+RUNTIME_EVIDENCE_DIR=""
 TRUST_MATERIALS_AVAILABLE="false"
+BDD_RUNNER="$DIR/test/bdd/run-bdd.sh"
 
 normalize_bool() {
   case "${1:-false}" in
@@ -32,6 +35,7 @@ normalize_bool() {
   esac
 }
 EIDAS_MODE="$(normalize_bool "$EIDAS_MODE_RAW")"
+PATCH_INGRESS_NGINX="$(normalize_bool "$PATCH_INGRESS_NGINX_RAW")"
 
 emit_event() {
   local phase="$1" step="$2" status="$3" started_at="$4" details="${5:-}"
@@ -47,10 +51,24 @@ ensure_namespace_exists() {
 }
 
 patch_ingress_tls() {
-  kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false","allow-snippet-annotations":"true"}}' >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx patch svc ingress-nginx-controller -p '{"spec":{"externalTrafficPolicy":"Cluster"}}' >/dev/null 2>&1 || true
+  local started="$(date -Iseconds)"
+  CURRENT_STEP="ingress-controller"
+  CURRENT_STEP_STARTED="$started"
+
+  if [ "$PATCH_INGRESS_NGINX" != "true" ]; then
+    emit_event config ingress-controller skipped "$started" "Global ingress-nginx changes were not requested"
+    return 0
+  fi
+
+  emit_event config ingress-controller started "$started" "Applying explicitly requested ingress-nginx controller settings"
+  kubectl get namespace ingress-nginx >/dev/null
+  kubectl -n ingress-nginx get configmap ingress-nginx-controller >/dev/null
+  kubectl -n ingress-nginx get service ingress-nginx-controller >/dev/null
+  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
+    -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false","allow-snippet-annotations":"true"}}' >/dev/null
+  kubectl -n ingress-nginx patch service ingress-nginx-controller --type merge \
+    -p '{"spec":{"externalTrafficPolicy":"Cluster"}}' >/dev/null
+  emit_event config ingress-controller succeeded "$started" "Requested ingress-nginx controller settings applied"
 }
 
 ensure_namespace_baseline() {
@@ -127,14 +145,6 @@ find_deployment() {
   kubectl -n "$NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep "$pattern" | head -n1 || true
 }
 
-wait_deployment_rollout() {
-  local deployment_name="$1"
-  local timeout="${2:-180s}"
-  if [ -n "$deployment_name" ]; then
-    kubectl -n "$NAMESPACE" rollout status "deploy/${deployment_name}" --timeout="$timeout" >/dev/null 2>&1 || true
-  fi
-}
-
 persist_runtime_config() {
   local started="$(date -Iseconds)"
   CURRENT_STEP="config"
@@ -184,23 +194,81 @@ propagate_runtime_config() {
   policy_dep="$(find_deployment '^policy')"
   signer_dep="$(find_deployment '^signer$')"
 
-  if [ -n "$policy_dep" ]; then
-    kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" --from=configmap/tsa-runtime-config >/dev/null 2>&1 || true
-    if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
-      kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null 2>&1 || true
-    fi
-    wait_deployment_rollout "$policy_dep" 240s
+  [ -n "$policy_dep" ] || { echo "ERROR: policy deployment was not found" >&2; return 1; }
+  [ -n "$signer_dep" ] || { echo "ERROR: signer deployment was not found" >&2; return 1; }
+
+  kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" --from=configmap/tsa-runtime-config >/dev/null
+  if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
+    kubectl -n "$NAMESPACE" set env "deploy/${policy_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null
   fi
 
-  if [ -n "$signer_dep" ]; then
-    kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" --from=configmap/tsa-runtime-config >/dev/null 2>&1 || true
-    if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
-      kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null 2>&1 || true
-    fi
-    wait_deployment_rollout "$signer_dep" 240s
+  kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" --from=configmap/tsa-runtime-config >/dev/null
+  if [ "$TRUST_MATERIALS_AVAILABLE" = "true" ]; then
+    kubectl -n "$NAMESPACE" set env "deploy/${signer_dep}" TSA_TRUST_MATERIAL_SECRET=tsa-trust-materials >/dev/null
   fi
 
   emit_event config rollout succeeded "$started" "Runtime configuration propagated to TSA workloads"
+}
+
+
+run_runtime_acceptance() {
+  local started="$(date -Iseconds)"
+  CURRENT_STEP="runtime-health"
+  CURRENT_STEP_STARTED="$started"
+  emit_event test runtime-health started "$started" "Checking Kubernetes Service readiness"
+
+  RUNTIME_EVIDENCE_DIR="$(mktemp -d -t tsa-runtime-evidence-XXXXXX)"
+  chmod 700 "$RUNTIME_EVIDENCE_DIR"
+  set +e
+  bash "$BDD_RUNNER" "$NAMESPACE" "$DOMAIN" "$KUBE" "$CERT_PATH" "$RUNTIME_EVIDENCE_DIR"
+  local health_rc="$?"
+  set -e
+
+  # Persist only the compact acceptance evidence. Full Pod/Service/Event snapshots stay
+  # in the protected temporary directory and are used only for local diagnostics. Using
+  # an apply-style update here would copy the entire ConfigMap into the
+  # kubectl.kubernetes.io/last-applied-configuration annotation and can exceed Kubernetes'
+  # 256 KiB annotation limit even when the ConfigMap data itself is valid.
+  local evidence_args=(kubectl -n "$NAMESPACE" create configmap tsa-runtime-evidence)
+  local evidence_file evidence_size evidence_total=0
+  for evidence_file in runtime-health.json runtime-health.md bdd-results.json bdd-results.md service-readiness.tsv; do
+    if [ -f "$RUNTIME_EVIDENCE_DIR/$evidence_file" ]; then
+      evidence_size="$(wc -c < "$RUNTIME_EVIDENCE_DIR/$evidence_file")"
+      evidence_total=$((evidence_total + evidence_size))
+      evidence_args+=(--from-file="$evidence_file=$RUNTIME_EVIDENCE_DIR/$evidence_file")
+    fi
+  done
+
+  # Runtime evidence persistence is best-effort and never changes the Service-readiness
+  # result. ConfigMaps have an overall object-size limit; keep sufficient headroom for
+  # object metadata and serialization overhead.
+  local evidence_status="stored"
+  if [ "$evidence_total" -gt 786432 ]; then
+    evidence_status="skipped: compact evidence exceeds 768 KiB (${evidence_total} bytes)"
+  else
+    set +e
+    kubectl -n "$NAMESPACE" delete configmap tsa-runtime-evidence --ignore-not-found --wait=true >/dev/null 2>&1
+    "${evidence_args[@]}" >/dev/null 2>&1
+    local evidence_rc="$?"
+    if [ "$evidence_rc" -eq 0 ]; then
+      kubectl -n "$NAMESPACE" label configmap tsa-runtime-evidence \
+        app.kubernetes.io/name=tsa-runtime-evidence \
+        app.kubernetes.io/part-of=tsa \
+        --overwrite >/dev/null 2>&1
+      evidence_rc="$?"
+    fi
+    set -e
+    if [ "$evidence_rc" -ne 0 ]; then
+      evidence_status="warning: evidence ConfigMap could not be persisted"
+    fi
+  fi
+
+  if [ "$health_rc" -ne 0 ]; then
+    emit_event test runtime-health failed "$started" "Kubernetes Service readiness failed; evidence status: ${evidence_status}"
+    return "$health_rc"
+  fi
+
+  emit_event test runtime-health succeeded "$started" "Kubernetes Services have ready backends; evidence status: ${evidence_status}"
 }
 
 publish_status_contract() {
@@ -217,8 +285,6 @@ publish_status_contract() {
   [ -n "$tsa_url" ] || tsa_url="https://policy.${DOMAIN}/v1/policies"
   [ -n "$key_id" ] || key_id="SDJWTCredential"
   [ -n "$policy_status" ] || policy_status="Ready"
-
-  curl -kfsS --max-time 15 "$tsa_url" >/dev/null 2>&1 || true
 
   status_json="$(jq -cn \
     --arg tsaUrl "$tsa_url" \
@@ -242,12 +308,13 @@ rollback_on_error() {
     local started="$(date -Iseconds)"
     emit_event deploy rollback skipped "$started" "Deployment failed; preserving namespace for inspection"
   fi
-  [ -n "$CORE_STDOUT_FILE" ] && rm -f "$CORE_STDOUT_FILE" || true
+  if [ -n "$CORE_STDOUT_FILE" ]; then rm -f "$CORE_STDOUT_FILE"; fi
+  if [ -n "$RUNTIME_EVIDENCE_DIR" ]; then rm -rf "$RUNTIME_EVIDENCE_DIR"; fi
   exit "$exit_code"
 }
 trap rollback_on_error EXIT
 
-for bin in kubectl jq curl awk; do
+for bin in kubectl jq awk; do
   require "$bin"
 done
 
@@ -269,14 +336,23 @@ CURRENT_STEP="core"
 CURRENT_STEP_STARTED="$started"
 emit_event deploy core started "$started" "Executing TSA deployment workflow"
 CORE_STDOUT_FILE="$(mktemp -t tsa-core-stdout-XXXXXX)"
+set +e
 bash "$CORE" "$@" | tee "$CORE_STDOUT_FILE"
+core_rc="${PIPESTATUS[0]}"
+set -e
+if [ "$core_rc" -ne 0 ]; then
+  echo "ERROR: TSA deploy:core failed with exit code ${core_rc}" >&2
+  exit "$core_rc"
+fi
 emit_event deploy core succeeded "$started" "TSA deployment workflow finished"
 
 ensure_namespace_baseline
 propagate_runtime_config
+run_runtime_acceptance
 publish_status_contract
 
 trap - EXIT
-[ -n "$CORE_STDOUT_FILE" ] && rm -f "$CORE_STDOUT_FILE" || true
+if [ -n "$CORE_STDOUT_FILE" ]; then rm -f "$CORE_STDOUT_FILE"; fi
+if [ -n "$RUNTIME_EVIDENCE_DIR" ]; then rm -rf "$RUNTIME_EVIDENCE_DIR"; fi
 DURATION="$(( $(date +%s) - START_EPOCH ))"
 echo "DEPLOYMENT_DURATION_SECONDS=${DURATION}"

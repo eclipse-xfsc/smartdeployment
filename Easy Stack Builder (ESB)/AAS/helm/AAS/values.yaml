@@ -1,15 +1,13 @@
 replicaCount: 1
 name: aas
-fullnameOverride: ""
-
+fullnameOverride: ''
 resources:
   requests:
-    cpu: "250m"
-    memory: "512Mi"
+    cpu: 250m
+    memory: 512Mi
   limits:
-    cpu: "1"
-    memory: "2Gi"
-
+    cpu: '1'
+    memory: 2Gi
 image:
   repository: registry.gitlab.com/gaia-x/data-infrastructure-federation-services/authenticationauthorization
   name: auth-service-image
@@ -19,66 +17,50 @@ image:
   pullSecrets: ""
 
 podAnnotations: {}
-
-# Plain env vars (non-secret)
 env:
-  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres-postgresql:5432/aas"
-  SPRING_DATASOURCE_USERNAME: "aas"
-
-# Secret-backed env vars (secretKeyRef)
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-postgresql:5432/aas
+  SPRING_DATASOURCE_USERNAME: aas
 secretEnv:
   SPRING_DATASOURCE_PASSWORD:
     name: aas-db-secret
     key: password
-
 externalSecrets: false
-
 service:
   port: 9000
   type: ClusterIP
-
 server:
   http:
     port: 9000
-
 config:
   profile: prod
-
 ingress:
   enabled: true
   ingressClassName: nginx
   annotations:
     kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/affinity: cookie
-    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
-    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-expires: '172800'
+    nginx.ingress.kubernetes.io/session-cookie-max-age: '172800'
   hosts:
-    - host: "auth-server.DOMAIN"
-      paths:
-        - path: /
-          port: 9000
-    - host: "test-server.DOMAIN"
-      paths:
-        - path: /
-          port: 9000
+  - host: auth-server.DOMAIN
+    paths:
+    - path: /
+      port: 9000
   tls:
-    - secretName: TLS_SECRET
-      hosts:
-        - "auth-server.DOMAIN"
-        - "test-server.DOMAIN"
-
+  - secretName: TLS_SECRET
+    hosts:
+    - auth-server.DOMAIN
 secrets:
   keys:
-    iat: "IAT_TOKEN"
-    jwk: "JWK_SECRET"
+    iat: IAT_TOKEN
+    jwk: JWK_SECRET
   oidc:
-    username: "aas-app-oidc"
-    password: "{noop}secret"
+    username: aas-app-oidc
+    password: ''
   siop:
-    username: "aas-app-siop"
-    password: "{noop}secret2"
-
+    username: aas-app-siop
+    password: ''
 properties:
   management:
     endpoints:
@@ -111,46 +93,46 @@ properties:
     iam:
       base-uri: https://key-server.DOMAIN
       iat:
-        dcr-uri: "https://key-server.DOMAIN/realms/gaia-x/clients-registrations/openid-connect"
-        redirect-uri: "https://auth-server.DOMAIN/*"
+        dcr-uri: https://key-server.DOMAIN/realms/gaia-x/clients-registrations/openid-connect
+        redirect-uri: https://auth-server.DOMAIN/*
         secret: ${AAS_IAM_IAT_SECRET}
       clients:
         oidc:
-          id: "aas-app-oidc"
-          secret: "{noop}secret"
+          id: aas-app-oidc
+          secret: ''
           redirect-uris:
-            - "https://key-server.DOMAIN/realms/gaia-x/broker/ssi-oidc/endpoint"
+          - https://key-server.DOMAIN/realms/gaia-x/broker/ssi-oidc/endpoint
         siop:
-          id: "aas-app-siop"
-          secret: "{noop}secret2"
+          id: aas-app-siop
+          secret: ''
           redirect-uris:
-            - "https://key-server.DOMAIN/realms/gaia-x/broker/ssi-siop/endpoint"
+          - https://key-server.DOMAIN/realms/gaia-x/broker/ssi-siop/endpoint
     jwk:
       length: 3072
       secret: ${AAS_JWK_SECRET}
     oidc:
       issuer: https://auth-server.DOMAIN
-      static-scopes: "openid profile email"
+      static-scopes: openid profile email
     siop:
       clock-skew: 5s
       issuer: https://self-issued.me/v2
     scopes:
       openid:
-        - sub
-        - iss
-        - auth_time
+      - sub
+      - iss
+      - auth_time
       profile:
-        - name
-        - given_name
-        - family_name
-        - middle_name
-        - preferred_username
-        - gender
-        - birthdate
-        - updated_at
+      - name
+      - given_name
+      - family_name
+      - middle_name
+      - preferred_username
+      - gender
+      - birthdate
+      - updated_at
       email:
-        - email
-        - email_verified
+      - email
+      - email_verified
     token:
       ttl: 5m
     tsa:
@@ -166,3 +148,32 @@ properties:
       statuses:
         GetLoginProofResult: ACCEPTED
         GetIatProofResult: ACCEPTED
+
+# NF-11: distinct AAS demo/test service. The image tag is the explicit tag
+# published in the checked-in upstream AAS deployment manifest.
+testServer:
+  enabled: true
+  replicas: 1
+  image:
+    repository: registry.gitlab.com/gaia-x/data-infrastructure-federation-services/authenticationauthorization/auth-app
+    tag: "1.1.0-SNAPSHOT"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8990
+  oidc:
+    issuerUri: "https://key-server.DOMAIN/realms/gaia-x"
+    clientId: "demo-app"
+    clientSecretName: "esb-aas-generated-credentials"
+    clientSecretKey: "demo-app-secret"
+  ingress:
+    enabled: true
+    host: "test-server.DOMAIN"
+    tlsSecretName: "TLS_SECRET"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+

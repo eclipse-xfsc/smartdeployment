@@ -43,6 +43,12 @@
       <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
       <textarea class="tsa-hidden" id="node-input-certificateContent"></textarea>
     </div>
+    <div class="form-row">
+      <label for="node-input-patchIngressNginx">Modify ingress-nginx</label>
+      <input class="tsa-checkbox" type="checkbox" id="node-input-patchIngressNginx">
+      <span>Opt in to cluster-wide ingress-nginx controller settings</span>
+    </div>
+    <div class="tsa-note">Disabled by default. Enable only when this deployment is authorized to modify the shared ingress-nginx controller ConfigMap and Service.</div>
     <div class="tsa-note">Deployment validates the kubeconfig, cluster reachability, and the supplied TLS key/certificate pair before running the TSA workflow.</div>
   </fieldset>
 
@@ -122,6 +128,7 @@
       policyRepoUrl: { value: 'https://github.com/eclipse-xfsc/rego-policies', required: true },
       policyRepoFolder: { value: '' },
       eidasCompliance: { value: false },
+      patchIngressNginx: { value: false },
       trustKeyContent: { value: '' },
       trustChainContent: { value: '' },
       kubeconfigContent: { value: '', required: true },

@@ -8,6 +8,10 @@ CERT_PATH="$3"
 KEY_PATH="$4"
 EMAIL="$5"
 KUBE="$6"
+USE_CUSTOM_CA_BUNDLE="${7:-false}"
+CA_BUNDLE_PATH="${8:-}"
+ENABLE_INGRESS_NGINX_CLUSTER_CONFIG="${9:-false}"
+DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK="${10:-false}"
 
 fail() {
   echo "$*" >&2
@@ -25,6 +29,29 @@ done
 [[ -f "$KUBE" ]] || fail "kubeconfig file not found: $KUBE"
 [[ -f "$CERT_PATH" ]] || fail "certificate file not found: $CERT_PATH"
 [[ -f "$KEY_PATH" ]] || fail "private key file not found: $KEY_PATH"
+
+case "$USE_CUSTOM_CA_BUNDLE" in
+  true|false) ;;
+  *) fail "USE_CUSTOM_CA_BUNDLE must be true or false." ;;
+esac
+
+case "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" in
+  true|false) ;;
+  *) fail "ENABLE_INGRESS_NGINX_CLUSTER_CONFIG must be true or false." ;;
+esac
+
+case "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" in
+  true|false) ;;
+  *) fail "DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK must be true or false." ;;
+esac
+
+if [[ "$USE_CUSTOM_CA_BUNDLE" == "true" ]]; then
+  [[ -n "$CA_BUNDLE_PATH" ]] || fail "CA bundle is enabled but no CA bundle path was provided."
+  [[ -s "$CA_BUNDLE_PATH" ]] || fail "CA bundle file not found or empty: $CA_BUNDLE_PATH"
+  openssl crl2pkcs7 -nocrl -certfile "$CA_BUNDLE_PATH" 2>/dev/null \
+    | openssl pkcs7 -print_certs -noout >/dev/null 2>&1 \
+    || fail "CA bundle is not a valid PEM certificate bundle."
+fi
 
 if [[ ! "$NAMESPACE" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
   fail "Namespace must be a DNS-1123 label (lowercase letters, digits, and hyphens only)."

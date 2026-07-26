@@ -4,16 +4,48 @@
   "type": "object",
   "description": "Input and output contract for the FACIS TSA builder node aligned to the TSA SRS.",
   "properties": {
-    "instanceName": { "type": "string", "minLength": 1 },
-    "domainAddress": { "type": "string", "minLength": 1 },
-    "policyRepoUrl": { "type": "string", "minLength": 1 },
-    "policyRepoFolder": { "type": "string" },
-    "eidasCompliance": { "type": "boolean", "default": false },
-    "trustKeyContent": { "type": "string" },
-    "trustChainContent": { "type": "string" },
-    "kubeconfigContent": { "type": "string", "minLength": 1 },
-    "privateKeyContent": { "type": "string", "minLength": 1 },
-    "certificateContent": { "type": "string", "minLength": 1 }
+    "instanceName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domainAddress": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policyRepoUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policyRepoFolder": {
+      "type": "string"
+    },
+    "eidasCompliance": {
+      "type": "boolean",
+      "default": false
+    },
+    "patchIngressNginx": {
+      "type": "boolean",
+      "default": false,
+      "description": "Explicit opt-in for cluster-wide ingress-nginx controller changes."
+    },
+    "trustKeyContent": {
+      "type": "string"
+    },
+    "trustChainContent": {
+      "type": "string"
+    },
+    "kubeconfigContent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "privateKeyContent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "certificateContent": {
+      "type": "string",
+      "minLength": 1
+    }
   },
   "required": [
     "instanceName",
@@ -25,12 +57,26 @@
   ],
   "outputContract": {
     "type": "object",
-    "required": ["tsaUrl", "keyId", "policyStatus", "status"],
+    "required": [
+      "tsaUrl",
+      "keyId",
+      "policyStatus",
+      "status"
+    ],
     "properties": {
-      "tsaUrl": { "type": "string", "format": "uri" },
-      "keyId": { "type": "string" },
-      "policyStatus": { "type": "string" },
-      "status": { "type": "string" }
+      "tsaUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "keyId": {
+        "type": "string"
+      },
+      "policyStatus": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      }
     }
   },
   "uiSections": [

@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# BusyBox and GNU coreutils both support the short decode flag.
+# Keep the short decode option; ORCE images use BusyBox base64.
+decode_base64() {
+  base64 -d
+}
+
 NAMESPACE="$1"
 KUBE="$2"
 KEYCLOAK_REALM="$NAMESPACE"
@@ -18,7 +24,7 @@ cleanup_keycloak_artifacts() {
     return 0
   fi
 
-  pass="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  pass="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' 2>/dev/null | decode_base64 2>/dev/null || true)"
   if [[ -z "$pass" ]]; then
     return 0
   fi

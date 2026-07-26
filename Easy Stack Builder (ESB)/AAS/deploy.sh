@@ -1,6 +1,40 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+
+# NF-3 explicit opt-in defaults. Child scripts inherit these values.
+MANAGE_INGRESS_NGINX="${MANAGE_INGRESS_NGINX:-false}"
+ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION="${ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION:-false}"
+export MANAGE_INGRESS_NGINX ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION
+
+
+# Verified TLS helper. Private CAs are supplied by the Node-RED editor as base64 PEM
+# or by direct callers through ESB_CA_BUNDLE_FILE. Insecure TLS is never enabled.
+esb_curl() {
+  local ca_file="" rc=0
+  if [[ -n "${ESB_CA_BUNDLE_B64:-}" ]]; then
+    ca_file="$(mktemp)"
+    chmod 600 "$ca_file"
+    if ! printf '%s' "$ESB_CA_BUNDLE_B64" | base64 --decode >"$ca_file" 2>/dev/null; then
+      if ! printf '%s' "$ESB_CA_BUNDLE_B64" | base64 -d >"$ca_file" 2>/dev/null; then
+        rm -f "$ca_file"
+        printf '%s\n' 'Invalid trusted CA bundle supplied to deployment' >&2
+        return 2
+      fi
+    fi
+    command curl --cacert "$ca_file" "$@" || rc=$?
+    rm -f "$ca_file"
+    return "$rc"
+  fi
+  if [[ -n "${ESB_CA_BUNDLE_FILE:-}" ]]; then
+    [[ -r "$ESB_CA_BUNDLE_FILE" ]] || { printf 'CA bundle is not readable: %s\n' "$ESB_CA_BUNDLE_FILE" >&2; return 2; }
+    command curl --cacert "$ESB_CA_BUNDLE_FILE" "$@"
+    return $?
+  fi
+  command curl "$@"
+}
+
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 CORE="$DIR/scripts/deploy.sh"
 
@@ -82,18 +116,36 @@ EOF_SEC
 
 health_checks() {
   local core_output="$1"
-  local started="$(date -Iseconds)"
+  local started
   local aas_auth_url key_server_url test_url status_json
-  aas_auth_url="$(grep '^AAS_AUTH_URL=' "$core_output" | tail -n 1 | cut -d= -f2- || true)"
-  key_server_url="$(grep '^KEY_SERVER_URL=' "$core_output" | tail -n 1 | cut -d= -f2- || true)"
-  test_url="$(grep '^TEST_URL=' "$core_output" | tail -n 1 | cut -d= -f2- || true)"
-  emit_event observability probe started "$started" "Running AAS endpoint smoke checks"
-  [ -n "$aas_auth_url" ] && curl -kfsS --max-time 15 "$aas_auth_url/actuator/health" >/dev/null 2>&1 || true
-  [ -n "$key_server_url" ] && curl -kfsS --max-time 15 "$key_server_url/realms/gaia-x/.well-known/openid-configuration" >/dev/null 2>&1 || true
-  [ -n "$test_url" ] && curl -kfsS --max-time 15 "$test_url" >/dev/null 2>&1 || true
-  status_json="$(jq -cn --arg aasAuthUrl "$aas_auth_url" --arg keyServerUrl "$key_server_url" --arg testUrl "$test_url" --arg status 'Deployed' '{aasAuthUrl:$aasAuthUrl,keyServerUrl:$keyServerUrl,testUrl:$testUrl,status:$status}')"
-  kubectl create configmap aas-deployment-status -n "$NAMESPACE" --from-literal=status.json="$status_json" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  emit_event observability probe succeeded "$started" "AAS smoke checks finished and status contract stored"
+  started="$(date -Iseconds)"
+  aas_auth_url="$(grep '^AAS_AUTH_URL=' "$core_output" | tail -n 1 | cut -d= -f2-)"
+  key_server_url="$(grep '^KEY_SERVER_URL=' "$core_output" | tail -n 1 | cut -d= -f2-)"
+  test_url="$(grep '^TEST_URL=' "$core_output" | tail -n 1 | cut -d= -f2-)"
+
+  [[ -n "$aas_auth_url" ]] || { printf '%s\n' 'AAS auth URL was not emitted' >&2; return 1; }
+  [[ -n "$key_server_url" ]] || { printf '%s\n' 'AAS key-server URL was not emitted' >&2; return 1; }
+  [[ -n "$test_url" ]] || { printf '%s\n' 'AAS test-server URL was not emitted' >&2; return 1; }
+
+  emit_event observability probe started "$started" "Running AAS service health checks"
+  esb_curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+    "$aas_auth_url/actuator/health" >/dev/null
+  esb_curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+    "$key_server_url/realms/gaia-x/.well-known/openid-configuration" >/dev/null
+  kubectl -n "$NAMESPACE" rollout status deployment/test-server --timeout=300s >/dev/null
+  [[ -n "$(kubectl -n "$NAMESPACE" get endpoints test-server -o jsonpath='{.subsets[*].addresses[*].ip}')" ]] \
+    || { printf '%s\n' 'AAS test-server Service has no ready endpoints' >&2; return 1; }
+
+  status_json="$(jq -cn \
+    --arg aasAuthUrl "$aas_auth_url" \
+    --arg keyServerUrl "$key_server_url" \
+    --arg testUrl "$test_url" \
+    --arg status 'Deployed' \
+    '{aasAuthUrl:$aasAuthUrl,keyServerUrl:$keyServerUrl,testUrl:$testUrl,status:$status}')"
+  kubectl create configmap aas-deployment-status -n "$NAMESPACE" \
+    --from-literal=status.json="$status_json" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  emit_event observability probe succeeded "$started" "AAS service health checks passed"
 }
 
 cleanup_temp_file() {
@@ -110,6 +162,7 @@ rollback_on_error() {
     ROLLBACK_DONE=1
     if [ "$AUTO_ROLLBACK_ON_FAILURE" = "true" ]; then
       emit_event deploy rollback started "$started" "AAS deployment failed; executing uninstall rollback"
+      # Best-effort rollback must not replace the original deployment failure.
       bash "$DIR/uninstall.sh" "$NAMESPACE" "$KUBE" >/dev/null 2>&1 || true
       emit_event deploy rollback finished "$started" "Rollback completed"
     else
@@ -122,6 +175,9 @@ rollback_on_error() {
 for bin in jq kubectl curl tee grep cut; do
   require "$bin"
 done
+
+NAMESPACE="$NAMESPACE" DOMAIN="$DOMAIN" KUBECONFIG="$KUBE" \
+  "$DIR/preflight.sh" "$CERT_PATH" "$KEY_PATH"
 
 started="$(date -Iseconds)"
 emit_event deploy core started "$started" "Executing AAS deployment workflow"

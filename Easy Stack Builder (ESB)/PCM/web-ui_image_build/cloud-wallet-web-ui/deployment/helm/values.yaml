@@ -4,5 +4,5 @@ service:
 frontendContainer:
   image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/pcm-cloud/web-ui
   imagePullPolicy: Always
-  tag: main
+  tag: "0.1.0"
   port: 3000

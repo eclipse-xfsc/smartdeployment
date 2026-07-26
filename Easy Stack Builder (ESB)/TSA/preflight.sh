@@ -11,6 +11,7 @@ POLICY_REPO_FOLDER="${7:-}"
 EIDAS_MODE_RAW="${8:-false}"
 TRUST_KEY_PATH="${9:-}"
 TRUST_CHAIN_PATH="${10:-}"
+PATCH_INGRESS_NGINX_RAW="${11:-false}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -53,6 +54,11 @@ is_reserved_namespace "$NAMESPACE" && fail "instance name uses a reserved namesp
 case "${EIDAS_MODE_RAW,,}" in
   true|false|1|0|yes|no|on|off) ;;
   *) fail "eIDAS flag must be a boolean-like value" ;;
+esac
+
+case "${PATCH_INGRESS_NGINX_RAW,,}" in
+  true|false|1|0|yes|no|on|off) ;;
+  *) fail "ingress-nginx modification flag must be a boolean-like value" ;;
 esac
 
 grep -q 'BEGIN CERTIFICATE' "$CERT_PATH" || fail "certificate file does not look like PEM data"

@@ -1,6 +1,49 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# NF-3: cluster-wide ingress-nginx changes are explicit opt-in operations.
+MANAGE_INGRESS_NGINX="${MANAGE_INGRESS_NGINX:-false}"
+ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION="${ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION:-false}"
+
+esb_require_ingress_nginx_prerequisites() {
+  kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null
+  local allow_snippets risk_level tls_protocols
+  allow_snippets="$(kubectl -n ingress-nginx get configmap ingress-nginx-controller -o 'go-template={{index .data "allow-snippet-annotations"}}')"
+  risk_level="$(kubectl -n ingress-nginx get configmap ingress-nginx-controller -o 'go-template={{index .data "annotations-risk-level"}}')"
+  tls_protocols="$(kubectl -n ingress-nginx get configmap ingress-nginx-controller -o 'go-template={{index .data "ssl-protocols"}}')"
+  [[ "$allow_snippets" == "true" ]] || { printf '%s\n' 'ingress-nginx prerequisite missing: allow-snippet-annotations=true. Enable Manage ingress-nginx or configure the controller.' >&2; return 1; }
+  [[ "${risk_level,,}" == "critical" ]] || { printf '%s\n' 'ingress-nginx prerequisite missing: annotations-risk-level=Critical. Enable Manage ingress-nginx or configure the controller.' >&2; return 1; }
+  [[ "$tls_protocols" == *TLSv1.3* ]] || { printf '%s\n' 'ingress-nginx prerequisite missing: ssl-protocols must include TLSv1.3. Enable Manage ingress-nginx or configure the controller.' >&2; return 1; }
+}
+
+
+# Verified TLS helper. Private CAs are supplied by the Node-RED editor as base64 PEM
+# or by direct callers through ESB_CA_BUNDLE_FILE. Insecure TLS is never enabled.
+esb_curl() {
+  local ca_file="" rc=0
+  if [[ -n "${ESB_CA_BUNDLE_B64:-}" ]]; then
+    ca_file="$(mktemp)"
+    chmod 600 "$ca_file"
+    if ! printf '%s' "$ESB_CA_BUNDLE_B64" | base64 --decode >"$ca_file" 2>/dev/null; then
+      if ! printf '%s' "$ESB_CA_BUNDLE_B64" | base64 -d >"$ca_file" 2>/dev/null; then
+        rm -f "$ca_file"
+        printf '%s\n' 'Invalid trusted CA bundle supplied to deployment' >&2
+        return 2
+      fi
+    fi
+    command esb_curl --cacert "$ca_file" "$@" || rc=$?
+    rm -f "$ca_file"
+    return "$rc"
+  fi
+  if [[ -n "${ESB_CA_BUNDLE_FILE:-}" ]]; then
+    [[ -r "$ESB_CA_BUNDLE_FILE" ]] || { printf 'CA bundle is not readable: %s\n' "$ESB_CA_BUNDLE_FILE" >&2; return 2; }
+    command esb_curl --cacert "$ESB_CA_BUNDLE_FILE" "$@"
+    return $?
+  fi
+  command esb_curl "$@"
+}
+
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 CORE="$DIR/deploy-core.sh"
 PREFLIGHT="$DIR/preflight.sh"
@@ -39,10 +82,17 @@ require() {
 }
 
 patch_ingress_tls() {
-  kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false"}}' >/dev/null 2>&1 || true
-  kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller >/dev/null 2>&1 || true
+  if [[ "$MANAGE_INGRESS_NGINX" != "true" ]]; then
+    printf '%s\n' 'Ingress-nginx management is disabled; checking existing controller prerequisites.'
+    esb_require_ingress_nginx_prerequisites
+    return 0
+  fi
+
+  printf '%s\n' 'Ingress-nginx management explicitly enabled from the Node-RED editor.'
+  kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx >/dev/null 2>&1
+  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+  kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p '{"data":{"ssl-protocols":"TLSv1.3","hsts":"true","server-tokens":"false"}}' >/dev/null 2>&1
+  kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller >/dev/null 2>&1
 }
 
 ensure_namespace_baseline() {
@@ -124,14 +174,14 @@ patch_workloads() {
 configure_runtime_env() {
   while read -r workload; do
     [ -n "$workload" ] || continue
-    kubectl -n "$NAMESPACE" set env "$workload" KEYCLOAK_REALM="$REALM_NAME" KEYCLOAK_CLIENT_ID="$WEBUI_CLIENT_ID" KEYCLOAK_AUTH_URL="https://auth-cloud-wallet.${DOMAIN}" KEYCLOAK_BASE_URL="https://auth-cloud-wallet.${DOMAIN}" >/dev/null 2>&1 || true
+    kubectl -n "$NAMESPACE" set env "$workload" KEYCLOAK_REALM="$REALM_NAME" KEYCLOAK_CLIENT_ID="$WEBUI_CLIENT_ID" KEYCLOAK_AUTH_URL="https://auth-cloud-wallet.${DOMAIN}" KEYCLOAK_BASE_URL="https://auth-cloud-wallet.${DOMAIN}" >/dev/null 2>&1
   done < <(kubectl -n "$NAMESPACE" get deploy -o name | grep -E 'web-ui|account|configuration|plugin' || true)
 }
 
 wait_rollouts() {
   while read -r workload; do
     [ -n "$workload" ] || continue
-    kubectl -n "$NAMESPACE" rollout status "$workload" --timeout=10m >/dev/null 2>&1 || true
+    kubectl -n "$NAMESPACE" rollout status "$workload" --timeout=10m >/dev/null 2>&1
   done < <(kubectl -n "$NAMESPACE" get deploy -o name 2>/dev/null)
 }
 
@@ -188,8 +238,8 @@ health_checks() {
   local keycloak_url="https://auth-cloud-wallet.${DOMAIN}"
   local status_json
   emit_event observability probe started "$started" "Running PCM and Keycloak smoke checks"
-  curl -kfsS --max-time 15 "$pcm_url/" >/dev/null 2>&1 || true
-  curl -kfsS --max-time 15 "$keycloak_url/realms/${REALM_NAME}/.well-known/openid-configuration" >/dev/null 2>&1 || true
+  esb_curl -fsS --max-time 15 "$pcm_url/" >/dev/null 2>&1
+  esb_curl -fsS --max-time 15 "$keycloak_url/realms/${REALM_NAME}/.well-known/openid-configuration" >/dev/null 2>&1
   status_json="$(jq -cn --arg pcmUrl "$pcm_url" --arg issuerId "$issuer_id" --arg keycloakUrl "$keycloak_url" --arg clientSecret "$CLIENT_SECRET" --arg status 'Deployed' '{pcmUrl:$pcmUrl,issuerId:$issuerId,keycloakUrl:$keycloakUrl,clientSecret:$clientSecret,status:$status}')"
   kubectl create configmap pcm-deployment-status -n "$NAMESPACE" --from-literal=status.json="$status_json" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   echo "PCM_URL=$pcm_url"

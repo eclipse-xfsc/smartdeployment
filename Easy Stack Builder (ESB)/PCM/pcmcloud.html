@@ -89,6 +89,16 @@
     </div>
     <div class="esb-note">These policy settings are projected into a ConfigMap and injected into the deployed PCM workloads for runtime visibility.</div>
   </fieldset>
+
+<div class="form-row">
+    <label for="node-input-manageIngressNginx"><i class="fa fa-shield"></i> Manage ingress-nginx</label>
+    <input type="checkbox" id="node-input-manageIngressNginx" style="display:inline-block; width:auto; vertical-align:top;">
+    <div class="form-tips">Opt-in only. When disabled, deployment performs read-only prerequisite checks and never changes cluster-scoped ingress-nginx resources.</div>
+</div>
+<div class="form-row">
+    <label for="node-input-caBundle"><i class="fa fa-certificate"></i> Trusted CA bundle</label>
+    <textarea id="node-input-caBundle" rows="6" placeholder="Optional PEM CA bundle; leave empty to use the operating-system trust store."></textarea>
+</div>
 </script>
 
 <script type="text/javascript">
@@ -118,6 +128,8 @@
     color: '#c0deed',
     icon: 'bridge.svg',
     defaults: {
+        manageIngressNginx: { value: false },
+        caBundle: { value: "" },
       name: { value: '' },
       instanceName: { value: '', required: true },
       ocmInstanceName: { value: '', required: true },

@@ -293,3 +293,23 @@ Deployment toolchain requirements:
 
 This project is licensed under the Apache License 2.0.  
 See the [LICENSE](../LICENSE) file for details.
+
+## QA remediation deployment controls
+
+- HTTPS probes and administrative REST calls verify TLS by default. Supply the optional Node-RED **Trusted CA bundle** field for a private CA; leaving it empty uses the system trust store.
+- Cluster-scoped ingress-nginx reconciliation is disabled by default and must be selected explicitly in the Node-RED editor. Disabled mode is read-only and validates controller prerequisites.
+- Runtime health tests validate only Kubernetes/service health and readiness; they do not exercise application business workflows.
+
+## Executable BDD and runtime evidence
+
+The package includes a health-only acceptance pack under `test/bdd` and an evidence collector under `test/evidence`. The tooling is run separately from deployment and does not alter the PCM service deployment flow. It validates namespace/workload readiness and, when supplied, an endpoint over verified TLS. It does not execute credential issuance, wallet synchronization, revocation, login, or policy workflows.
+
+Example:
+
+```bash
+./test/evidence/collect-runtime-evidence.sh \
+  --namespace <pcm-namespace> \
+  --url https://<pcm-endpoint> \
+  --kubeconfig <kubeconfig> \
+  --ca-bundle <ca.pem>
+```

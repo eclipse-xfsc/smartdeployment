@@ -23,7 +23,7 @@ cleanup_keycloak() {
 cleanup_namespace_objects() {
   kubectl -n "$NAMESPACE" delete ingress policy-public key-server-public --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete secret tsa-keycloak-client preauthbridge-redis vault xfsc-wildcard tsa-trust-materials --ignore-not-found >/dev/null 2>&1 || true
-  kubectl -n "$NAMESPACE" delete configmap tsa-deployment-status tsa-runtime-config --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete configmap tsa-deployment-status tsa-runtime-config tsa-runtime-evidence --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete serviceaccount tsa-runtime --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete role tsa-runtime-role --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete rolebinding tsa-runtime-binding --ignore-not-found >/dev/null 2>&1 || true

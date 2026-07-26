@@ -31,7 +31,7 @@ An automated OCM workspace that deploys an XFSC Organisation Credential Manager 
 
 OCM-WStack is a streamlined deployment workspace that provisions and tears down an XFSC OCM wallet stack on a Kubernetes cluster from inside a ORCE-based ORCE environment. Instead of manually applying dozens of manifests and Helm charts, you provide an instance name, bare domain, issuer email address, kubeconfig, and TLS credentials, and the node executes the bundled `deploy.sh` workflow to bootstrap the required infrastructure and install the full stack.
 
-The deployment logic covers both cluster bootstrap and application rollout. It prepares ingress-nginx, creates the target namespace, uploads TLS material, installs core infrastructure such as NATS, cert-manager, Cassandra, Redis, PostgreSQL, Keycloak, and Vault, and then deploys the OCM-facing services such as Storage Service, Status List Service, Universal Resolver, TSA Signer, SD-JWT, Dummy Content Signer, Pre-Authorization Bridge, Credential Issuance, Credential Retrieval, Credential Verification, Well-Known endpoints, and DIDComm. The accompanying `ocmwstack.js` back end manages temporary credentials, executes the deployment script, and reports status directly inside ORCE.
+The deployment logic validates the existing shared ingress-nginx controller by default, creates the target namespace, uploads TLS material, installs core infrastructure such as NATS, cert-manager, Cassandra, Redis, PostgreSQL, Keycloak, and Vault, and then deploys the OCM-facing services such as Storage Service, Status List Service, Universal Resolver, TSA Signer, SD-JWT, Dummy Content Signer, Pre-Authorization Bridge, Credential Issuance, Credential Retrieval, Credential Verification, Well-Known endpoints, and DIDComm. The accompanying `ocmwstack.js` back end manages temporary credentials, executes the deployment script, and reports status directly inside ORCE.
 
 Whether you want a reproducible playground for OCM integration, a fast bootstrap path for SSI-based credential workflows, or a low-code control point for spinning up a complete wallet stack, OCM-WStack reduces the operational overhead significantly. It combines a simple node editor UI with script-driven automation so you can focus on experimenting with credential flows rather than wiring infrastructure by hand.
 
@@ -41,7 +41,7 @@ Whether you want a reproducible playground for OCM integration, a fast bootstrap
 
 ## ⚡️ Click-to-Deploy
 
-Install the packaged ORCE node (`orce-esb-ocmwstack-1.0.0.tgz`) into a local ORCE instance, add the **OCM-W-Stack** node to your flow, provide your Kubernetes and TLS inputs, and deploy the workspace from the editor.
+Install the packaged ORCE node (`orce-esb-ocmwstack-10.1.8.tgz`) into a local ORCE instance, add the **OCM-W-Stack** node to your flow, provide your Kubernetes and TLS inputs, review the disabled-by-default cluster-wide ingress options, and deploy the workspace from the editor.
 
 ---
 
@@ -59,7 +59,7 @@ You'll need:
 1.4. The runtime environment used by ORCE must have the required command-line tooling available, including `bash`, `kubectl`, `helm`, `curl`, `jq`, and `openssl`.
 
 ### 1.1. Kubernetes
-The node expects a working Kubernetes cluster with sufficient permissions for infrastructure bootstrap. The bundled deployment script installs or patches ingress-nginx, applies cert-manager CRDs, creates namespaces and secrets, installs Helm releases, configures databases, and patches deployments. In practice, this means the supplied kubeconfig should have elevated privileges on the destination cluster.
+The node expects a working Kubernetes cluster with sufficient permissions for infrastructure bootstrap. The bundled deployment script validates an existing ingress-nginx controller by default. It installs or reconciles that shared controller only when the disabled-by-default **Manage ingress controller** option is explicitly selected. It also applies cert-manager CRDs, creates namespaces and secrets, installs Helm releases, configures databases, and patches application deployments. In practice, this means the supplied kubeconfig should have elevated privileges on the destination cluster.
 
 Before using the node in a shared or production-like cluster, review the script carefully so you understand which cluster-scoped resources it modifies.
 
@@ -70,7 +70,7 @@ As in the ORCE workspace, you can run a local parent environment with Docker:
 docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:2.0.12
 ```
 
-After the container starts, open [http://localhost:1880](http://localhost:1880) and install the packaged node from this directory: `orce-esb-ocmwstack-1.0.0.tgz`.
+After the container starts, open [http://localhost:1880](http://localhost:1880) and install the packaged node from this directory: `orce-esb-ocmwstack-10.1.8.tgz`.
 ![new node](./docImages/step1.jpg?raw=true)
 
 ![upload node](./docImages/step2.jpg?raw=true)
@@ -98,6 +98,14 @@ Upload the following files in the node editor:
 - **TLS Certificate** (`.crt`, `.pem`, `.cer`, or equivalent text form)
 
 The node stores the uploaded file contents in hidden editor fields, writes them to temporary files during execution, and passes those files to `deploy.sh`.
+
+Optional editor controls are intentionally disabled by default:
+
+- **Custom CA bundle** appends an uploaded CA bundle to the served TLS chain.
+- **Manage ingress controller** installs or reconciles the pinned shared ingress-nginx controller, patches its ConfigMap with `allow-snippet-annotations=true`, `annotations-risk-level=Critical`, and `ssl-protocols=TLSv1.3`, then restarts it. This is cluster-wide. When disabled, the deployer performs read-only validation of the existing namespace, Deployment, Service, IngressClass, and rollout status.
+- **Delete ingress webhook** deletes the `ingress-nginx-admission` `ValidatingWebhookConfiguration` and stale admission jobs. This is cluster-wide and high impact.
+
+Enable either ingress option only after explicit approval from the cluster owner. When both ingress options are disabled, the deployment script performs only read-only validation of the existing shared controller and does not modify ingress-nginx resources.
 
 ### 5. Click done and then deploy
 Click **Done** in the node editor and then click **Deploy** in the upper-right corner of the ORCE/ORCE interface.
@@ -145,8 +153,34 @@ Before you deploy, provide the following values in the node UI:
 6. **TLS Certificate**  
    Required. Stored as the wildcard TLS secret for ingress exposure.
 
-7. **Node Label**  
+7. **Custom CA bundle**  
+   Optional and disabled by default. Appends a validated PEM CA bundle to the TLS chain.
+
+8. **Manage ingress controller**  
+   Optional and disabled by default. Installs or reconciles the pinned shared ingress-nginx controller, performs the ConfigMap patch required for snippet annotations and Critical-risk annotations, enforces TLS 1.3, and restarts it. With this option disabled, the deployer only validates the existing controller and does not create, apply, patch, restart, or delete shared ingress-nginx resources.
+
+9. **Delete ingress webhook**  
+   Optional and disabled by default. Deletes the cluster-wide `ingress-nginx-admission` validating webhook configuration and stale admission jobs. Use only with cluster-owner approval.
+
+10. **Node Label**  
    Optional. Friendly display name shown in the ORCE flow.
+
+---
+
+## Runtime acceptance and evidence
+
+The package includes health-only runtime integration tests and an executable BDD acceptance pack under `test/`:
+
+```bash
+./test/evidence/collect-runtime-evidence.sh \
+  --namespace ocmwstack \
+  --domain example.com \
+  --output-json ./captured-node-red-output.json
+```
+
+The suite validates workload rollout and Pod readiness, required Service endpoints, internal TCP and health-endpoint connectivity, verified-TLS ingress availability, and the ORCE output contract. It does **not** execute credential issuance, verification, revocation, OIDC, DIDComm-message, policy, or other application workflows. The evidence collector creates a timestamped archive containing non-secret cluster snapshots, detailed logs, redacted deployment output, the Gherkin feature, and the traceability matrix.
+
+Vault dev-mode authentication no longer uses a committed fixed root token. The deployer generates a 256-bit token, stores it in the namespaced `vault` Kubernetes Secret, reuses a valid generated token for idempotent redeployment, and rotates legacy fixed/default values.
 
 ---
 
@@ -190,7 +224,7 @@ Before you deploy, provide the following values in the node UI:
 │   └── values.yaml
 ├── ocmwstack.html
 ├── ocmwstack.js
-├── orce-esb-ocmwstack-10.0.0.tgz
+├── orce-esb-ocmwstack-10.1.8.tgz
 ├── package.json
 ├── Policies
 │   ├── didDoc
@@ -271,9 +305,9 @@ Before you deploy, provide the following values in the node UI:
   Node back end. It validates required inputs, writes temporary kubeconfig/key/certificate files, executes `deploy.sh`, updates node status, and runs namespace cleanup on node removal.
 
 - **ocmwstack.html**  
-  Node front end. It defines the ORCE editor form for instance name, domain, email, kubeconfig, TLS key, certificate, and optional node label.
+  Node front end. It defines the ORCE editor form for instance name, domain, email, kubeconfig, TLS key, certificate, optional custom CA bundle, and optional node label. Custom CA handling is disabled by default and must be explicitly enabled with the **Custom CA bundle** checkbox.
 
-- **orce-esb-ocmwstack-1.0.0.tgz**  
+- **orce-esb-ocmwstack-10.1.8.tgz**  
   Packaged ORCE node ready for installation into ORCE.
 
 - **Chart and service directories**  
@@ -319,3 +353,8 @@ openssl
 
 This project is licensed under the Apache License 2.0.  
 See the [LICENSE](../LICENSE) file for details.
+
+
+## Optional custom CA bundle
+
+Custom CA handling is disabled by default. Enable **Custom CA bundle** in the Node-RED editor and upload a PEM bundle. When selected, the deployer validates the PEM bundle, appends it to the served certificate chain, and adds it as `ca.crt` in the `xfsc-wildcard` Kubernetes TLS Secret. When the checkbox is clear, no CA bundle is written or applied.

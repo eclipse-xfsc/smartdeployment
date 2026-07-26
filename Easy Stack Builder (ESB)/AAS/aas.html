@@ -34,7 +34,7 @@
       <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
     </div>
     <div class="derived-note">
-      Package version: <strong>2.0.1</strong><br>
+      Package version: <strong>6.0.5</strong><br>
       Output contract: <code>{ aasAuthUrl, keyServerUrl, testUrl, status }</code>
     </div>
   </div>
@@ -103,9 +103,24 @@
   <div id="aas-panel-verify" class="facis-panel">
     <div class="derived-note">
       Verification URL exposed to downstream nodes: <code>https://test-server.&lt;domain&gt;/demo</code><br>
-      The patched package adds a dedicated <code>test-server</code> ingress alias so ORCE receives the SRS output contract even though the upstream deployment remains centered on the auth-service image.
+      A distinct <code>test-server</code> Deployment, Service, and Ingress are installed. Deployment validation is intentionally limited to Kubernetes readiness and service health; the authentication workflow is not exercised.
     </div>
   </div>
+
+<div class="form-row">
+    <label for="node-input-manageIngressNginx"><i class="fa fa-shield"></i> Manage ingress-nginx</label>
+    <input type="checkbox" id="node-input-manageIngressNginx" style="display:inline-block; width:auto; vertical-align:top;">
+    <div class="form-tips">Opt-in only. Reconciles the existing ingress-nginx controller settings and admission certificate; the project manifest is installed only when the controller is absent. No kubectl/server minor-version gate is applied. When disabled, only read-only prerequisite checks are performed.</div>
+</div>
+<div class="form-row" id="aas-admission-delete-row">
+    <label for="node-input-allowIngressAdmissionWebhookDeletion"><i class="fa fa-exclamation-triangle"></i> Delete admission webhook</label>
+    <input type="checkbox" id="node-input-allowIngressAdmissionWebhookDeletion" style="display:inline-block; width:auto; vertical-align:top;">
+    <div class="form-tips">Separate emergency fallback, disabled by default. Requires Manage ingress-nginx and is used only when certificate regeneration still fails; deletion removes ingress admission validation cluster-wide.</div>
+</div>
+<div class="form-row">
+    <label for="node-input-caBundle"><i class="fa fa-certificate"></i> Trusted CA bundle</label>
+    <textarea id="node-input-caBundle" rows="6" placeholder="Optional PEM CA bundle for HTTPS probes; it does not affect the Kubernetes ingress admission webhook."></textarea>
+</div>
 </script>
 
 <script type="text/javascript">
@@ -151,11 +166,23 @@
     setDbModeVisibility(selected);
   }
 
+  function syncIngressOptions() {
+    var manage = $("#node-input-manageIngressNginx").prop("checked");
+    $("#node-input-allowIngressAdmissionWebhookDeletion").prop("disabled", !manage);
+    $("#aas-admission-delete-row").toggle(manage);
+    if (!manage) {
+      $("#node-input-allowIngressAdmissionWebhookDeletion").prop("checked", false);
+    }
+  }
+
   RED.nodes.registerType('AAS-Stack', {
     category: 'FAPs',
     color: '#c0deed',
     icon: 'bridge.svg',
     defaults: {
+        manageIngressNginx: { value: false },
+        allowIngressAdmissionWebhookDeletion: { value: false },
+        caBundle: { value: "" },
       name: { value: "" },
       instanceName: { value: "", required: true },
       domainAddress: { value: "", required: true },
@@ -203,9 +230,12 @@
       $("#node-input-dbType-" + (dbType === "external" ? "external" : "embedded")).prop("checked", true);
       setDbModeVisibility(dbType);
       $('input[name="node-input-dbType-choice"]').on('change', syncDbModeFromRadios);
+      $("#node-input-manageIngressNginx").on("change", syncIngressOptions);
+      syncIngressOptions();
     },
     oneditsave: function() {
       syncDbModeFromRadios();
+      syncIngressOptions();
       var domain = $("#node-input-domainAddress").val().trim();
       if (domain.startsWith("http://") || domain.startsWith("https://") || domain.includes("/")) {
         RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");

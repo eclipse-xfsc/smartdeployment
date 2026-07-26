@@ -2,7 +2,13 @@
 
 set -euo pipefail
 
-# ./deploy.sh ocmnamespace domain FULLCHAINCERT keypath email KUBECONFIG
+# BusyBox and GNU coreutils both support the short decode flag.
+# Keep the short decode option; ORCE images use BusyBox base64.
+decode_base64() {
+  base64 -d
+}
+
+# ./deploy.sh ocmnamespace domain CERT keypath email KUBECONFIG USE_CUSTOM_CA_BUNDLE [CA_BUNDLE] [ENABLE_INGRESS_NGINX_CLUSTER_CONFIG] [DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK]
 
 NAMESPACE="$1"
 DOMAIN="$2"
@@ -10,6 +16,10 @@ CERT_PATH="$3"
 KEY_PATH="$4"
 EMAIL="$5"
 KUBE="$6"
+USE_CUSTOM_CA_BUNDLE="${7:-false}"
+CA_BUNDLE_PATH="${8:-}"
+ENABLE_INGRESS_NGINX_CLUSTER_CONFIG="${9:-false}"
+DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK="${10:-false}"
 TLS_SECRET="xfsc-wildcard"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$(mktemp -d /tmp/ocm-w-stack-XXXXXX)"
@@ -21,6 +31,21 @@ ROLLBACK_IN_PROGRESS=0
 LAST_PHASE="init"
 
 export KUBECONFIG="$KUBE"
+
+case "$USE_CUSTOM_CA_BUNDLE" in
+  true|false) ;;
+  *) echo "USE_CUSTOM_CA_BUNDLE must be true or false." >&2; exit 1 ;;
+esac
+
+case "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" in
+  true|false) ;;
+  *) echo "ENABLE_INGRESS_NGINX_CLUSTER_CONFIG must be true or false." >&2; exit 1 ;;
+esac
+
+case "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" in
+  true|false) ;;
+  *) echo "DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK must be true or false." >&2; exit 1 ;;
+esac
 
 cleanup_workdir() {
   rm -rf "$WORKDIR" 2>/dev/null || true
@@ -168,6 +193,34 @@ ensure_vault_key() {
   fi
 }
 
+repair_didcomm_dirty_migration() {
+  local state_file="$WORKDIR/didcomm-migration-state.txt"
+  local cqlsh="/opt/bitnami/cassandra/bin/cqlsh"
+
+  if ! kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
+    "$cqlsh" 127.0.0.1 9042 -u cassandra -p "$CASSANDRA_PASSWORD" \
+    -e "SELECT version, dirty FROM didcomm_space.schema_migrations;" \
+    >"$state_file" 2>/dev/null; then
+    return 0
+  fi
+
+  if ! grep -Eq '^[[:space:]]*1[[:space:]]*\|[[:space:]]*(True|true)[[:space:]]*$' "$state_file"; then
+    return 0
+  fi
+
+  emit_warning "DIDComm migration version 1 is marked dirty; stopping only the DIDComm workload and clearing its migration marker for an idempotent retry."
+
+  if kubectl -n "$NAMESPACE" get deployment didcomm-connector >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" scale deployment didcomm-connector --replicas=0 >/dev/null
+    kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=2m >/dev/null
+  fi
+
+  kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
+    "$cqlsh" 127.0.0.1 9042 -u cassandra -p "$CASSANDRA_PASSWORD" \
+    -e "DELETE FROM didcomm_space.schema_migrations WHERE version = 1;" \
+    >/dev/null
+}
+
 collect_external_ip() {
   local external
   external="$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
@@ -212,12 +265,15 @@ trap 'handle_error $LINENO' ERR
 cp -R "$SCRIPT_DIR"/. "$WORKDIR"/
 cd "$WORKDIR"
 
-for cmd in kubectl helm jq openssl curl; do
+for cmd in kubectl helm jq openssl curl node; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
 done
 
 record_phase "preflight" "running" "Validating kubeconfig, domain, namespace, and TLS material"
-bash "$SCRIPT_DIR/preflight.sh" "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE"
+bash "$SCRIPT_DIR/preflight.sh" \
+  "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE" \
+  "$USE_CUSTOM_CA_BUNDLE" "$CA_BUNDLE_PATH" \
+  "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK"
 record_phase "preflight" "done" "Input validation completed"
 
 record_phase "helm-bootstrap" "running" "Preparing Helm repositories and ingress controller"
@@ -227,54 +283,84 @@ helm repo add codecentric https://codecentric.github.io/helm-charts
 helm repo add hashicorp https://helm.releases.hashicorp.com
 helm repo update
 
-# Ingress NGINX install/patch (robust + idempotent)
-
-# 1) Ensure namespace exists
-kubectl get ns ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx
-
-# 2) Best-effort cleanup of leftover admission webhook jobs
-kubectl -n ingress-nginx delete job -l app.kubernetes.io/component=admission-webhook --ignore-not-found
-
-# 3) Apply a pinned ingress-nginx release (avoid 'main' drift)
+# ingress-nginx is shared cluster infrastructure. Installation, reconciliation,
+# controller ConfigMap changes, and restarts are performed only with explicit opt-in.
 NGINX_ING_VER="controller-v1.11.1"
 ING_URL="https://raw.githubusercontent.com/kubernetes/ingress-nginx/${NGINX_ING_VER}/deploy/static/provider/cloud/deploy.yaml"
-curl -fsSL "$ING_URL" | kubectl apply -f -
 
-# 4) Wait for the Deployment (safer than waiting on pods by selector)
-#    Handle initial creation race where the resource may not exist yet.
-for i in {1..30}; do
-  kubectl -n ingress-nginx get deploy/ingress-nginx-controller >/dev/null 2>&1 && break
-  sleep 2
-done
-kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=5m
+if [[ "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" == "true" ]]; then
+  emit_warning "Cluster-wide ingress-nginx admission webhook deletion is enabled by operator opt-in."
+  if kubectl get namespace ingress-nginx >/dev/null 2>&1; then
+    kubectl -n ingress-nginx delete job -l app.kubernetes.io/component=admission-webhook --ignore-not-found
+  fi
+else
+  emit_warning "Skipped ingress-nginx admission webhook deletion; opt-in is disabled."
+fi
 
-# 5) Best-effort: remove validating webhook if it hinders bootstrap
-kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found
+if [[ "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" == "true" ]]; then
+  emit_warning "Cluster-wide ingress-nginx installation/reconciliation and controller changes are enabled by operator opt-in."
+  kubectl get namespace ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx
+  curl -fsSL "$ING_URL" | kubectl apply -f -
 
-# 6) Make idempotent config changes and restart once
-#    Ensure the ConfigMap exists even if chart/manifests did not create it with data.
-kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n ingress-nginx patch configmap ingress-nginx-controller \
-  --type merge \
-  -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical","ssl-protocols":"TLSv1.3"}}' || true
+  for i in {1..30}; do
+    kubectl -n ingress-nginx get deployment/ingress-nginx-controller >/dev/null 2>&1 && break
+    sleep 2
+  done
+  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
 
-kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller
-kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=5m || true
-record_phase "helm-bootstrap" "done" "Ingress controller and Helm repositories are ready"
+  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n ingress-nginx patch configmap ingress-nginx-controller \
+    --type merge \
+    -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical","ssl-protocols":"TLSv1.3"}}'
+  kubectl -n ingress-nginx rollout restart deployment/ingress-nginx-controller
+  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
+else
+  emit_warning "Ingress controller management is disabled; validating the existing shared controller without modifying it."
+  kubectl get namespace ingress-nginx >/dev/null 2>&1 || {
+    echo "Existing ingress-nginx namespace was not found. Enable Ingress controller changes only with cluster-owner approval to install it." >&2
+    exit 1
+  }
+  kubectl -n ingress-nginx get deployment/ingress-nginx-controller >/dev/null
+  kubectl -n ingress-nginx get service/ingress-nginx-controller >/dev/null
+  kubectl get ingressclass nginx >/dev/null
+  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
+fi
+
+# Webhook deletion remains an independent, explicit cluster-wide opt-in.
+# It is intentionally performed after an opted-in controller reconciliation so
+# the applied ingress-nginx manifest cannot recreate it afterward.
+if [[ "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" == "true" ]]; then
+  kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found
+fi
+record_phase "helm-bootstrap" "done" "Ingress controller prerequisites are ready"
 
 record_phase "namespace" "running" "Creating namespace, TLS secret, and guardrails"
 ensure_namespace
 apply_namespace_guardrails
-kubectl create secret tls "$TLS_SECRET" \
-  --cert="$CERT_PATH" \
-  --key="$KEY_PATH" \
-  -n "$NAMESPACE" \
-  --dry-run=client -o yaml | kubectl apply -f -
+TLS_CERT_SOURCE="$CERT_PATH"
+TLS_SECRET_ARGS=(
+  kubectl create secret generic "$TLS_SECRET"
+  --type=kubernetes.io/tls
+  --from-file=tls.key="$KEY_PATH"
+  -n "$NAMESPACE"
+)
+
+if [[ "$USE_CUSTOM_CA_BUNDLE" == "true" ]]; then
+  TLS_CERT_SOURCE="$WORKDIR/tls-fullchain.crt"
+  cat "$CERT_PATH" > "$TLS_CERT_SOURCE"
+  printf '\n' >> "$TLS_CERT_SOURCE"
+  cat "$CA_BUNDLE_PATH" >> "$TLS_CERT_SOURCE"
+  TLS_SECRET_ARGS+=(--from-file=ca.crt="$CA_BUNDLE_PATH")
+  emit_event "namespace" "running" "Custom CA bundle enabled; adding ca.crt and full certificate chain"
+fi
+
+TLS_SECRET_ARGS+=(--from-file=tls.crt="$TLS_CERT_SOURCE")
+"${TLS_SECRET_ARGS[@]}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic signing \
   --from-file=signing-key="$KEY_PATH" \
   -n "$NAMESPACE" \
   --dry-run=client -o yaml | kubectl apply -f -
-record_phase "namespace" "done" "Namespace guardrails and TLS materials applied"
+record_phase "namespace" "done" "Namespace guardrails and TLS materials applied (custom CA bundle: ${USE_CUSTOM_CA_BUNDLE})"
 
 record_phase "nats" "running" "Deploying NATS"
 helm dependency build "./Nats Chart"
@@ -331,7 +417,7 @@ helm upgrade --install cassandra \
   --set image.tag=5.0.5-debian-12-r7 \
   --set global.security.allowInsecureImages=true
 
-CASSANDRA_PASSWORD="$(kubectl -n "$NAMESPACE" get secret cassandra -o jsonpath='{.data.cassandra-password}' | base64 -d)"
+CASSANDRA_PASSWORD="$(kubectl -n "$NAMESPACE" get secret cassandra -o jsonpath='{.data.cassandra-password}' | decode_base64)"
 kubectl -n "$NAMESPACE" wait --for=condition=ready pod cassandra-0 --timeout=10m
 ok=""
 for i in {1..60}; do
@@ -410,7 +496,7 @@ helm upgrade --install postgres \
 
 POSTGRES_ADMIN_PASSWORD="$({
   kubectl get secret -n "$NAMESPACE" postgres-postgresql \
-    -o jsonpath='{.data.postgres-password}' | base64 -d
+    -o jsonpath='{.data.postgres-password}' | decode_base64
 })"
 POSTGRES_POD="$({
   kubectl get pod -n "$NAMESPACE" \
@@ -441,11 +527,12 @@ helm upgrade --install keycloak "./Keycloak" \
   --set keycloak.resources.requests.memory=768Mi \
   --set keycloak.resources.limits.cpu=1500m \
   --set keycloak.resources.limits.memory=1536Mi \
-  --wait
+  --wait \
+  --timeout 20m
 mv ./Keycloak/values.yaml.bak ./Keycloak/values.yaml
 
 KC_POD="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')"
-PASS="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' | base64 -d)"
+PASS="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' | decode_base64)"
 KCADM_DIR="/tmp/kcadm"
 KCADM_CFG="$KCADM_DIR/kcadm.config"
 ok=""
@@ -533,14 +620,37 @@ kubectl delete clusterrolebinding vault-agent-injector-binding || true
 kubectl delete clusterrolebinding vault-server-binding || true
 kubectl delete mutatingwebhookconfiguration vault-agent-injector-cfg || true
 kubectl delete clusterrole vault-agent-injector-clusterrole || true
-helm upgrade --install vault hashicorp/vault --namespace "$NAMESPACE" \
-  -f "./Vault/values.yaml" --set "server.dev.enabled=true" --wait
 
-kubectl create secret generic vault --namespace "$NAMESPACE" \
-  --from-literal=token="root" \
-  --dry-run=client -o yaml | kubectl apply -f -
+VAULT_ROOT_TOKEN=""
+VAULT_TOKEN_B64="$(kubectl -n "$NAMESPACE" get secret vault -o jsonpath='{.data.token}' 2>/dev/null || true)"
+if [[ -n "$VAULT_TOKEN_B64" ]]; then
+  VAULT_ROOT_TOKEN="$(printf '%s' "$VAULT_TOKEN_B64" | decode_base64)"
+fi
+
+# Reuse only a token generated by this deployer. Rotate legacy fixed/default values.
+if [[ ! "$VAULT_ROOT_TOKEN" =~ ^[0-9a-f]{64}$ ]]; then
+  VAULT_ROOT_TOKEN="$(openssl rand -hex 32)"
+  kubectl create secret generic vault --namespace "$NAMESPACE" \
+    --from-literal=token="$VAULT_ROOT_TOKEN" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  emit_event "vault" "running" "Generated and persisted a new Vault root token in Kubernetes Secret vault"
+else
+  emit_event "vault" "running" "Reusing the persisted generated Vault root token"
+fi
+
+VAULT_RUNTIME_VALUES="$WORKDIR/vault-runtime-values.yaml"
+( umask 077; cat > "$VAULT_RUNTIME_VALUES" <<YAML
+server:
+  dev:
+    enabled: true
+    devRootToken: "${VAULT_ROOT_TOKEN}"
+YAML
+)
+
+helm upgrade --install vault hashicorp/vault --namespace "$NAMESPACE" \
+  -f "./Vault/values.yaml" -f "$VAULT_RUNTIME_VALUES" --wait
 kubectl -n "$NAMESPACE" wait --for=condition=ready pod vault-0 --timeout=10m
-VAULT_ENV='VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root'
+VAULT_ENV="VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
 # enable a TRANSIT engine at path 'tenant_space' and also the default 'transit' engine
 kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=tenant_space transit || true"
 kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable transit || true"
@@ -718,12 +828,17 @@ mv ./Well\ Known\ Ingress\ Rules/values.yaml.bak ./Well\ Known\ Ingress\ Rules/v
 record_phase "well-known" "done" "Well-known services deployed"
 
 record_phase "didcomm" "running" "Deploying DIDComm connector"
+repair_didcomm_dirty_migration
 sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Didcomm/values.yaml"
 sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Didcomm/values.yaml"
 helm dependency build "./Didcomm"
-helm upgrade --install didcomm "./Didcomm" --namespace "$NAMESPACE" -f "./Didcomm/values.yaml"
+helm upgrade --install didcomm "./Didcomm" \
+  --namespace "$NAMESPACE" \
+  -f "./Didcomm/values.yaml" \
+  --post-renderer "./Didcomm/didcomm-post-renderer.js"
 mv ./Didcomm/values.yaml.bak ./Didcomm/values.yaml
-record_phase "didcomm" "done" "DIDComm connector deployed"
+kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=15m
+record_phase "didcomm" "done" "DIDComm connector deployed and healthy"
 
 record_phase "smoke-tests" "running" "Verifying ingress, Keycloak connectivity, and stored secrets"
 post_deploy_smoke_checks
@@ -732,7 +847,7 @@ record_phase "smoke-tests" "done" "Smoke checks completed"
 OCM_URL="https://cloud-wallet.${DOMAIN}"
 KEYCLOAK_URL="https://auth-cloud-wallet.${DOMAIN}"
 EXTERNAL_IP="$(collect_external_ip)"
-CLIENT_SECRET="$(kubectl -n "$NAMESPACE" get secret ocm-keycloak-client -o jsonpath='{.data.clientSecret}' | base64 -d)"
+CLIENT_SECRET="$(kubectl -n "$NAMESPACE" get secret ocm-keycloak-client -o jsonpath='{.data.clientSecret}' | decode_base64)"
 DURATION_SECONDS="$(( $(date +%s) - START_TS ))"
 
 if (( DURATION_SECONDS > 600 )); then
