@@ -1,3 +1,18 @@
+
+function buildDeploymentEnv(config) {
+    const env = Object.assign({}, process.env);
+    const cfg = config || {};
+    const manageIngress = cfg.manageIngressNginx === true;
+    env.MANAGE_INGRESS_NGINX = manageIngress ? "true" : "false";
+    env.ALLOW_INGRESS_ADMISSION_WEBHOOK_DELETION = manageIngress && cfg.allowIngressAdmissionWebhookDeletion === true ? "true" : "false";
+    if (typeof cfg.caBundle === "string" && cfg.caBundle.trim()) {
+        env.ESB_CA_BUNDLE_B64 = Buffer.from(cfg.caBundle, "utf8").toString("base64");
+    } else {
+        delete env.ESB_CA_BUNDLE_B64;
+    }
+    return env;
+}
+
 module.exports = function(RED) {
   const { spawn } = require('child_process');
   const fs = require('fs');
@@ -20,11 +35,22 @@ module.exports = function(RED) {
     return String(value || '').trim().toLowerCase() === 'external' ? 'external' : 'embedded';
   }
 
-  function buildDeploymentPayload(stdout, domain) {
-    const aasAuthUrl = pickOutputValue(stdout, 'AAS_AUTH_URL') || pickOutputValue(stdout, 'AUTH_SERVER_URL');
+  function buildDeploymentPayload(stdout) {
+    const aasAuthUrl = pickOutputValue(stdout, 'AAS_AUTH_URL');
     const keyServerUrl = pickOutputValue(stdout, 'KEY_SERVER_URL');
-    const testUrl = pickOutputValue(stdout, 'TEST_URL') || (domain ? `https://test-server.${domain}/demo` : '');
-    const status = pickOutputValue(stdout, 'STATUS') || 'Deployed';
+    const testUrl = pickOutputValue(stdout, 'TEST_URL');
+    const status = pickOutputValue(stdout, 'STATUS');
+    const missing = [];
+    if (!aasAuthUrl) missing.push('AAS_AUTH_URL');
+    if (!keyServerUrl) missing.push('KEY_SERVER_URL');
+    if (!testUrl) missing.push('TEST_URL');
+    if (!status) missing.push('STATUS');
+    if (missing.length) {
+      throw new Error(`Deployment script completed without required output: ${missing.join(', ')}`);
+    }
+    if (status !== 'Deployed') {
+      throw new Error(`Deployment script returned unexpected status: ${status}`);
+    }
     const diagnostics = {
       keycloakAdminUsername: pickOutputValue(stdout, 'KEYCLOAK_ADMIN_USERNAME') || 'admin',
       keycloakRealm: pickOutputValue(stdout, 'KEYCLOAK_REALM') || 'gaia-x',
@@ -58,8 +84,9 @@ module.exports = function(RED) {
     try { return JSON.parse(line.slice('EVENT_JSON='.length)); } catch (error) { return null; }
   }
 
-  function runScriptStreaming(scriptPath, args, handlers, onDone) {
+  function runScriptStreaming(scriptPath, args, handlers, onDone, deploymentEnv) {
     const child = spawn('bash', [scriptPath].concat(args), {
+            env: deploymentEnv,
       cwd: __dirname,
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -87,6 +114,7 @@ module.exports = function(RED) {
   function DeployNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
+    const deploymentEnv = buildDeploymentEnv(config);
 
     const kubeContent = config.kubeconfigContent;
     const keyContent = config.privateKeyContent;
@@ -182,7 +210,19 @@ module.exports = function(RED) {
           return;
         }
 
-        const result = buildDeploymentPayload(stdout || '', domain);
+        let result;
+        try {
+          result = buildDeploymentPayload(stdout || '');
+        } catch (validationError) {
+          const errorMsg = maskSecrets(validationError.message);
+          node.error(errorMsg, msg);
+          node.status({ fill: 'red', shape: 'ring', text: 'invalid output' });
+          msg.payload = errorMsg;
+          msg.deploymentEvents = events;
+          send(msg);
+          if (done) done(validationError);
+          return;
+        }
         msg.payload = result.payload;
         msg.aasAuthUrl = result.payload.aasAuthUrl;
         msg.keyServerUrl = result.payload.keyServerUrl;
@@ -196,7 +236,7 @@ module.exports = function(RED) {
         node.status({ fill: 'green', shape: 'dot', text: result.payload.status || 'deployed' });
         send(msg);
         if (done) done();
-      });
+      }, deploymentEnv);
     });
 
     node.on('close', function(removed, done) {
@@ -215,7 +255,7 @@ module.exports = function(RED) {
       runScriptStreaming(uninstallScript, args, {}, () => {
         try { kubeTmp.removeCallback(); } catch (_) {}
         done();
-      });
+      }, deploymentEnv);
     });
   }
 

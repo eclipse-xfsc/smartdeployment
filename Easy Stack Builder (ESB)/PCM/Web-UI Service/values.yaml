@@ -34,6 +34,3 @@ ingress:
   tls:
     secretName: xfsc-wildcard
   annotations:
-    nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/auth-secret: web-ui-basic-auth
-    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"

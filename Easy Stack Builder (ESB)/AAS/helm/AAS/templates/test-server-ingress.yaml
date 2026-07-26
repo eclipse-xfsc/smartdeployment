@@ -1,0 +1,27 @@
+{{- if and .Values.testServer.enabled .Values.testServer.ingress.enabled .Values.testServer.ingress.host }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-server
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  {{- if .Values.testServer.ingress.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ .Values.testServer.ingress.host | quote }}
+      secretName: {{ .Values.testServer.ingress.tlsSecretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.testServer.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: test-server
+                port:
+                  number: {{ .Values.testServer.service.port }}
+{{- end }}

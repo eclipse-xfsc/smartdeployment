@@ -373,7 +373,7 @@
   "webAuthnPolicyCreateTimeout": 0,
   "webAuthnPolicyAvoidSameAuthenticatorRegister": false,
   "webAuthnPolicyAcceptableAaguids": [],
-  "webAuthnPolicyPasswordlessRpEntityName": "keycloak",
+  "webAuthnPolicyPasswordlessRpEntityName": "",
   "webAuthnPolicyPasswordlessSignatureAlgorithms": [
     "ES256"
   ],
@@ -889,7 +889,7 @@
               "resources": "[\"Read Resource\"]",
               "applyPolicies": "[]"
             }
-          }          
+          }
         ],
         "scopes": [],
         "decisionStrategy": "UNANIMOUS"
@@ -1602,7 +1602,7 @@
         "authorizationUrl": "https://auth-server.DOMAIN/oauth2/authorize",
         "clientAuthMethod": "client_secret_basic",
         "syncMode": "IMPORT",
-        "clientSecret": "secret",
+        "clientSecret": "",
         "defaultScope": "openid profile email"
       }
     },
@@ -1627,7 +1627,7 @@
         "authorizationUrl": "https://auth-server.DOMAIN/oauth2/authorize",
         "clientAuthMethod": "client_secret_basic",
         "syncMode": "IMPORT",
-        "clientSecret": "secret2",
+        "clientSecret": "",
         "defaultScope": "openid profile email",
         "issuer": "https://auth-server.DOMAIN",
         "useJwksUrl": "true"

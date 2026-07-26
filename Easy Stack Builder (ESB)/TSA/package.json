@@ -1,7 +1,7 @@
 {
   "name": "orce-esb-tsastack",
-  "version": "12.1.0",
-  "description": "FACIS TSA builder node aligned to the TSA SRS output contract, deployment guardrails, and trust configuration",
+  "version": "12.1.9",
+  "description": "FACIS TSA builder node with opt-in ingress changes, secure Vault token generation, service-endpoint-only health acceptance, and bounded runtime evidence persistence",
   "dependencies": {
     "tmp": "^0.2.1"
   },
@@ -22,5 +22,10 @@
   "engines": {
     "node": ">=14.0.0",
     "node-red": ">=3.0.0"
+  },
+  "scripts": {
+    "test": "bash test/static-validate.sh",
+    "test:runtime": "bash test/runtime-health.sh",
+    "test:bdd": "bash test/bdd/run-bdd.sh"
   }
 }

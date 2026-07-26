@@ -11,6 +11,19 @@ keycloak:
       name: xfsc-themes
       subPath: themes
   replicaCount: 1
+  # Allow the initial Quarkus build/startup to complete before liveness checks can restart Keycloak.
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 90
+    successThreshold: 1
+  # The startup probe gates liveness/readiness; their delays begin after startup succeeds.
+  livenessProbe:
+    initialDelaySeconds: 0
+  readinessProbe:
+    initialDelaySeconds: 0
   extraEnvVars:
     - name: KC_HOSTNAME_URL
       value: https://auth-cloud-wallet.DOMAIN

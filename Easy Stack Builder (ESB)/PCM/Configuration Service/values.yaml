@@ -5,7 +5,7 @@ configuration-service:
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/common-services
     name: configuration-service
-    tag: "main"
+    tag: "v1.0.0"
     sha: ""
     pullPolicy: IfNotPresent
 

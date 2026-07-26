@@ -183,7 +183,8 @@ module.exports = function(RED) {
         String(config.policyRepoFolder || '').trim(),
         normalizeBoolean(config.eidasCompliance) ? 'true' : 'false',
         trustKeyTmp ? trustKeyTmp.name : '',
-        trustChainTmp ? trustChainTmp.name : ''
+        trustChainTmp ? trustChainTmp.name : '',
+        normalizeBoolean(config.patchIngressNginx) ? 'true' : 'false'
       ];
       const events = [];
       const preflightScript = path.join(__dirname, 'preflight.sh');

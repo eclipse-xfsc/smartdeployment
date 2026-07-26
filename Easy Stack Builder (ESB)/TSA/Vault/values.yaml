@@ -3,9 +3,9 @@ vault:
     enabled: true
   server:
     enabled: true
-    dev: 
+    dev:
       enabled: true
-      devRootToken: root
+      # devRootToken is injected at deployment time from a generated Kubernetes Secret.
 
     ha:
       enabled: false

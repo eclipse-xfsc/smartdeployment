@@ -3,9 +3,6 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-web-ui-ingress
   annotations:
-    nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/auth-secret: web-ui-basic-auth
-    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
 spec:
   ingressClassName: nginx
   rules:

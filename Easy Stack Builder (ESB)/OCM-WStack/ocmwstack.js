@@ -12,6 +12,10 @@ module.exports = function(RED) {
     const kubeContent = config.kubeconfigContent;
     const keyContent = config.privateKeyContent;
     const crtContent = config.certificateContent;
+    const useCustomCaBundle = config.useCustomCaBundle === true || config.useCustomCaBundle === 'true';
+    const enableIngressNginxClusterConfig = config.enableIngressNginxClusterConfig === true || config.enableIngressNginxClusterConfig === 'true';
+    const deleteIngressNginxAdmissionWebhook = config.deleteIngressNginxAdmissionWebhook === true || config.deleteIngressNginxAdmissionWebhook === 'true';
+    const caBundleContent = config.caBundleContent || '';
     const domain = config.domainAddress;
     const suffix = config.instanceName;
     const email = config.emailAddress;
@@ -26,12 +30,18 @@ module.exports = function(RED) {
       const crtTmp = tmp.fileSync({ prefix: 'crt-', postfix: '.crt' });
       fs.writeFileSync(crtTmp.name, crtContent, { encoding: 'utf8', mode: 0o600 });
 
-      return { kubeTmp, keyTmp, crtTmp };
+      let caTmp = null;
+      if (useCustomCaBundle) {
+        caTmp = tmp.fileSync({ prefix: 'ca-bundle-', postfix: '.crt' });
+        fs.writeFileSync(caTmp.name, caBundleContent, { encoding: 'utf8', mode: 0o600 });
+      }
+
+      return { kubeTmp, keyTmp, crtTmp, caTmp };
     }
 
     function cleanupTempFiles(files) {
       if (!files) return;
-      for (const handle of [files.kubeTmp, files.keyTmp, files.crtTmp]) {
+      for (const handle of [files.kubeTmp, files.keyTmp, files.crtTmp, files.caTmp]) {
         try {
           if (handle && typeof handle.removeCallback === 'function') handle.removeCallback();
         } catch (_) {
@@ -76,8 +86,8 @@ module.exports = function(RED) {
     node.on('input', function(msg, send, done) {
       send = send || node.send;
 
-      if (!suffix || !domain || !email || !kubeContent || !keyContent || !crtContent) {
-        const err = new Error('Missing required configuration (instanceName, domain, email, kubeconfig, key, certificate).');
+      if (!suffix || !domain || !email || !kubeContent || !keyContent || !crtContent || (useCustomCaBundle && !caBundleContent.trim())) {
+        const err = new Error('Missing required configuration (instanceName, domain, email, kubeconfig, key, certificate, and CA bundle when enabled).');
         node.error(err.message, msg);
         node.status({ fill: 'red', shape: 'ring', text: 'missing config' });
         msg.payload = err.message;
@@ -99,7 +109,18 @@ module.exports = function(RED) {
       }
 
       const deployScript = path.join(__dirname, 'deploy.sh');
-      const args = [suffix, domain, tempFiles.crtTmp.name, tempFiles.keyTmp.name, email, tempFiles.kubeTmp.name];
+      const args = [
+        suffix,
+        domain,
+        tempFiles.crtTmp.name,
+        tempFiles.keyTmp.name,
+        email,
+        tempFiles.kubeTmp.name,
+        useCustomCaBundle ? 'true' : 'false',
+        tempFiles.caTmp ? tempFiles.caTmp.name : '',
+        enableIngressNginxClusterConfig ? 'true' : 'false',
+        deleteIngressNginxAdmissionWebhook ? 'true' : 'false'
+      ];
       const child = spawn('bash', [deployScript, ...args], {
         cwd: __dirname,
         stdio: ['ignore', 'pipe', 'pipe']

@@ -38,15 +38,14 @@ The workspace supports two database strategies:
 - **Embedded deploy** installs PostgreSQL inside the target namespace and bootstraps the `aas` database automatically.
 - **External DB** connects AAS to an already existing PostgreSQL instance using a JDBC URL, username, and password supplied through the editor.
 
-At the end of a successful deployment, the node returns a structured output containing:
+At the end of a successful deployment, the node returns the SRS output contract:
 
-- `authServerUrl`
+- `aasAuthUrl`
 - `keyServerUrl`
-- `keycloakAdminUsername`
-- `keycloakAdminPassword`
-- `iatToken`
+- `testUrl`
+- `status`
 
-This makes the node useful not only for infrastructure provisioning, but also as a handoff point for downstream automation flows that need the resulting AAS endpoints and bootstrap credentials.
+Generated credentials and the initial access token remain in Kubernetes Secrets. The node returns only non-secret diagnostics such as the Keycloak realm and the Secret name that holds the initial access token.
 
 ---
 
@@ -64,7 +63,7 @@ You'll need:
 1.3. Required CLI tooling installed on the machine running ORCE / ORCE
 
 ### 1.1. Kubernetes
-The **AAS-Stack** node requires a working Kubernetes cluster that is reachable through a valid kubeconfig file. The deployment script installs or repairs `ingress-nginx` automatically, so the cluster user must have sufficient permissions to create namespaces, secrets, deployments, ingresses, configmaps, and cluster-scoped ingress resources.
+The **AAS-Stack** node requires a working Kubernetes cluster that is reachable through a valid kubeconfig file. Cluster-scoped `ingress-nginx` management is disabled by default. In that mode the deployer performs read-only prerequisite, certificate-chain, and server-side admission checks before creating AAS resources. Enabling **Manage ingress-nginx** explicitly authorizes controller reconciliation and direct regeneration of a mismatched or expired `ingress-nginx-admission` certificate and CA bundle. The repair does not depend on the upstream admission create/patch Jobs completing. A second, separately disabled checkbox permits deletion of the validating webhook only as an emergency fallback when regeneration still cannot restore admission.
 
 You also need TLS material for the domain you want to expose. The script creates a TLS secret named `xfsc-wildcard` in the target namespace and uses it for both Keycloak and AAS ingresses.
 
@@ -172,26 +171,25 @@ Now trigger the flow using the inject node.
 During deployment, the node status changes to indicate progress. Internally, the backend runs `deploy.sh` with the collected configuration and waits until Keycloak and AAS are reachable.
 
 ### 7. Read the deployment output
-On success, the node emits a structured payload to the debug node. The payload contains:
+On success, the node emits the validated SRS output contract:
 
 ```json
 {
-  "authServerUrl": "https://auth-server.<DOMAIN>",
+  "aasAuthUrl": "https://auth-server.<DOMAIN>",
   "keyServerUrl": "https://key-server.<DOMAIN>",
-  "keycloakAdminUsername": "admin",
-  "keycloakAdminPassword": "<generated-password>",
-  "iatToken": "<initial-access-token>"
+  "testUrl": "https://test-server.<DOMAIN>/demo",
+  "status": "Deployed"
 }
 ```
 
-These values are extracted from the deployment logs and attached both to `msg.payload` and as convenience properties on the outbound message.
+The output is emitted only after required workloads are Ready and the configured HTTPS health endpoints are reachable. No authentication workflow is executed. Generated credentials are not emitted.
 
 ### 8. Remove your instance
 To remove an AAS deployment, click the trash icon next to the **AAS-Stack** node and then deploy the flow again.
 
 This triggers `uninstall.sh`, which deletes the target namespace forcefully.
 
-**Important:** the uninstall step removes the namespace created for the AAS instance, but it does **not** undo all cluster-level changes performed by `deploy.sh` such as the installed or repaired `ingress-nginx` controller. If you want complete cluster rollback, you must clean up those shared components manually.
+**Important:** the uninstall step removes the AAS namespace but does not reverse explicitly authorized cluster-scoped `ingress-nginx` changes. Shared-controller rollback remains an operator action.
 
 ---
 
@@ -223,18 +221,27 @@ Before deployment, provide the following values in the node editor:
 
 9. **External DB password** *(external mode only)*
 
+10. **Manage ingress-nginx** *(optional, default off)*  
+    Explicitly authorizes cluster-scoped controller reconciliation and direct regeneration of the ingress admission certificate, Secret, and validating-webhook CA bundle when the existing trust chain is broken. Existing certificate Jobs are not used as a success gate.
+
+11. **Delete admission webhook** *(optional, default off)*  
+    Emergency fallback available only when ingress management is enabled. Leave it off for the first retry; enable it only when automatic certificate regeneration fails and cluster policy permits temporarily bypassing ingress admission.
+
+12. **Trusted CA bundle** *(optional)*  
+    PEM CA bundle for outbound HTTPS health probes. It does not change Kubernetes admission-webhook trust.
+
 ### Public endpoints created by the deployment
 
 - **Auth Server** → `https://auth-server.<DOMAIN>`
 - **Key Server / Keycloak** → `https://key-server.<DOMAIN>`
+- **Test Server** → `https://test-server.<DOMAIN>/demo`
 
 ### Runtime output returned by the node
 
-- `authServerUrl`
+- `aasAuthUrl`
 - `keyServerUrl`
-- `keycloakAdminUsername`
-- `keycloakAdminPassword`
-- `iatToken`
+- `testUrl`
+- `status`
 
 ---
 
@@ -266,7 +273,7 @@ Before deployment, provide the following values in the node editor:
 │       ├── templates
 │       │   └── secret.yaml
 │       └── values.yaml
-├── orce-esb-aasstack-6.0.0.tgz
+├── orce-esb-aasstack-6.0.5.tgz
 ├── package.json
 ├── scripts
 │   ├── deploy.sh
@@ -284,13 +291,13 @@ Before deployment, provide the following values in the node editor:
   Helm chart and realm bootstrap assets for the identity provider layer. This directory contains the Keycloak values and the imported `gaia-x` realm configuration used during deployment.
 
 - **aas.js**  
-  ORCE backend implementation. It validates the editor configuration, writes temporary kubeconfig / certificate / key files, invokes `deploy.sh`, parses deployment output, and returns the final URLs and tokens through the outbound message.
+  ORCE backend implementation. It validates editor configuration, writes mode-0600 temporary inputs, invokes `deploy.sh`, validates the required output contract, and returns endpoint metadata without exposing generated credentials.
 
 - **aas.html**  
   ORCE editor UI. It provides the front-end form for instance name, domain, kubeconfig, TLS files, database mode selection, and optional external PostgreSQL credentials.
 
 - **deploy.sh**  
-  Main deployment script. It prepares or repairs `ingress-nginx`, creates the target namespace and TLS secret, handles embedded or external PostgreSQL mode, templates Keycloak and AAS values, imports the realm, generates an initial access token, and installs the final AAS release.
+  Main deployment script. It enforces the ingress opt-in boundary, validates the admission-webhook TLS chain, creates the target namespace and TLS Secret, handles embedded or external PostgreSQL mode, renders deployment-specific values into mode-0600 temporary files, imports the realm, generates an initial access token, and installs the AAS services.
 
 - **uninstall.sh**  
   Teardown script. It force deletes the target namespace associated with the instance.
@@ -339,3 +346,26 @@ tr
 
 This project is licensed under the Apache License 2.0.  
 See the [LICENSE](../LICENSE) file for details.
+
+## QA remediation deployment controls
+
+- HTTPS probes and administrative REST calls verify TLS by default. Supply the optional Node-RED **Trusted CA bundle** field for a private CA; leaving it empty uses the system trust store.
+- Cluster-scoped ingress-nginx reconciliation is disabled by default and must be selected explicitly in the Node-RED editor. Under that opt-in, a broken admission certificate is regenerated and verified before any AAS Helm release is applied. Admission-webhook deletion is a separate emergency fallback and remains disabled by default.
+- The Trusted CA bundle is used only for verified outbound HTTPS probes; it cannot repair Kubernetes API-server trust for the ingress admission webhook.
+- Preflight checks authenticated Kubernetes API reachability only. It does not reject a cluster because of kubectl/server minor-version skew, and ingress admission repair does not wait for the upstream certificate Jobs.
+- The project-owner-approved AAS image source remains `registry.gitlab.com/gaia-x/data-infrastructure-federation-services/authenticationauthorization/auth-service-image:latest`; the general NF-10 immutable-tag rule is explicitly excepted only for this exact image.
+- Runtime health tests validate only Kubernetes/service health and readiness; they do not exercise application business workflows.
+
+## Executable BDD and runtime evidence
+
+The package includes a health-only acceptance pack under `test/bdd` and an evidence collector under `test/evidence`. The tooling is run separately from deployment and does not alter the AAS deployment flow. It validates namespace/workload readiness and, when supplied, an endpoint over verified TLS. It does not execute OIDC, SIOP, login, token-exchange, or authorization workflows.
+
+Example:
+
+```bash
+./test/evidence/collect-runtime-evidence.sh \
+  --namespace <aas-namespace> \
+  --url https://test-server.<domain>/demo \
+  --kubeconfig <kubeconfig> \
+  --ca-bundle <ca.pem>
+```
