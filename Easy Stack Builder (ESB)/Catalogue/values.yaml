@@ -133,7 +133,7 @@ env:
   - name: GRAPHSTORE_QUERY_TIMEOUT_IN_SECONDS
     value: "5"
   - name: GRAPHSTORE_PASSWORD
-    value: neo12345
+    value: "[Neo4j_Password]"
 #    valueFrom:
 #      secretKeyRef:
 #        name: fc-neo4j-secret
@@ -163,19 +163,19 @@ postgresql:
   fullnameOverride: fc-postgres
   nameOverride: fc-postgres
   auth:
-    postgresPassword: postgres
+    postgresPassword: "[Postgres_Admin_Password]"
     username: keycloak
-    password: keycloak
+    password: "[Keycloak_DB_Password]"
     database: keycloak
   primary:
     persistence:
       enabled: true
     initdb:
       user: postgres
-      password: postgres
+      password: "[Postgres_Admin_Password]"
       scripts:
         00_init_keycloak.sql: |
-          CREATE USER keycloak WITH PASSWORD 'keycloak';
+          CREATE USER keycloak WITH PASSWORD '[Keycloak_DB_Password]';
           CREATE DATABASE "keycloak" WITH OWNER keycloak;
           GRANT ALL PRIVILEGES ON DATABASE keycloak TO $POSTGRES_USER;
 
@@ -246,7 +246,7 @@ neo4j:
   fullnameOverride: fc-neo4j
   neo4j:
     name: fc-neo4j-db
-    password: "neo12345"
+    password: "[Neo4j_Password]"
   volumes:
     data:
       mode: defaultStorageClass

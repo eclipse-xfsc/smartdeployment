@@ -633,7 +633,6 @@
       "enabled": true,
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
-      "secret": "**********",
       "redirectUris": [
         "http://78.138.66.147:8088/*",
         "https://fc-demo-server.gxfs.dev/*",

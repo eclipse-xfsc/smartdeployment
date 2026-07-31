@@ -10,6 +10,7 @@ log() {
 
 usage() {
   echo "Usage: $0 <kubeconfig> <private_key_path> <crt_path> <domain> <path> <admin_user> <admin_pass> <new_user> <new_pass>"
+  echo "Optional: set CA_BUNDLE_FILE=/path/to/ca-bundle.pem for private/internal CAs."
   exit 1
 }
 
@@ -31,6 +32,17 @@ NEW_USER="$8"
 NEW_PASS="$9"
 export KUBECONFIG="$KUBECONFIG_FILE"
 
+# Verified TLS is the default. For private/internal PKI, provide a CA bundle
+# through CA_BUNDLE_FILE instead of disabling certificate verification.
+CURL_TLS_ARGS=(--silent --show-error)
+if [[ -n "${CA_BUNDLE_FILE:-}" ]]; then
+  if [[ ! -r "$CA_BUNDLE_FILE" ]]; then
+    log "❌ CA bundle is not readable: $CA_BUNDLE_FILE"
+    exit 1
+  fi
+  CURL_TLS_ARGS+=(--cacert "$CA_BUNDLE_FILE")
+fi
+
 # cleanup local helm artifacts
 if [ -f Chart.lock ]; then
   rm Chart.lock
@@ -45,7 +57,7 @@ fi
 #----------------------------------------
 # Check dependencies
 #----------------------------------------
-for cmd in kubectl helm jq curl; do
+for cmd in kubectl helm jq curl openssl; do
   if ! command -v "$cmd" &>/dev/null; then
     log "❌ '$cmd' is not installed. Please install it and retry."
     exit 1
@@ -98,7 +110,7 @@ if kubectl get ns "$NAMESPACE" &>/dev/null; then
   echo "🔹 Keycloak URL:        https://${DOMAIN}/${URL_PATH}/key-server"
 
   TOKEN_URL="https://${DOMAIN}/${URL_PATH}/key-server/realms/master/protocol/openid-connect/token"
-  ACCESS_TOKEN=$(curl -k -s \
+  ACCESS_TOKEN=$(curl "${CURL_TLS_ARGS[@]}" \
     -X POST "$TOKEN_URL" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=admin-cli" \
@@ -107,10 +119,10 @@ if kubectl get ns "$NAMESPACE" &>/dev/null; then
     -d "grant_type=password" | jq -r .access_token)
 
   REALM_API="https://${DOMAIN}/${URL_PATH}/key-server/admin/realms/gaia-x"
-  CLIENT_ID=$(curl -k -s \
+  CLIENT_ID=$(curl "${CURL_TLS_ARGS[@]}" \
     -X GET "${REALM_API}/clients?clientId=federated-catalogue" \
     -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r '.[0].id')
-  EXISTING_SECRET=$(curl -k -s \
+  EXISTING_SECRET=$(curl "${CURL_TLS_ARGS[@]}" \
     -X GET "${REALM_API}/clients/${CLIENT_ID}/client-secret" \
     -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r .value)
 
@@ -122,11 +134,18 @@ fi
 #----------------------------------------
 # Prepare temporary values file
 #----------------------------------------
-TMP_VALUES="$(mktemp /tmp/values.XXXXXX)"
-TMP_VALUES="${TMP_VALUES}.yaml"
+TMP_VALUES="$(mktemp /tmp/values.XXXXXX.yaml)"
 trap 'rm -f "$TMP_VALUES"' EXIT
 
 cp values.yaml "$TMP_VALUES"
+chmod 600 "$TMP_VALUES"
+
+# Generate per-deployment credentials; no database or graph-store passwords are
+# committed to values.yaml or reused between independent deployments.
+POSTGRES_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+KEYCLOAK_DB_PASSWORD="$(openssl rand -hex 24)"
+NEO4J_PASSWORD="$(openssl rand -hex 24)"
+
 log "ℹ Replacing placeholders in $TMP_VALUES"
 sed -i \
   -e "s|\[domain-name\]|${DOMAIN}|g" \
@@ -134,6 +153,9 @@ sed -i \
   -e "s|\[namespace\]|${NAMESPACE}|g" \
   -e "s|\[Keycloak_Admin_Username\]|${ADMIN_USER}|g" \
   -e "s|\[Keycloak_Admin_Password\]|${ADMIN_PASS}|g" \
+  -e "s|\[Postgres_Admin_Password\]|${POSTGRES_ADMIN_PASSWORD}|g" \
+  -e "s|\[Keycloak_DB_Password\]|${KEYCLOAK_DB_PASSWORD}|g" \
+  -e "s|\[Neo4j_Password\]|${NEO4J_PASSWORD}|g" \
   "$TMP_VALUES"
 log "✅ Placeholders replaced in $TMP_VALUES"
 #----------------------------------------
@@ -217,7 +239,7 @@ log "✅ Keycloak StatefulSet is ready"
 # Wait for HTTP endpoint
 #----------------------------------------
 log "ℹ Waiting for Keycloak HTTP endpoint to respond..."
-until curl -k -s -o /dev/null -w "%{http_code}" \
+until curl "${CURL_TLS_ARGS[@]}" -o /dev/null -w "%{http_code}" \
   "https://${DOMAIN}/${URL_PATH}/key-server/realms/master" | grep -q '^200$'; do
   log "⏳ Keycloak not ready yet, retrying in 5s..."
   sleep 5
@@ -234,7 +256,7 @@ ENCODED_PASS=$(jq -rn --arg x "$ADMIN_PASS" '$x|@uri')
 TOKEN_URL="https://${DOMAIN}/${URL_PATH}/key-server/realms/master/protocol/openid-connect/token"
 
 log "ℹ Requesting access token..."
-TOKEN_RESP=$(curl -k -s -w "HTTPSTATUS:%{http_code}" -X POST "$TOKEN_URL" \
+TOKEN_RESP=$(curl "${CURL_TLS_ARGS[@]}" -w "HTTPSTATUS:%{http_code}" -X POST "$TOKEN_URL" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "client_id=admin-cli" \
   -d "username=${ADMIN_USER}" \
@@ -254,7 +276,7 @@ log "✅ Access token received"
 # Keycloak API: remove passwordPolicy
 #----------------------------------------
 REALM_API="https://${DOMAIN}/${URL_PATH}/key-server/admin/realms/$REALMNAME"
-REALM_RESP=$(curl -k -s -w "HTTPSTATUS:%{http_code}" -X GET "$REALM_API" \
+REALM_RESP=$(curl "${CURL_TLS_ARGS[@]}" -w "HTTPSTATUS:%{http_code}" -X GET "$REALM_API" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json")
 REALM_BODY=$(echo "$REALM_RESP" | sed -e 's/HTTPSTATUS:.*//g')
@@ -265,7 +287,7 @@ if [[ "$REALM_STATUS" -ne 200 ]]; then
   exit 1
 fi
 REALM_NO_POLICY=$(echo "$REALM_BODY" | jq '.passwordPolicy = ""')
-UPDATE_RESP=$(curl -k -s -w "HTTPSTATUS:%{http_code}" -X PUT "$REALM_API" \
+UPDATE_RESP=$(curl "${CURL_TLS_ARGS[@]}" -w "HTTPSTATUS:%{http_code}" -X PUT "$REALM_API" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   --data "$REALM_NO_POLICY")
@@ -281,18 +303,28 @@ fi
 #----------------------------------------
 # Keycloak API: client ID & secret
 #----------------------------------------
-CLIENT_ID=$(curl -k -s -X GET \
+CLIENT_ID=$(curl "${CURL_TLS_ARGS[@]}" -X GET \
   "${REALM_API}/clients?clientId=${CLIENT_NAME}" \
   -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r '.[0].id')
-NEW_SECRET=$(curl -k -s -X POST \
+NEW_SECRET=$(curl "${CURL_TLS_ARGS[@]}" -X POST \
   "${REALM_API}/clients/${CLIENT_ID}/client-secret" \
   -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r .value)
-log "✅ New client secret generated"
+if [[ -z "$NEW_SECRET" || "$NEW_SECRET" == "null" ]]; then
+  log "❌ Keycloak did not return a client secret"
+  exit 1
+fi
+
+kubectl create secret generic fc-keycloak-client-secret \
+  --namespace "$NAMESPACE" \
+  --from-literal=keycloak_client_secret="$NEW_SECRET" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deployment/fc-service -n "$NAMESPACE"
+log "✅ New client secret generated and synchronized"
 
 #----------------------------------------
 # Keycloak API: create user & assign role
 #----------------------------------------
-CREATE_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" -X POST \
+CREATE_STATUS=$(curl "${CURL_TLS_ARGS[@]}" -o /dev/null -w "%{http_code}" -X POST \
   "${REALM_API}/users" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -307,13 +339,13 @@ else
   log "✅ User '${NEW_USER}' created"
 fi
 
-USER_ID=$(curl -k -s -X GET \
+USER_ID=$(curl "${CURL_TLS_ARGS[@]}" -X GET \
   "${REALM_API}/users?username=${NEW_USER}" \
   -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r '.[0].id')
-ROLE_ID=$(curl -k -s -X GET \
+ROLE_ID=$(curl "${CURL_TLS_ARGS[@]}" -X GET \
   "${REALM_API}/clients/${CLIENT_ID}/roles" \
   -H "Authorization: Bearer $ACCESS_TOKEN" | jq -r ".[]|select(.name==\"${CLIENT_ROLE}\")|.id")
-curl -k -s -o /dev/null -w "%{http_code}" -X POST \
+curl "${CURL_TLS_ARGS[@]}" -o /dev/null -w "%{http_code}" -X POST \
   "${REALM_API}/users/${USER_ID}/role-mappings/clients/${CLIENT_ID}" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
