@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "12.3.18",
+  "version": "12.4.0",
   "description": "ESB wrapper for the official eclipse-xfsc/deployment bootstrap procedure",
   "license": "Apache-2.0",
   "engines": {
@@ -15,7 +15,8 @@
   "files": [
     "ocmwstack.js",
     "ocmwstack.html",
-    "lib",
+    "deploy.sh",
+    "deployment",
     "scripts",
     "upstream-lock.json",
     "README.md",
@@ -38,9 +39,9 @@
     "eslint.config.mjs"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js test/runtime/*.test.cjs",
+    "test": "node --test test/deployment/*.test.cjs test/runtime/*.test.cjs",
     "test:helm": "python3 test/render.py",
-    "check": "node scripts/cli.js check",
+    "check": "bash deploy.sh check",
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "test:ui": "node --test test/ui/dom-smoke.cjs",
     "build:release": "python3 scripts/build-release.py",
@@ -48,10 +49,11 @@
     "build:ui": "npm --prefix ui run build",
     "verify:source": "node scripts/verify-source.js",
     "verify:code": "node scripts/verify-code.js",
-    "format:check": "prettier --check lib runtime/lib runtime/nodes ui/src scripts test/runtime",
+    "format:check": "prettier --check ocmwstack.js ocmwstack.html runtime/lib runtime/nodes ui/src scripts test/runtime",
     "lint": "eslint runtime/lib runtime/nodes ui/src",
     "typecheck": "vue-tsc --noEmit -p ui/tsconfig.json",
-    "test:bdd": "node --test test/bdd/*.test.cjs"
+    "test:bdd": "node --test test/bdd/*.test.cjs",
+    "test:recovery": "python3 test/retrieval-recovery.py"
   },
   "keywords": [
     "node-red",

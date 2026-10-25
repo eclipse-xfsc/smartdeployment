@@ -20,6 +20,27 @@ for (const file of files) {
     if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
     checked++;
   }
+  if (file.endsWith('.sh')) {
+    const result = spawnSync('bash', ['-n', file], { encoding: 'utf8' });
+    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    checked++;
+  }
+  if (file.endsWith('.jq')) {
+    const name = path.basename(file, '.jq');
+    const result = spawnSync('jq', ['-n', '-L', path.dirname(file), `include "${name}"; null`], { encoding: 'utf8' });
+    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    checked++;
+  }
+  if (file === path.join(root, 'ocmwstack.html')) {
+    const source = fs.readFileSync(file, 'utf8');
+    const script = source.match(/<script type="text\/javascript">([\s\S]*?)<\/script>/)?.[1];
+    if (!script) { console.error('Missing editor script'); process.exitCode = 1; }
+    else {
+      const result = spawnSync(process.execPath, ['--check'], { input: script, encoding: 'utf8' });
+      if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+      checked++;
+    }
+  }
   if (file.endsWith('.json')) {
     try { JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { console.error(file, error.message); process.exitCode = 1; }
   }

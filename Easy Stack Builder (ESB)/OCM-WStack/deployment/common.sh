@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Shared process, JSON and file handling for the deployment procedure.
+
+umask 077
+CURRENT_PID=
+LEASE_PID=
+TUNNEL_PIDS=()
+OWNS_WORKDIR=false
+RESULT_WRITTEN=false
+
+timestamp() {
+    date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+emit() {
+    # FD 3 carries progress independently of a function's captured stdout.
+    jq -cn --arg timestamp "$(timestamp)" --argjson event "$1" \
+        '$event + {timestamp:$timestamp}' >&3
+}
+
+phase() {
+    emit "$(jq -cn --arg phase "$1" '{type:"phase",phase:$phase}')"
+}
+
+fail() {
+    local code=$1 message=$2
+    jq -cn --arg code "$code" --arg message "$message" \
+        '{status:"failed",code:$code,message:$message}' >"$WORKDIR/error.json"
+    return 1
+}
+
+config_value() {
+    jq -r "$1" "$CONFIG"
+}
+
+optional_value() {
+    jq -r "$1 // empty" "$CONFIG"
+}
+
+update_config() {
+    local filter=$1
+    shift
+    jq "$@" "$filter" "$CONFIG" >"$WORKDIR/config.next.json"
+    mv "$WORKDIR/config.next.json" "$CONFIG"
+}
+
+json_program() {
+    local expression=$1
+    shift
+    jq -L "$DEPLOYMENT" "include \"values\"; $expression" "$@"
+}
+
+safe_error() {
+    local file=$1
+    # API errors can echo Secret objects. Only report a classified diagnostic.
+    if grep -Eiq 'unauthorized|authentication required' "$file"; then printf 'authentication failed';
+    elif grep -iq forbidden "$file"; then printf 'access was denied';
+    elif grep -Eiq 'x509:|certificate verify' "$file"; then printf 'certificate verification failed';
+    elif grep -Eiq 'pending-|another operation' "$file"; then printf 'another Helm operation is pending';
+    elif grep -Eiq 'timed out|timeout|context deadline' "$file"; then printf 'request timed out';
+    elif grep -Eiq 'Conflict|object has been modified|test failed' "$file"; then printf 'the resource changed during the operation';
+    elif grep -Eiq 'not found|NotFound' "$file"; then printf 'the requested resource was not found';
+    else printf 'command returned an error'; fi
+}
+
+run_capture() {
+    local output=$1 seconds=$2
+    shift 2
+    local error_file status=0
+    error_file=$(mktemp "$WORKDIR/command-error.XXXXXX")
+    timeout -s TERM -k 3 "$seconds" "$@" <&0 >"$output" 2>"$error_file" &
+    CURRENT_PID=$!
+    wait "$CURRENT_PID" || status=$?
+    CURRENT_PID=
+    LAST_ERROR=$error_file
+    LAST_STATUS=$status
+    if ((status != 0)); then
+        return "$status"
+    fi
+}
+
+run() {
+    local seconds=$1
+    shift
+    local output
+    output=$(mktemp "$WORKDIR/command-output.XXXXXX")
+    if ! run_capture "$output" "$seconds" "$@"; then
+        fail COMMAND_FAILED "${1##*/} failed: $(safe_error "$LAST_ERROR")"
+        return 1
+    fi
+}
+
+kube_json() {
+    local output=$1
+    shift
+    if ! run_capture "$output" 30 kubectl "$@"; then
+        fail KUBERNETES "Kubernetes request failed: $(safe_error "$LAST_ERROR")"
+        return 1
+    fi
+    if [[ ! -s $output ]]; then
+        printf 'null\n' >"$output"
+    fi
+    jq -e 'type == "object" or . == null' "$output" >/dev/null ||
+        fail API_RESPONSE 'Kubernetes returned an invalid resource document.'
+}
+
+get_optional() {
+    local output=$1 namespace=$2 kind=$3 name=$4
+    local args=()
+    [[ -z $namespace ]] || args+=(-n "$namespace")
+    kube_json "$output" "${args[@]}" get "$kind" "$name" --ignore-not-found -o json
+}
+
+apply_json() {
+    run 60 kubectl apply --field-manager=esb-ocmwstack -f "$1"
+}
+
+check_tools() {
+    local command missing=0
+    local report='[]'
+    for command in bash node jq curl git helm kubectl openssl base64 sha256sum timeout setsid nc busybox; do
+        local available=false
+        if command -v "$command" >/dev/null 2>&1; then
+            available=true
+        else
+            missing=1
+        fi
+        report=$(jq -c --arg name "$command" --argjson available "$available" \
+            '. + [{name:$name,available:$available}]' <<<"$report")
+    done
+    jq -n --arg bash "$BASH_VERSION" --argjson tools "$report" \
+        '{bash:$bash,tools:$tools}'
+    return "$missing"
+}
+
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM ERR
+    [[ -z $CURRENT_PID ]] || kill -TERM "$CURRENT_PID" 2>/dev/null || true
+    [[ -z $LEASE_PID ]] || kill -TERM "$LEASE_PID" 2>/dev/null || true
+    local pid
+    for pid in "${TUNNEL_PIDS[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    [[ -z $CURRENT_PID ]] || wait "$CURRENT_PID" 2>/dev/null || true
+    [[ -z $LEASE_PID ]] || wait "$LEASE_PID" 2>/dev/null || true
+    if [[ $OWNS_WORKDIR == true ]]; then
+        if [[ -n ${ESB_LEASE_HOLDER:-} ]]; then
+            release_lease || true
+        fi
+        if ((status != 0)) && [[ $RESULT_WRITTEN != true ]]; then
+            if [[ -s $WORKDIR/error.json ]]; then
+                cat "$WORKDIR/error.json"
+            else
+                jq -cn --argjson exitCode "$status" \
+                    '{status:"failed",code:"COMMAND_FAILED",exitCode:$exitCode,message:"Deployment stopped; see progress for the last completed phase."}'
+            fi
+        fi
+        rm -rf -- "$WORKDIR"
+    fi
+    exit "$status"
+}
+
+cancel() {
+    if [[ ! -f $WORKDIR/lease-lost ]]; then
+        fail CANCELLED 'Operation cancelled; cluster resources are retained.' || true
+    fi
+    exit 130
+}
+
+load_libraries() {
+    local name
+    for name in cluster network services runtime checks; do
+        # shellcheck source=/dev/null
+        source "$DEPLOYMENT/$name.sh"
+    done
+}

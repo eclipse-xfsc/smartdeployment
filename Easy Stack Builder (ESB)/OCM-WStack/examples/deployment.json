@@ -5,5 +5,5 @@
   "externalDns": false,
   "publicDashboards": false,
   "provider": "auto",
-  "runtimeImage": "ecofacis/xfsc-orce:2.0.15"
+  "runtimeImage": "registry.example.com/ocm-ui:12.4.0"
 }

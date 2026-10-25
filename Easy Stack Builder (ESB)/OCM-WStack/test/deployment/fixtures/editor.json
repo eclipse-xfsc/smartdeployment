@@ -1,0 +1,134 @@
+{
+  "category": "Easy Stack Builder",
+  "color": "#c7e2e4",
+  "icon": "font-awesome/fa-cubes",
+  "inputs": 1,
+  "outputs": 2,
+  "outputLabels": [
+    "Result",
+    "Progress"
+  ],
+  "defaults": {
+    "name": {
+      "value": ""
+    },
+    "procedureVersion": {
+      "value": 12
+    },
+    "instanceName": {
+      "value": "ocm-wstack"
+    },
+    "domainAddress": {
+      "value": "",
+      "required": true
+    },
+    "emailAddress": {
+      "value": ""
+    },
+    "tenantId": {
+      "value": "demo-tenant",
+      "required": true
+    },
+    "tenantRelease": {
+      "value": "demotenant"
+    },
+    "tenantSubdomain": {
+      "value": ""
+    },
+    "provider": {
+      "value": "auto"
+    },
+    "storageClass": {
+      "value": ""
+    },
+    "lbLocation": {
+      "value": ""
+    },
+    "lbNetworkZone": {
+      "value": ""
+    },
+    "lbType": {
+      "value": ""
+    },
+    "lbPrivate": {
+      "value": false
+    },
+    "lbAnnotations": {
+      "value": "{}"
+    },
+    "externalTrafficPolicy": {
+      "value": "Cluster"
+    },
+    "gatewayRouting": {
+      "value": "internal"
+    },
+    "externalDns": {
+      "value": false
+    },
+    "dnsProvider": {
+      "value": "auto"
+    },
+    "dnsValues": {
+      "value": "{}"
+    },
+    "publicDashboards": {
+      "value": false
+    },
+    "runtimeEnabled": {
+      "value": true
+    },
+    "runtimeImage": {
+      "value": ""
+    },
+    "runtimeServices": {
+      "value": "{}"
+    },
+    "orceStorageSize": {
+      "value": "3Gi"
+    },
+    "mongoStorageSize": {
+      "value": "5Gi"
+    },
+    "useExternalMongo": {
+      "value": false
+    },
+    "editorUsername": {
+      "value": "admin"
+    },
+    "uiAdminUsername": {
+      "value": "admin"
+    },
+    "uiAdminEmail": {
+      "value": ""
+    },
+    "timeoutSeconds": {
+      "value": 1800
+    }
+  },
+  "credentials": {
+    "kubeconfig": {
+      "type": "password"
+    },
+    "tlsCertificate": {
+      "type": "password"
+    },
+    "tlsPrivateKey": {
+      "type": "password"
+    },
+    "dnsToken": {
+      "type": "password"
+    },
+    "dnsSecretData": {
+      "type": "password"
+    },
+    "editorPassword": {
+      "type": "password"
+    },
+    "uiAdminPassword": {
+      "type": "password"
+    },
+    "mongoUri": {
+      "type": "password"
+    }
+  }
+}

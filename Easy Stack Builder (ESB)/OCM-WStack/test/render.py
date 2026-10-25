@@ -5,14 +5,14 @@ import yaml
 root=pathlib.Path(__file__).resolve().parents[1]
 helm=shutil.which('helm')
 if not helm:
-    raise SystemExit('Helm 3 is required; these rendering checks were not executed.')
+    raise SystemExit('Helm is required for chart rendering.')
 def render(chart,values,upgrade=False):
     with tempfile.NamedTemporaryFile(mode='w',suffix='.json') as f:
         json.dump(values,f); f.flush()
         args=[helm,'template','demotenant',str(chart),'-n','ocm-wstack','-f',f.name]
         if upgrade: args+=['--is-upgrade']
         return [d for d in yaml.safe_load_all(subprocess.check_output(args,text=True)) if d]
-base={'image':'example.invalid/ocm-ui:12.3.18','host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','issuer':'https://demo-tenant.example.com/orce/identity/realms/ocm-ui-demo-tenant'}}
+base={'image':'example.invalid/ocm-ui:12.4.0','host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','auth':{'mode':'local-session','sessionHours':24}}}
 checks=0
 for upgrade in [False,True]:
     for external in [False,True]:
@@ -51,8 +51,11 @@ with tempfile.TemporaryDirectory() as tmp:
         c={'actualProvider':provider,'lbLocation':location,'lbAnnotations':{'example.com/custom':'retained'},'externalDns':False}
         defaults=yaml.safe_load((envoy/'values.yaml').read_text())
         c['upstreamAnnotationKeys']=list(defaults['envoyProxy']['service']['annotations'])
-        code="const {networkValues}=require('./lib/adapt');console.log(JSON.stringify(networkValues("+json.dumps(c)+")));"
-        settings=json.loads(subprocess.check_output(['node','-e',code],cwd=root,text=True))
+        c.update(lbNetworkZone='', lbType='', lbPrivate=False, providerLocations=[], providerZones=[], actualDns='disabled')
+        program='include \"values\"; .resolvedLbAnnotations=provider_annotations | network_values($lock[0])'
+        settings=json.loads(subprocess.check_output(
+            ['jq','-L',str(root/'deployment'),'--slurpfile','lock',str(root/'upstream-lock.json'),program],
+            input=json.dumps(c),text=True))
         patch=render(engine,{**settings,'chartPath':'INFRA/network/envoy'})[0]
         helm_text=patch['spec']['source']['helm']['values']
         assert isinstance(helm_text,str)

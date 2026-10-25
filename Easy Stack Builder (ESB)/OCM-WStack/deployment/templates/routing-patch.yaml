@@ -1,0 +1,33 @@
+spec:
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/template/spec/hostAliases, /spec/template/metadata/annotations/esb.xfsc.io~1credentials, /spec/template/metadata/annotations/esb.xfsc.io~1nats-recovery]
+    - group: apps
+      kind: StatefulSet
+      jsonPointers: [/spec/template/spec/hostAliases]
+    - group: apps
+      kind: StatefulSet
+      namespace: infrastructure
+      name: cassandra
+      jqPathExpressions:
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .startupProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .readinessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.failureThreshold'
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-retrieval-service
+      jsonPointers: [/spec/strategy]
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-verification-service
+      jqPathExpressions:
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_HOST")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_PORT")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_MESSAGING_NATS_URL")'
+  syncPolicy:
+    syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]
