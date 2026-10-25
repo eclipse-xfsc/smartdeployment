@@ -17,8 +17,8 @@
     "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f743eb0646883ad4085415a2c394b10ce55d359f3cbc6a0bf75f7b93b41b6fac",
     "INFRA/network/envoy/values.yaml": "09543ec6ee0d2ad27af22cebdc1108e679783d601a7213ddd58b440b36b136e3",
     "INFRA/network/envoy/templates/envoyproxy.yaml": "39cc26b68f68622436078a5d940a63a3f68489ea781e792a12820611607417c5",
-    "INFRA/observability/opentelemtry/Chart.yaml": "04d64c4ab45137a0471257872f9405ff8552e824a457197f4086cc0fbbffde25",
-    "INFRA/observability/opentelemtry/templates/datasources.yaml": "c5eacc2b44cc4240aa8f2abee5a80fc9d5ee18e22ece355dac49159e4e190ae2"
+    "INFRA/observability/opentelemtry/Chart.yaml": "8d0db4a98718025a869af63f6a7cb0c83df9d06e94d2384affe1f27835d4c112",
+    "INFRA/observability/opentelemtry/templates/datasources.yaml": "a793a5f89efa60415cdf0ecce5f7a4838c1a1f3b6bc095d67fbc7a1b4e6f7e3c"
   },
   "compatibleBootstrapCommits": [
     "739606691ecff72b3a40404a19fce44d9c22b0ee"
@@ -36,5 +36,22 @@
   "dnsWebhookPins": {
     "ionos": "v0.14.0",
     "hetzner": "v0.3.4"
+  },
+  "gitBlobs": {
+    "basic-cluster-init.sh": "e377f061e4c8e8e107c370c5cff9001441f01f93",
+    "ocm-wstack-init.sh": "bdb9fe157ab89f41e16feec0f48b7cbf81671a02",
+    "argocd-bootstrap.sh": "b17b1dcc2a481f7b11c78a62576e4669b1ada5ed",
+    "check-applicationset.sh": "c50a51ef77d45287d735d17c23dab61dcb825333",
+    "XFSC/Applicationsets/chart/templates/applicationset-template.yaml": "73762f95b83a7335a77037c18f45439a6713b6a8",
+    "XFSC/tenant/chart/templates/tenant-registration.yaml": "c8ca8098207db910a5e4faced09082462c546de3",
+    "INFRA/security/kyverno/values.yaml": "276212196ed2affa87c07a4fda297bff6d4e88fd",
+    "INFRA/observability/opentelemtry/values.yaml": "12cfbc40cfb6d0e50975498873cf8c9135a39690",
+    "INFRA/observability/opentelemtry/crds/telemetryconfig.yaml": "249e3f0c086e5ab45f983281d06a74424ebbf44a",
+    "XFSC/Applicationsets/chart/templates/approject.yaml": "623303e436efd302d644db96071f6af6c4efa643",
+    "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f8a0e6bb1a0a10f71ce5c41f136d826d53921d07",
+    "INFRA/network/envoy/values.yaml": "7ecc24d34f0e761cbe5fad188d12b7791fa6306e",
+    "INFRA/network/envoy/templates/envoyproxy.yaml": "2fad9eb208255970e734a6d6299523dccd397de0",
+    "INFRA/observability/opentelemtry/Chart.yaml": "50ddad14902eca8b7cb75c11c5a161f759bfac24",
+    "INFRA/observability/opentelemtry/templates/datasources.yaml": "8f5af3896e4965a102f039d32c70577b4a6214a0"
   }
 }

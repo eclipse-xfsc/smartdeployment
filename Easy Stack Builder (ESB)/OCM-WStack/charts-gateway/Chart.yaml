@@ -1,4 +1,4 @@
 apiVersion: v2
 name: esb-ocm-gateway
-version: 12.2.0
+version: 12.2.1
 description: Persistent traffic policy for the upstream OCM EnvoyProxy
