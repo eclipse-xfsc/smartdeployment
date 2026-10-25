@@ -17,5 +17,5 @@ test('12.3.0 matching installation upgrades ownership in place',async()=>{
  const c={...resolve(config({procedureVersion:12,domain:'example.com'}),{items:[]},{items:[{metadata:{name:'standard',annotations:{'storageclass.kubernetes.io/is-default-class':'true'}}}]},{}),clusterUid:'cluster'};
  const marker={metadata:{labels:{'app.kubernetes.io/managed-by':'esb-ocmwstack'}},data:{instance:c.instanceName,clusterUid:c.clusterUid,tenantId:c.tenantId,tenantRelease:c.tenantRelease,tenantHost:c.tenantHost,storageClass:c.actualStorageClass,upstreamCommit:'8485621574abdee08b8ca24c2f0f60136ba0dad7',fingerprint:fingerprint(c),bootstrapComplete:'true'}};
  const r={json:async(cmd,args,options)=>args.includes('replace')?JSON.parse(options.input):marker};
- const updated=await ensureMarker(r,c);assert.equal(updated.data.bootstrapComplete,'true');assert.equal(updated.data.packageVersion,'12.3.2');assert.equal(updated.data.upstreamCommit,require('../upstream-lock.json').commit);
+ const updated=await ensureMarker(r,c);assert.equal(updated.data.bootstrapComplete,'true');assert.equal(updated.data.packageVersion,'12.3.3');assert.equal(updated.data.upstreamCommit,require('../upstream-lock.json').commit);
 });

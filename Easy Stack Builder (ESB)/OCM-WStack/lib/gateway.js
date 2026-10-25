@@ -8,6 +8,7 @@ async function policy(r,c){
  await r.run('kubectl',['wait','clusterpolicy/esb-ocm-tenant-routing','--for=condition=Ready',`--timeout=${c.timeoutSeconds}s`],{timeout:(c.timeoutSeconds+30)*1000});
  await r.run('kubectl',['wait','clusterpolicy/esb-ocm-envoy-traffic','--for=condition=Ready',`--timeout=${c.timeoutSeconds}s`],{timeout:(c.timeoutSeconds+30)*1000});
  await r.run('kubectl',['wait','clusterpolicy/esb-ocm-didcomm-startup','--for=condition=Ready',`--timeout=${c.timeoutSeconds}s`],{timeout:(c.timeoutSeconds+30)*1000});
+ await r.run('kubectl',['wait','clusterpolicy/esb-ocm-retrieval-startup','--for=condition=Ready',`--timeout=${c.timeoutSeconds}s`],{timeout:(c.timeoutSeconds+30)*1000});
 }
 async function reconcile(r,c){
  const proxy=await r.json('kubectl',['-n','infrastructure','get','envoyproxy','envoy','-o','json']);

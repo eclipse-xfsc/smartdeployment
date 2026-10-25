@@ -6,6 +6,7 @@ const {fail}=require('./config');
 const POLICY='OCM W-Stack/Policy Chart';
 const VERIFICATION='OCM W-Stack/Credential Verification Service Chart';
 const DIDCOMM='OCM W-Stack/Didcomm';
+const RESOLVER_CHART='INFRA/core/universal-resolver';
 const REGISTRY='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io';
 // The published dependency chart's image name is tsa/policy. The wrapper
 // incorrectly replaces it with a repository at the registry root.
@@ -18,7 +19,7 @@ function overrides(c) {
         'inject.xfsc.io/env-replacements':JSON.stringify({NATS_URL:'NATS_ADDR'})},
       policy:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'},http:{port:8080}},service:{port:8080},
       memoryStorage:{policiesRepo:'https://github.com/eclipse-xfsc/deployment.git',policiesFolder:'OCM W-Stack/Policies'},
-      addresses:{didResolver:'http://universal-resolver.infrastructure.svc.cluster.local:8080',
+      addresses:{didResolver:'http://universal-resolver-service.infrastructure.svc.cluster.local:8080',
         signer:'http://signer.ocm-wstack.svc.cluster.local:8080',ocm:c.tenantUrl,NAMESPACE:null}}},
     [VERIFICATION]: {'credential-verification-service':{
       podAnnotations:{'inject.xfsc.io/enabled':'true','inject.xfsc.io/needs':'nats',
@@ -27,14 +28,14 @@ function overrides(c) {
       server:{http:{host:'0.0.0.0'}},config:{
         cassandra:{Name:CASSANDRA_SECRET,Key:'cassandra-password',cassandraHosts:'cassandra.infrastructure.svc.cluster.local',cassandraUser:'cassandra'},
         signing:{Name:'signing',Key:'signing-key'},
-        didResolver:'http://universal-resolver.infrastructure.svc.cluster.local:8080',
+        didResolver:'http://universal-resolver-service.infrastructure.svc.cluster.local:8080',
         externalPresentation:{authorizeEndpoint:`http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/${c.tenantId}/presentation/`,
           // 1.0.2 misspells this value and renders it without quotes.
           enbaled:'"true"'},
         signerService:{presentationVerifyUrl:'http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify',
           presentationSignUrl:'http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof'},
         messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}}}}},
-    [DIDCOMM]: {'didcomm-connector':{ingress:{enabled:false},podAnnotations:{'inject.xfsc.io/enabled':'false'},config:{env:'DEV',logLevel:'error',url:c.tenantUrl+'/api/didcomm',didcomm:{resolverUrl:'http://universal-resolver.infrastructure.svc.cluster.local:8080'},messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}},database:{inMemory:false,host:'cassandra.infrastructure.svc.cluster.local',port:9042,password:{passwordSecret:CASSANDRA_SECRET,passwordKey:'cassandra-password'}}}}}
+    [DIDCOMM]: {'didcomm-connector':{ingress:{enabled:false},podAnnotations:{'inject.xfsc.io/enabled':'false'},config:{env:'DEV',logLevel:'error',url:c.tenantUrl+'/api/didcomm',didcomm:{resolverUrl:'http://universal-resolver-service.infrastructure.svc.cluster.local:8080'},messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}},database:{inMemory:false,host:'cassandra.infrastructure.svc.cluster.local',port:9042,password:{passwordSecret:CASSANDRA_SECRET,passwordKey:'cassandra-password'}}}}}
   };
 }
 function routingValues(){
@@ -46,6 +47,11 @@ function routingValues(){
     - group: apps
       kind: StatefulSet
       jsonPointers: [/spec/template/spec/hostAliases]
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-retrieval-service
+      jsonPointers: [/spec/strategy]
   syncPolicy:
     syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]
 `;
@@ -81,6 +87,7 @@ function validateKey(value) {
   } catch {fail('SIGNING_KEY','Existing signing/signing-key is incompatible with the verification service (EC PRIVATE KEY label, PKCS#8 EC contents required). It was retained; no key was replaced.');}
 }
 async function prerequisites(r,timeoutSeconds) {
+  await require('./ocm-startup').resolver(r);
   const current=await r.json('kubectl',['-n','ocm-wstack','get','secret','signing','--ignore-not-found','-o','json']);
   if(current) {
     const encoded=current.data?.['signing-key'];
@@ -116,6 +123,16 @@ async function imagePreflight(r,directory) {
   r.emit({type:'image-preflight',image:POLICY_IMAGE,status:'resolvable',authentication:result.authentication});
 }
 function validateManifests(documents,chart) {
+  if(chart===RESOLVER_CHART) {
+    const service=Object.values(documents).find(d=>d?.kind==='Service'&&d.metadata?.name==='universal-resolver-service');
+    const port=service?.spec?.ports?.find(p=>p.port===8080);
+    const selector=service?.spec?.selector;
+    const deployment=Object.values(documents).find(d=>d?.kind==='Deployment'&&selector&&Object.keys(selector).length&&Object.entries(selector).every(([k,v])=>d.spec?.template?.metadata?.labels?.[k]===v));
+    const target=port?.targetPort??port?.port;
+    const reaches=deployment?.spec?.template?.spec?.containers?.some(c=>c.ports?.some(p=>typeof target==='number'?p.containerPort===target:p.name===target));
+    if(!port||!reaches)fail('RESOLVER_SERVICE','Rendered upstream resolver does not expose universal-resolver-service:8080 to its Deployment. Compatibility values require review before deployment.');
+    return;
+  }
   const name=chart===POLICY?'policy':chart===DIDCOMM?'didcomm-connector':'credential-verification-service';
   const deployments=Object.values(documents).filter(d=>d?.kind==='Deployment');
   const workload=deployments.find(d=>d.spec?.template?.spec?.containers?.some(x=>x.name===name));
@@ -123,7 +140,7 @@ function validateManifests(documents,chart) {
   const pod=workload.spec.template,container=pod.spec.containers.find(x=>x.name===name),env=Object.fromEntries((container.env||[]).map(x=>[x.name,x]));
   if(JSON.stringify(container.env).includes('NAMESPACE'))fail('OCM_VALUES',`Unresolved namespace in ${name} environment.`);
   if(chart===DIDCOMM) {
-    const required={DIDCOMMCONNECTOR_DATBASE_HOST:'cassandra.infrastructure.svc.cluster.local',DIDCOMMCONNECTOR_DATBASE_PORT:'9042',DIDCOMMCONNECTOR_DIDCOMM_RESOLVERURL:'http://universal-resolver.infrastructure.svc.cluster.local:8080',DIDCOMMCONNECTOR_CLOUDFORWARDING_NATS_URL:'nats://nats.infrastructure.svc.cluster.local:4222'};
+    const required={DIDCOMMCONNECTOR_DATBASE_HOST:'cassandra.infrastructure.svc.cluster.local',DIDCOMMCONNECTOR_DATBASE_PORT:'9042',DIDCOMMCONNECTOR_DIDCOMM_RESOLVERURL:'http://universal-resolver-service.infrastructure.svc.cluster.local:8080',DIDCOMMCONNECTOR_CLOUDFORWARDING_NATS_URL:'nats://nats.infrastructure.svc.cluster.local:4222'};
     for(const [key,value] of Object.entries(required))if(String(env[key]?.value)!==value)fail('OCM_VALUES',`DIDComm ${key} override was ignored.`);
     const ref=env.DIDCOMMCONNECTOR_DATBASE_PASSWORD?.valueFrom?.secretKeyRef;
     if(ref?.name!==CASSANDRA_SECRET||ref.key!=='cassandra-password')fail('OCM_VALUES','DIDComm must use the prepared Cassandra Secret.');
@@ -152,4 +169,4 @@ async function inspect(r,root,directory,readYaml,chart) {
   }}
   await walk(root);validateManifests(await readYaml(r,directory,sources),chart);
 }
-module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,DIDCOMM};
+module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,DIDCOMM,RESOLVER_CHART};

@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "12.3.2",
+  "version": "12.3.3",
   "description": "ESB wrapper for the official eclipse-xfsc/deployment bootstrap procedure",
   "license": "Apache-2.0",
   "engines": {

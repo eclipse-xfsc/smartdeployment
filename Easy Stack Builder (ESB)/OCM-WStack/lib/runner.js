@@ -33,7 +33,7 @@ class Runner {
         if(line.startsWith('[ESB_API] ')) {
           try {
             const event=JSON.parse(this.redact(line.slice(10)));
-            if(['phase','routing-progress','routing-drift','gateway-configured'].includes(event.type)){this.emit(event);return;}
+            if(['phase','routing-progress','routing-drift','gateway-configured','ocm-startup','migration-recovery'].includes(event.type)){this.emit(event);return;}
           } catch {}
         }
         this.emit(phase ? {type:'phase',phase:phase[1]} : {type:'log',message:this.redact(line).slice(0,2000)});

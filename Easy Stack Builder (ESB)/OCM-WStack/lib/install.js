@@ -246,7 +246,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const ocmValues=await privateFile(dir,'ocm-values.json',JSON.stringify(ocm.values(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));
-    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile};
+    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile,ESB_OCM_STARTUP:path.join(__dirname,'../scripts/ocm-startup.js'),ESB_NATIVE_DIDCOMM:String(!!(c.runtimeEnabled&&!c.runtimeServices?.didcomm))};
     if(action==='install-ui'){await tls.install(r,c,certificate);if(marker.data.bootstrapComplete!=='true')fail('OWNERSHIP','Complete the native bootstrap before install-ui.');if(!c.runtimeEnabled)fail('CONFIG','Enable the ORCE runtime before install-ui.');await gatewayConfig.internalRouting(r,c);await gatewayConfig.waitTenantTls(r,c);const ui=await runtime.install(r,c,credentials,dir);const report=await validate(r,c);return {...report,ui:{...report.ui,...ui}};}
     let lastAddresses='',observing=false;
     dnsTimer=setInterval(async()=>{
@@ -282,6 +282,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
       emit({type:'phase',phase:'repair-ocm'});
       await ocm.prerequisites(r,c.timeoutSeconds);
       await helmUpgrade(r,['upgrade','--install','ocm-wstack',path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,'XFSC/Applicationsets/values/06_ocm_wstack-values.yaml'),'-f',ocmValues,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{namespace:'ocm-wstack',release:'ocm-wstack',cwd:source,timeout:(c.timeoutSeconds+30)*1000});
+      await require('./ocm-startup').stabilize(r,c);
       await r.run('bash',['check-applicationset.sh','ocm-wstack','argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
       held.check();marker=await updateMarker(r,marker,{bootstrapComplete:'true',ocmCompatibility:'12.0.8',state:'tenant',updatedAt:new Date().toISOString()});
     } else if(marker.data.bootstrapComplete!=='true') {

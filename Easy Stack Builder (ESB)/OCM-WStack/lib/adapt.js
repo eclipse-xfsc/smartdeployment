@@ -126,6 +126,7 @@ async function adapt(dir) {
       const prerequisites=nameMatch[2]==='ocm-wstack'?'node "${ESB_OCM_PREREQUISITES:?ESB OCM prerequisites are required}"\n':'';
       return `echo "[ESB_PHASE] ${nameMatch[2]}"\n${prerequisites}${command}${waits[nameMatch[2]] ? '\n'+waits[nameMatch[2]] : ''}`;
     }).join('\n');
+    if(name==='ocm-wstack-init.sh')text=once(text,'./check-applicationset.sh ocm-wstack argocd','node "${ESB_OCM_STARTUP:?ESB OCM startup runner is required}"\n./check-applicationset.sh ocm-wstack argocd',name);
     if (name === 'basic-cluster-init.sh') {
       text=once(text,'./check-applicationset.sh network argocd','./check-applicationset.sh network argocd\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" policy\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" reconcile',name);
       text = once(text, 'DNSTOKEN=""', 'DNSTOKEN="${ESB_DNS_SECRET_FILE:+provided-through-file}"', name);
