@@ -3,7 +3,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('n
 const {fail}=require('./config');
 const NAME='esb-ocm-guard',NS='ocm-wstack',OWNER='esb-ocmwstack';
 const labels={'app.kubernetes.io/managed-by':OWNER,app:NAME};
-function resources(image,files){
+function resources(image,files,apiEgress=[]){
  const metadata=(name=NAME,namespace=NS)=>({name,...(namespace?{namespace}:{}),labels});
  const role=(namespace,rules)=>({apiVersion:'rbac.authorization.k8s.io/v1',kind:'Role',metadata:metadata(NAME,namespace),rules});
  const binding=(namespace,kind='Role')=>({apiVersion:'rbac.authorization.k8s.io/v1',kind:kind==='Role'?'RoleBinding':'ClusterRoleBinding',metadata:metadata(NAME,namespace),roleRef:{apiGroup:'rbac.authorization.k8s.io',kind,name:NAME},subjects:[{kind:'ServiceAccount',name:NAME,namespace:NS}]});
@@ -19,7 +19,7 @@ function resources(image,files){
   binding(null,'ClusterRole'),
   {apiVersion:'apps/v1',kind:'Deployment',metadata:metadata(),spec:{replicas:1,strategy:{type:'Recreate'},selector:{matchLabels:{app:NAME}},template:{metadata:{labels,annotations:{'esb.xfsc.io/source':checksum}},spec:{serviceAccountName:NAME,securityContext:{runAsNonRoot:true,runAsUser:1000,runAsGroup:1000,seccompProfile:{type:'RuntimeDefault'}},containers:[{name:NAME,image,imagePullPolicy:'IfNotPresent',command:['node','/guard/scripts/ocm-guard.js'],securityContext:{allowPrivilegeEscalation:false,readOnlyRootFilesystem:true,capabilities:{drop:['ALL']}},resources:{requests:{cpu:'25m',memory:'48Mi'},limits:{cpu:'250m',memory:'128Mi'}},ports:[{name:'http',containerPort:8080}],readinessProbe:{httpGet:{path:'/health',port:'http'},periodSeconds:5},livenessProbe:{httpGet:{path:'/health',port:'http'},initialDelaySeconds:10,periodSeconds:20},volumeMounts:[{name:'source',mountPath:'/guard',readOnly:true}]}],volumes:[{name:'source',configMap:{name:NAME,items:[{key:'ocm-guard.js',path:'scripts/ocm-guard.js'},{key:'ocm-guard-core.js',path:'lib/ocm-guard-core.js'}]}}]}}}},
   {apiVersion:'v1',kind:'Service',metadata:metadata(),spec:{type:'ClusterIP',selector:{app:NAME},ports:[{name:'http',port:8080,targetPort:'http'}]}},
-  {apiVersion:'networking.k8s.io/v1',kind:'NetworkPolicy',metadata:metadata(),spec:{podSelector:{matchLabels:{app:NAME}},policyTypes:['Ingress','Egress'],ingress:[{ports:[{protocol:'TCP',port:8080}]}],egress:[{ports:[{protocol:'UDP',port:53},{protocol:'TCP',port:53},{protocol:'TCP',port:443},{protocol:'TCP',port:6443}]},{to:[{namespaceSelector:{matchLabels:{'kubernetes.io/metadata.name':'infrastructure'}}}],ports:[{protocol:'TCP',port:6379},{protocol:'TCP',port:4222},{protocol:'TCP',port:8222}]}]}}
+  {apiVersion:'networking.k8s.io/v1',kind:'NetworkPolicy',metadata:metadata(),spec:{podSelector:{matchLabels:{app:NAME}},policyTypes:['Ingress','Egress'],ingress:[{ports:[{protocol:'TCP',port:8080}]}],egress:[{ports:[{protocol:'UDP',port:53},{protocol:'TCP',port:53}]},...apiEgress,{to:[{namespaceSelector:{matchLabels:{'kubernetes.io/metadata.name':'infrastructure'}}}],ports:[{protocol:'TCP',port:6379},{protocol:'TCP',port:4222},{protocol:'TCP',port:8222}]}]}}
  ];
 }
 async function install(r,image=r.env?.ESB_GUARD_IMAGE){
@@ -28,8 +28,10 @@ async function install(r,image=r.env?.ESB_GUARD_IMAGE){
  const docs=resources(image,files);
  // Inspect every name before the first write, including cluster RBAC.
  for(const d of docs){const old=await r.json('kubectl',[...(d.metadata.namespace?['-n',d.metadata.namespace]:[]),'get',d.kind,d.metadata.name,'--ignore-not-found','-o','json']);if(old&&old.metadata?.labels?.['app.kubernetes.io/managed-by']!==OWNER)fail('OWNERSHIP','An OCM reconciler resource belongs to another owner.');}
+ const apiEgress=await require('./kube-api-egress').discover(r);
+ docs.find(d=>d.kind==='NetworkPolicy').spec.egress.splice(1,0,...apiEgress);
  await r.run('kubectl',['apply','--field-manager=esb-ocmwstack','-f','-'],{input:JSON.stringify({apiVersion:'v1',kind:'List',items:docs})});
- r.emit({type:'ocm-guard',state:'installed',image});
+ r.emit({type:'ocm-guard',state:'installed',image,apiPorts:apiEgress.map(rule=>rule.ports[0].port)});
 }
 async function status(r){
  const result=await r.run('kubectl',['get','--raw',`/api/v1/namespaces/${NS}/services/http:${NAME}:8080/proxy/status`],{timeout:20000,allowFailure:true});
