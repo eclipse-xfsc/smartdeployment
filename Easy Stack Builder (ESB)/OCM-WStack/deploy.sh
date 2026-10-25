@@ -670,7 +670,7 @@ sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g; s/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Sto
 helm dependency build "./Storage Service"
 helm upgrade --install storage-service "./Storage Service" --namespace "$NAMESPACE" -f "./Storage Service/values.yaml"
 mv ./Storage\ Service/values.yaml.bak ./Storage\ Service/values.yaml
-kubectl set env deployment/storage-service -c storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" STORAGESERVICE_NATS_URL="nats://nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
+node "$SCRIPT_DIR/scripts/deployment-env.cjs" "$NAMESPACE" storage-service storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" STORAGESERVICE_NATS_URL="nats://nats.$NAMESPACE.svc.cluster.local:4222"
 record_phase "storage" "done" "Storage service deployed"
 
 record_phase "status-list" "running" "Deploying status list service"
@@ -706,8 +706,7 @@ sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./signer/values.yaml"
 helm dependency build "./signer"
 helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "./signer/values.yaml"
 mv ./signer/values.yaml.bak ./signer/values.yaml
-kubectl set env deployment/signer -c signer \
-  -n "$NAMESPACE" \
+node "$SCRIPT_DIR/scripts/deployment-env.cjs" "$NAMESPACE" signer signer \
   NATS_STATUS_TOPIC=status.data.verify \
   NATS_HOST="nats://nats.${NAMESPACE}.svc.cluster.local:4222" \
   VAULT_ADDR="http://vault.${NAMESPACE}.svc:8200" \
@@ -765,8 +764,7 @@ helm upgrade --install credential-retrieval-service "./Credential Retrieval" \
 mv ./Credential\ Retrieval/values.yaml.bak ./Credential\ Retrieval/values.yaml
 # The chart emits singular CASSANDRA_HOST; the current service reads HOSTS.
 # Keep its original env for compatibility and supply the expected plural alias.
-kubectl -n "$NAMESPACE" set env deployment/credential-retrieval-service \
-  -c credential-retrieval-service \
+node "$SCRIPT_DIR/scripts/deployment-env.cjs" "$NAMESPACE" credential-retrieval-service credential-retrieval-service \
   CREDENTIALRETRIEVAL_CASSANDRA_HOSTS="cassandra.${NAMESPACE}.svc.cluster.local:9042"
 record_phase "credential-retrieval" "done" "Credential retrieval service deployed"
 
@@ -779,31 +777,8 @@ helm upgrade --install credential-verification-service "./Credential Verificatio
 mv ./Credential\ Verification\ Service\ Chart/values.yaml.bak ./Credential\ Verification\ Service\ Chart/values.yaml
 container_name="$(kubectl -n "$NAMESPACE" get deploy credential-verification-service -o jsonpath='{.spec.template.spec.containers[0].name}')"
 
-patch_json="$(jq -n \
-  --arg name "$container_name" \
-  --arg nats "nats.${NAMESPACE}.svc.cluster.local:4222" \
-  '{
-    spec: {
-      template: {
-        spec: {
-          containers: [
-            {
-              name: $name,
-              env: [
-                {
-                  name: "CREDENTIALVERIFICATION_MESSAGING_NATS_URL",
-                  value: $nats
-                }
-              ]
-            }
-          ]
-        }
-      }
-    }
-  }'
-)"
-
-kubectl -n "$NAMESPACE" patch deploy/credential-verification-service --type=strategic -p "$patch_json"
+node "$SCRIPT_DIR/scripts/deployment-env.cjs" "$NAMESPACE" credential-verification-service "$container_name" \
+  CREDENTIALVERIFICATION_MESSAGING_NATS_URL="nats.${NAMESPACE}.svc.cluster.local:4222"
 record_phase "credential-verification" "done" "Credential verification service deployed"
 
 record_phase "well-known" "running" "Deploying well-known services and ingress rules"
@@ -868,4 +843,4 @@ jq -cn \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.2",runtimeVersion:"11.0.2",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.3",runtimeVersion:"11.0.3",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
