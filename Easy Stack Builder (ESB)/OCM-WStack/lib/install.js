@@ -7,6 +7,7 @@ const {Runner} = require('./runner');
 const {config, resolve, fingerprint, fail, object, kubeconfigText} = require('./config');
 const {adapt, networkValues} = require('./adapt');
 const lock = require('../upstream-lock.json');
+const {prepare}=require('./chart-check');
 const MARKER = 'esb-ocmwstack-v12';
 const LEASE = 'esb-ocmwstack-v12';
 const MANAGED_NS = ['observability','security','argocd','infrastructure','ocm-wstack'];
@@ -106,7 +107,7 @@ async function validate(r,c) {
   return report;
 }
 async function operation(action,input,credentials,{emit=()=>{},signal:externalSignal,runnerFactory,checkoutSource=checkout}={}) {
-  if(!['deploy','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, validate, inspect, test-credentials or teardown.');
+  if(!['deploy','preflight','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, validate, inspect, test-credentials or teardown.');
   const controller=new AbortController();
   const relay=()=>controller.abort();
   if(externalSignal?.aborted)controller.abort();
@@ -147,8 +148,11 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     // Source and adaptation checks precede writes to the cluster.
     emit({type:'phase',phase:'upstream-source'});
     const source=await checkoutSource(r,dir);
+    const chartReport=await prepare(r,source,c,dir);
+    if(action==='preflight')return chartReport;
     held=await lease(r,crypto.randomUUID(),()=>controller.abort());
     marker=await ensureMarker(r,c);
+    marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
     const network=await privateFile(dir,'network-values.json',JSON.stringify(networkValues(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));

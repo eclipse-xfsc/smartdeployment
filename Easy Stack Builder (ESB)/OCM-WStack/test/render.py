@@ -21,6 +21,19 @@ def write_json(p, obj):
 def manifests(text):
     return [d for d in yaml.safe_load_all(text) if d]
 
+def telemetry_schema(value, schema):
+    """Validate the types, required fields and enums used by this specific CRD."""
+    types = {'object': dict, 'string': str, 'boolean': bool, 'integer': int}
+    if 'type' in schema:
+        assert type(value) is types[schema['type']], (value, schema['type'])
+    if 'enum' in schema:
+        assert value in schema['enum']
+    if isinstance(value, dict):
+        assert all(key in value for key in schema.get('required', []))
+        for key, child in schema.get('properties', {}).items():
+            if key in value:
+                telemetry_schema(value[key], child)
+
 with tempfile.TemporaryDirectory(prefix='esb-render-') as temp:
     temp = pathlib.Path(temp)
     source = temp / 'deployment'
@@ -104,3 +117,82 @@ with tempfile.TemporaryDirectory(prefix='esb-render-') as temp:
         env = {e['name']: e['value'] for e in bootstrap['spec']['template']['spec']['containers'][0]['env']}
         assert env['TRANSIT_PATH'] == f'ocm-wstack/{tenant_id}'
         print(f'PASS tenant routes, certificate, registration and transit mount: {tenant_id}')
+
+    # Exercise every wrapper selected by the same planner used before deployment.
+    # Dependencies are deliberately removed ONLY in this wrapper-only test. This
+    # does not count as dependency validation; runtime preflight builds them all.
+    plan_json = run('node', '-e', '''
+const {plan}=require('./lib/chart-check');
+const {Runner}=require('./lib/runner');
+const {config,resolve}=require('./lib/config');
+const c=resolve(config(require('./examples/deployment.json')),{items:[]},{items:[{metadata:{name:'fast'}}]},{ });
+'''.replace("config(require('./examples/deployment.json'))", "config({...require('./examples/deployment.json'),storageClass:'fast'})") + '''
+const r=new Runner();const call=r.run.bind(r);r.run=(cmd,args,opts)=>call(cmd==='helm'?process.env.HELM_BIN||'helm':cmd,args,opts);
+plan(r,process.argv[1],process.argv[2],c,process.argv[3]).then(x=>console.log(JSON.stringify(x))).catch(e=>{console.error(e);process.exit(1)});
+''', source, ROOT / 'test/fixtures/upstream', temp)
+    jobs = json.loads(plan_json)
+    wrappers = temp / 'wrappers'
+    shutil.copytree(source, wrappers)
+    for chart_file in wrappers.rglob('Chart.yaml'):
+        definition = yaml.safe_load(chart_file.read_text())
+        definition.pop('dependencies', None)
+        chart_file.write_text(yaml.safe_dump(definition))
+    all_docs = []
+    for i, job in enumerate(jobs):
+        # Remote Argo charts are unmodified source, local bootstrap is adapted.
+        # No child service chart templates are patched by the ESB.
+        args = [HELM, 'template', job['release'], wrappers / job['chart'], '-n', job['namespace']]
+        for values in job['files']:
+            args += ['-f', wrappers / values]
+        args += ['-f', write_json(temp / f'wrapper-{i}.json', job['values'])]
+        for parameter in job['parameters']:
+            args += ['--set-string', parameter]
+        docs = manifests(run(*args))
+        upgraded = manifests(run(*args, '--is-upgrade'))
+        all_docs += docs
+        for doc in docs + upgraded:
+            if doc['kind'] in ['Job', 'CronJob']:
+                spec = doc['spec']['jobTemplate']['spec'] if doc['kind'] == 'CronJob' else doc['spec']
+                for container in spec['template']['spec'].get('containers', []):
+                    command = container.get('command', [])
+                    if command and command[0] in ['/bin/sh', 'sh', '/bin/bash', 'bash']:
+                        script = (command + container.get('args', []))[-1]
+                        subprocess.run(['sh', '-n'], input=script, text=True, check=True)
+        print(f'PASS wrapper install + upgrade: {job["release"]} ({job["chart"]})')
+    assert len(jobs) == 34
+    telemetry = yaml.safe_load((source / 'INFRA/observability/opentelemtry/crds/telemetryconfig.yaml').read_text())
+    assert 'metrics' not in telemetry['spec']
+    assert 'metrics' in telemetry['spec']['versions'][0]['schema']['openAPIV3Schema']['properties']['spec']['properties']
+    telemetry_doc = next(d for d in all_docs if d['kind'] == 'TelemetryConfig')
+    telemetry_schema(telemetry_doc, telemetry['spec']['versions'][0]['schema']['openAPIV3Schema'])
+    tempo = yaml.safe_load((source / 'INFRA/observability/opentelemtry/values.yaml').read_text())['tempo']['tempo']
+    assert tempo['receivers']['otlp']['protocols'] == {'grpc': {'endpoint': '0.0.0.0:4317'}, 'http': {'endpoint': '0.0.0.0:4318'}}
+    print('PASS TelemetryConfig CRD field placement and Tempo receiver types')
+
+    # Evaluate the actual AppProject template for absent, owned and foreign
+    # project states. Only lookup is replaced; the rest is the real template.
+    projects = temp / 'projects'
+    shutil.copytree(source / 'XFSC/Applicationsets/chart', projects)
+    template = projects / 'templates/approject.yaml'
+    template.write_text(template.read_text().replace('lookup "argoproj.io/v1alpha1" "AppProject" $projectNamespace .name', '.testExisting'))
+    for label, existing, expected in [
+        ('absent', {}, True),
+        ('owned', {'metadata': {'annotations': {'meta.helm.sh/release-name': 'storage', 'meta.helm.sh/release-namespace': 'infrastructure'}}}, True),
+        ('foreign', {'metadata': {'annotations': {'meta.helm.sh/release-name': 'other', 'meta.helm.sh/release-namespace': 'infrastructure'}}}, False)
+    ]:
+        v = write_json(temp / 'project.json', {'project': {'testExisting': existing}})
+        docs = manifests(run(HELM, 'template', 'storage', projects, '-n', 'infrastructure', '-f', source / 'XFSC/Applicationsets/values/03_storage-values.yaml', '-f', v, '--is-upgrade'))
+        assert any(d['kind'] == 'AppProject' for d in docs) == expected
+        print(f'PASS AppProject upgrade ownership: {label}')
+
+    # Run the exact mount-inspection block from the adapted provisioning hook
+    # against realistic multi-line JSON and CLI table fixtures.
+    namespace_job = next(d for d in all_docs if d['kind'] == 'Job' and d['metadata']['name'] == 'infrastructure-namespace-openbao-access')
+    script = namespace_job['spec']['template']['spec']['containers'][0]['command'][-1]
+    block = script[script.index('MOUNT_TYPE="$('):script.index('echo "Generating resource provisioner policy..."')]
+    block = block[:block.index('\nelse\n')]
+    for mount_type, expected in [('kv', 0), ('transit', 1)]:
+        program = 'set -eu\nSTORE_MOUNT=infrastructure/system\nbao() { printf "Path Type Accessor Description\\ninfrastructure/system/ ' + mount_type + ' mount_accessor desc\\n"; }\n' + block
+        result = subprocess.run(['sh'], input=program, text=True, capture_output=True)
+        assert result.returncode == expected, result.stdout + result.stderr
+        print(f'PASS existing OpenBao mount type: {mount_type}')

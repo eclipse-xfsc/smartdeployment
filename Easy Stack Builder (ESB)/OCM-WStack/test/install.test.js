@@ -12,9 +12,9 @@ async function setup(t,{failRelease='',namespaces=['kube-system']}={}) {
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'esb-integration-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const state=path.join(dir,'state.json'),calls=path.join(dir,'calls.jsonl');
   await fs.writeFile(state,JSON.stringify({namespaces,objects:{},appsets:[]}));await fs.writeFile(calls,'');
-  for(const name of ['kubectl','helm']){await fs.copyFile(path.join(__dirname,'fake-cli.cjs'),path.join(dir,name));await fs.chmod(path.join(dir,name),0o700);}
+  for(const name of ['kubectl','helm','git','curl']){await fs.copyFile(path.join(__dirname,'fake-cli.cjs'),path.join(dir,name));await fs.chmod(path.join(dir,name),0o700);}
   const events=[];
-  const options={emit:e=>events.push(e),runnerFactory:args=>new Runner({...args,env:{...args.env,PATH:`${dir}:${process.env.PATH}`,ESB_TEST_STATE:state,ESB_TEST_CALLS:calls,ESB_TEST_FAIL_RELEASE:failRelease}}),checkoutSource:async(r,workspace)=>{const source=path.join(workspace,'deployment');await fs.cp(path.join(__dirname,'fixtures/upstream'),source,{recursive:true});await adapt(source);return source;}};
+  const options={emit:e=>events.push(e),runnerFactory:args=>new Runner({...args,env:{...args.env,PATH:`${dir}:${process.env.PATH}`,ESB_TEST_STATE:state,ESB_TEST_CALLS:calls,ESB_TEST_FAIL_RELEASE:failRelease,ESB_TEST_SOURCE:path.join(__dirname,'fixtures/upstream')}}),checkoutSource:async(r,workspace)=>{const source=path.join(workspace,'deployment');await fs.cp(path.join(__dirname,'fixtures/upstream'),source,{recursive:true});await adapt(source);return source;}};
   const originalFetch=global.fetch;
   global.fetch=async url=>new Response(JSON.stringify(url.endsWith('/openid-credential-issuer')?{credential_issuer:'https://demo-tenant.example.com',credential_endpoint:'https://demo-tenant.example.com/api/credential',credential_configurations_supported:{SDJWTCredential:{}}}:url.endsWith('/did.json')?{id:'did:web:demo-tenant.example.com',verificationMethod:[{id:'key'}]}:{keys:[{kid:'key'}]}),{status:200,headers:{'content-type':'application/json'}});
   t.after(()=>{global.fetch=originalFetch;});
@@ -24,6 +24,10 @@ test('executes real official entrypoint once, in order, and installs upstream te
   const h=await setup(t);const report=await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
   assert.equal(report.status,'ready');assert.equal(report.credentialLifecycle,'not-tested');
   const calls=await h.readCalls();const upgrades=calls.filter(x=>x.command==='helm'&&x.args[0]==='upgrade');
+  const firstMutation=calls.findIndex(x=>(x.command==='helm'&&x.args[0]==='upgrade')||(x.command==='kubectl'&&x.args.some(a=>['create','replace','apply'].includes(a))));
+  const lastRender=calls.findLastIndex(x=>x.command==='helm'&&x.args[0]==='template');
+  assert.ok(lastRender<firstMutation,'all chart renders must precede the first cluster write');
+  assert.ok(!calls.slice(firstMutation).some(x=>x.command==='helm'&&x.args[0]==='dependency'),'do not resolve new chart dependencies during installation');
   const names=upgrades.map(x=>x.args[2]==='--timeout'?x.args[x.args.indexOf('-n')+2]:x.args[2]);
   assert.deepEqual(names,['observability','openbao','eso','kyverno','infrastructure-namespace','kubernetes-operator','storage','network','core','ocm-wstack-namespace','ocm-wstack','demotenant']);
   assert.ok(upgrades.every(x=>x.cwd.endsWith('/deployment')));
@@ -31,7 +35,7 @@ test('executes real official entrypoint once, in order, and installs upstream te
   assert.ok(readyIndex>0);assert.ok(calls[readyIndex].args.includes('--for=condition=Ready'));
   assert.ok(readyIndex<calls.findIndex(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('eso')));
   const network=upgrades[names.indexOf('network')];assert.ok(network.args.includes('excludes[1]=INFRA/network/external-dns'));assert.match(network.network.esbTemplatePatch,/valuesObject/);
-  assert.equal(calls.filter(x=>x.args.some(a=>a.includes('install.yaml'))).length,1);
+  assert.equal(calls.filter(x=>x.command==='kubectl'&&x.args.some(a=>a.includes('argo-install.yaml'))).length,1);
   assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.bootstrapComplete,'true');
   const before=upgrades.length;
   await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
@@ -40,7 +44,7 @@ test('executes real official entrypoint once, in order, and installs upstream te
 test('upstream Helm failure stops before network/OCM/tenant, retains progress and permits a matching resume',async t=>{
   const h=await setup(t,{failRelease:'storage'});
   await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'COMMAND_FAILED'});
-  const calls=await h.readCalls();assert.ok(!calls.some(x=>x.command==='helm'&&x.args.includes('network')));assert.ok(!calls.some(x=>x.args.includes('demotenant')));
+  const calls=await h.readCalls();assert.ok(!calls.some(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('network')));assert.ok(!calls.some(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('demotenant')));
   const marker=(await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'];assert.equal(marker.data.state,'failed');assert.notEqual(marker.data.bootstrapComplete,'true');
   const factory=h.options.runnerFactory;h.options.runnerFactory=opts=>{const r=factory(opts);delete r.env.ESB_TEST_FAIL_RELEASE;return r;};
   assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
@@ -80,4 +84,23 @@ test('an unready OnDelete OpenBao pod stops bootstrap; retry succeeds when the p
   assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.state,'failed');
   h.options.runnerFactory=normal;
   assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
+});
+test('a late chart template error is detected before any cluster mutation, including ownership and lease writes',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_BAD_CHART='storage-service';return r;};
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.code==='CHART_PREFLIGHT'&&e.message.includes('OCM W-Stack/Storage Service'));
+  const calls=await h.readCalls();
+  assert.ok(!calls.some(x=>x.command==='helm'&&['upgrade','install','uninstall'].includes(x.args[0])));
+  assert.ok(!calls.some(x=>x.command==='kubectl'&&x.args.some(a=>['create','replace','apply','patch','delete'].includes(a))));
+  assert.deepEqual((await h.readState()).objects,{});
+  assert.ok(calls.some(x=>x.command==='helm'&&x.args[0]==='template'&&x.args[1]==='demotenant'),'check remaining charts after one fails');
+});
+test('preflight checks the complete selection without modifying the cluster',async t=>{
+  const h=await setup(t);const report=await operation('preflight',example,{kubeconfig:'mock-cluster-config'},h.options);
+  assert.equal(report.status,'charts-validated');assert.equal(report.liveDeploymentTested,false);
+  assert.deepEqual(report.applicationCounts,{'storage':5,'network':3,'core':2,'ocm-wstack':12});
+  assert.equal(report.charts.length,34);
+  const calls=await h.readCalls();
+  assert.ok(!calls.some(x=>x.command==='helm'&&x.args[0]==='upgrade'));
+  assert.deepEqual((await h.readState()).objects,{});
 });

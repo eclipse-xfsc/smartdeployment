@@ -9,6 +9,11 @@
     "argocd-bootstrap.sh": "49d6b6fade5af657dd17948d4a4f97e675645e0573052275ad9bfc8c2c49a780",
     "check-applicationset.sh": "70c50ad9b39494ffce28569788b9e161f541206f3f342fc6362d5dcec9e1ec7d",
     "XFSC/Applicationsets/chart/templates/applicationset-template.yaml": "4b66c2249e0b199224c0458dd1fadc52059edaab7de72c29b2c29b62b00b708b",
-    "XFSC/tenant/chart/templates/tenant-registration.yaml": "a6b3d6a0fe21dac8b75fc1357ff8da0ce4dd6f181b400bf2e259e4482dadf590"
+    "XFSC/tenant/chart/templates/tenant-registration.yaml": "a6b3d6a0fe21dac8b75fc1357ff8da0ce4dd6f181b400bf2e259e4482dadf590",
+    "INFRA/security/kyverno/values.yaml": "90f70060b688325721f5a1f7a094a748e132a57c1ffc3787758bf8856065f497",
+    "INFRA/observability/opentelemtry/values.yaml": "698d445a1cd65113c3b18deac84aefa30f41d2ae1c102928cf9f2a949c1864f7",
+    "INFRA/observability/opentelemtry/crds/telemetryconfig.yaml": "afbcb0f16e0498a0901a3d5dd5615b25b269c82c16661cd8a46320b585794d1a",
+    "XFSC/Applicationsets/chart/templates/approject.yaml": "91bf21e8a9751a058d16eaa92b0454bd4c69661ea35a282417563652be733529",
+    "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f743eb0646883ad4085415a2c394b10ce55d359f3cbc6a0bf75f7b93b41b6fac"
   }
 }

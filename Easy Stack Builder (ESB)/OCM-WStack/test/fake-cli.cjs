@@ -12,8 +12,24 @@ fs.appendFileSync(logPath,JSON.stringify(record)+'\n');
 const out=x=>process.stdout.write(typeof x==='string'?x+'\n':JSON.stringify(x)+'\n');
 const save=()=>fs.writeFileSync(statePath,JSON.stringify(state));
 function fail(message){process.stderr.write(message+'\n');process.exit(1);}
+if(cmd==='git') {
+  if(args.includes('rev-parse')||args.includes('ls-remote'))out('739606691ecff72b3a40404a19fce44d9c22b0ee');
+  else if(args.includes('worktree'))fs.cpSync(process.env.ESB_TEST_SOURCE,args[args.indexOf('--detach')+1],{recursive:true});
+  else if(!args.includes('fetch'))fail('Unimplemented fake git');
+  process.exit(0);
+}
+if(cmd==='curl') {
+  fs.writeFileSync(args[args.indexOf('--output')+1],'kind: CustomResourceDefinition\n---\nkind: Deployment\nmetadata:\n  name: argocd-server\n');
+  process.exit(0);
+}
 if(cmd==='helm'){
   if(args[0]==='version')out('v3.17.3+mock');
+  if(args[0]==='template') {
+    if(args[1]==='esb-yaml-reader') {
+      const input=fs.readFileSync(args[args.indexOf('-f')+1],'utf8');
+      out(require('node:child_process').execFileSync('python3',['-c','import sys,json,yaml; print(json.dumps({k:yaml.safe_load(v) for k,v in json.load(sys.stdin)["documents"].items()}))'],{input,encoding:'utf8'}).trim());
+    } else if(args[1]===process.env.ESB_TEST_BAD_CHART)fail('Simulated real-template rejection');
+  }
   if(args[0]==='upgrade'){
     const release=args[args.indexOf('-n')+2];
     // Tenant command places the release immediately after --install.
@@ -30,6 +46,7 @@ const a=[...args];let ns='default';
 const n=a.indexOf('-n');if(n>=0){ns=a[n+1];a.splice(n,2);}
 const nn=a.indexOf('--namespace');if(nn>=0){ns=a[nn+1];a.splice(nn,2);}
 const [verb,kind,name]=a;
+if(verb==='version'){out({serverVersion:{gitVersion:'v1.34.2'}});process.exit(0);}
 if(verb==='auth'){out('yes');process.exit(0);}
 if(verb==='rollout'&&a.includes('statefulset/openbao'))fail('error: rollout status is only available for RollingUpdate strategy type');
 if(verb==='wait'){
@@ -44,7 +61,7 @@ if(verb==='get'){
   else if(kind==='namespace'&&name==='kube-system')out({metadata:{name,uid:'test-cluster-uid'}});
   else if(kind==='namespaces')out({items:state.namespaces.map(name=>({metadata:{name}}))});
   else if(kind==='configmap'||kind==='lease'){const v=state.objects[`${ns}/${kind}/${name}`];if(v)out(v);else if(!a.includes('--ignore-not-found'))fail('NotFound');}
-  else if(kind==='applications.argoproj.io')out({items:state.appsets.map(set=>({metadata:{name:`${set}-component`,ownerReferences:[{kind:'ApplicationSet',name:set,controller:true}]},spec:{destination:{namespace:set==='ocm-wstack'?'ocm-wstack':'infrastructure'}},status:{sync:{status:'Synced',revision:'mock-main-sha'},health:{status:'Healthy'}}}))});
+  else if(kind==='applications.argoproj.io')out({items:state.appsets.flatMap(set=>Array.from({length:JSON.parse(process.env.ESB_APPSET_COUNTS||'{}')[set]||1},(_,i)=>({metadata:{name:`${set}-component-${i}`,ownerReferences:[{kind:'ApplicationSet',name:set,controller:true}]},spec:{destination:{namespace:set==='ocm-wstack'?'ocm-wstack':'infrastructure'}},status:{sync:{status:'Synced',revision:'mock-main-sha'},health:{status:'Healthy'}}})))});
   else if(kind==='pods'){if(a.includes('--no-headers'))out('argocd-server 1/1 Running 0 1m');else out({items:[{metadata:{name:'credential-retrieval-service-1',namespace:'ocm-wstack'},status:{phase:'Running',containerStatuses:[{name:'retrieval',ready:true,restartCount:0,image:'upstream:1.1.5',imageID:'sha256:test'}]}}]});}
   else if(kind==='pvc')out({items:[]});
   else if(kind==='gateway')out({status:{addresses:[{type:'Hostname',value:'example.elb.amazonaws.com'}]}});
@@ -56,7 +73,7 @@ if(verb==='get'){
 if(verb==='create'&&kind==='namespace') {out({apiVersion:'v1',kind:'Namespace',metadata:{name}});process.exit(0);}
 if(['create','replace','apply'].includes(verb)){
   const f=a[a.indexOf('-f')+1];
-  if(!f||f.startsWith('https://')){out('applied');process.exit(0);}
+  if(!f||f.startsWith('https://')||f.endsWith('argo-install.yaml')){out('applied');process.exit(0);}
   const doc=JSON.parse(fs.readFileSync(f==='-'?0:f,'utf8'));
   if(doc.kind==='Lease')for(const field of ['acquireTime','renewTime']){
     if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(doc.spec[field]))fail('BadRequest: Lease '+field+' must use Kubernetes RFC3339Micro');

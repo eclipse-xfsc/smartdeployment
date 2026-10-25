@@ -7,7 +7,7 @@ const {operation}=require('../lib/install');
 
 async function main() {
   const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},kubeconfig:{type:'string'},'dns-token-file':{type:'string'},'dns-secret-file':{type:'string'},confirm:{type:'string'},help:{type:'boolean',short:'h'}}});
-  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|deploy|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
+  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|preflight|deploy|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
   const action=positionals[0];
   if(positionals.length!==1)throw new Error('Provide exactly one action.');
   if(action==='check') {
