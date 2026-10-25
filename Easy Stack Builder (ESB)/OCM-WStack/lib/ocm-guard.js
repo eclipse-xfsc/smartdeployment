@@ -46,6 +46,8 @@ async function status(r){
   const current=core.ownedPods(workload,pods.items||[],replicasets.items||[]).map(p=>p.metadata.uid).sort();
   return current.length===(workload.spec.replicas??1)&&JSON.stringify(current)===JSON.stringify(service.podUids)&&subjects.every(x=>service.subjects?.includes(x));
  });
+ const verificationReady=core.verificationNatsReady(deployments.items?.find(x=>x.metadata.name===core.VERIFICATION),pods.items||[],replicasets.items||[]);
+ if(!verificationReady)return {...d,ready:false,code:'VERIFICATION_NATS_CONTRACT',verificationNats:{ready:false}};
  const age=Date.now()-Date.parse(d.checkedAt);
  return {...d,ready:d.ready===true&&d.credentials?.synchronized===true&&d.redis?.authenticated===true&&complete&&age>=0&&age<60000};
 }

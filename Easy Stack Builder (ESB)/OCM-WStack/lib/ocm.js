@@ -68,6 +68,12 @@ function routingValues(){
       namespace: ocm-wstack
       name: credential-retrieval-service
       jsonPointers: [/spec/strategy]
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-verification-service
+      jqPathExpressions:
+${Object.keys(require('./ocm-guard-core').VERIFICATION_NATS_ENV).map(name=>`        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "${name}")'`).join('\n')}
   syncPolicy:
     syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]
 `;

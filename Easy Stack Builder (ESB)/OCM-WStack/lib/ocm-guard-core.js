@@ -3,6 +3,15 @@
 const net=require('node:net'),tls=require('node:tls'),crypto=require('node:crypto');
 const NS='ocm-wstack',ANNOTATION='esb.xfsc.io/credentials',RECOVERY='esb.xfsc.io/nats-recovery';
 const BRIDGE='pre-authorization-bridge',WELLKNOWN='well-known-service';
+const VERIFICATION='credential-verification-service';
+// These four non-secret values are written by the native NATS injector.
+// Argo excludes only these entries; the guard checks their values and presence.
+const VERIFICATION_NATS_ENV=Object.freeze({
+ CREDENTIALVERIFICATION_NATS_HOST:'nats.infrastructure.svc.cluster.local',
+ CREDENTIALVERIFICATION_NATS_PORT:'4222',
+ CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT:'10s',
+ CREDENTIALVERIFICATION_MESSAGING_NATS_URL:'nats://nats.infrastructure.svc.cluster.local:4222'
+});
 const SUBJECTS={
  [BRIDGE]:['auth.authorization.generate','auth.authorization.validate'],
  [WELLKNOWN]:['wellknown.issuer.registration','wellknown.issuer.metadata']
@@ -73,6 +82,22 @@ async function ensureRedis(contract,{connect=redisConnection,repair=true}={}){
  return {authenticated:true,changed};
 }
 function ownedPods(d,pods,replicasets){const ids=new Set(replicasets.filter(s=>s.metadata.ownerReferences?.some(o=>o.uid===d.metadata.uid&&o.controller===true)).map(s=>s.metadata.uid));return pods.filter(p=>!p.metadata.deletionTimestamp&&p.metadata.ownerReferences?.some(o=>ids.has(o.uid)&&o.controller===true)&&p.status?.phase==='Running'&&p.status.podIP);}
+function verificationNatsContract(workload){
+ const spec=workload?.spec?.template?.spec||workload?.spec;
+ const containers=spec?.containers?.filter(c=>c.name===VERIFICATION)||[];
+ if(containers.length!==1)return false;
+ return Object.entries(VERIFICATION_NATS_ENV).every(([name,value])=>{
+  const entries=containers[0].env?.filter(e=>e.name===name)||[];
+  return entries.length===1&&entries[0].value===value&&!entries[0].valueFrom;
+ });
+}
+function verificationNatsReady(d,pods,replicasets){
+ if(!ready(d)||!verificationNatsContract(d))return false;
+ const current=ownedPods(d,pods,replicasets);
+ return current.length===(d.spec.replicas??1)&&current.every(p=>
+  verificationNatsContract(p)&&p.metadata.annotations?.[ANNOTATION]===d.spec.template.metadata.annotations?.[ANNOTATION]&&
+  p.spec.containers.find(c=>c.name===VERIFICATION)?.image===d.spec.template.spec.containers.find(c=>c.name===VERIFICATION)?.image);
+}
 function listeners(d,pods,replicasets,connections){
  const current=ownedPods(d,pods,replicasets).filter(p=>p.spec.containers.some(c=>c.name===d.metadata.name&&c.image===d.spec.template.spec.containers.find(c=>c.name===d.metadata.name)?.image)&&p.metadata.annotations?.[ANNOTATION]===d.spec.template.metadata.annotations?.[ANNOTATION]);
  const required=SUBJECTS[d.metadata.name]||[];
@@ -117,6 +142,7 @@ async function reconcile(api,{connect=redisConnection,now=Date.now}={}){
  const pending=consumers.filter(d=>!ready(d)).length;
  const latest=new Map((await api.list('secrets',NS)).map(x=>[x.metadata.name,x]));
  const stable=consumers.every(d=>credentialDigest(d,s.secrets)===credentialDigest(d,latest));
- return {ready:!changed&&stable&&pending===0&&redis.authenticated&&services.every(x=>x.ready),credentials:{synchronized:!changed&&stable&&pending===0,pendingRollouts:pending},redis:{authenticated:redis.authenticated},services,checkedAt:new Date(now()).toISOString()};
+ const verificationReady=verificationNatsReady(s.deployments.find(d=>d.metadata.name===VERIFICATION),s.pods,s.replicasets);
+ return {ready:!changed&&stable&&pending===0&&redis.authenticated&&services.every(x=>x.ready)&&verificationReady,...(!verificationReady?{code:'VERIFICATION_NATS_CONTRACT'}:{}),verificationNats:{ready:verificationReady},credentials:{synchronized:!changed&&stable&&pending===0,pendingRollouts:pending},redis:{authenticated:redis.authenticated},services,checkedAt:new Date(now()).toISOString()};
 }
-module.exports={NS,ANNOTATION,RECOVERY,BRIDGE,WELLKNOWN,SUBJECTS,ready,decode,env,value,credentialDigest,parseResp,redisConnection,redisContract,ensureRedis,ownedPods,listeners,snapshot,reconcile,blocked};
+module.exports={NS,ANNOTATION,RECOVERY,BRIDGE,WELLKNOWN,VERIFICATION,VERIFICATION_NATS_ENV,SUBJECTS,ready,decode,env,value,credentialDigest,parseResp,redisConnection,redisContract,ensureRedis,ownedPods,verificationNatsContract,verificationNatsReady,listeners,snapshot,reconcile,blocked};

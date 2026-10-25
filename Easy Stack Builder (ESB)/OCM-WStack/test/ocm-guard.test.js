@@ -5,10 +5,10 @@ const b64=s=>Buffer.from(s).toString('base64'),sha=s=>crypto.createHash('sha256'
 function fixture(){
  const secret={metadata:{name:'bridge-redis-credentials'},data:{username:b64('bridge'),password:b64('first-private-password')}};
  const e=[{name:'PREAUTHBRIDGE_REDIS_HOSTS',value:'redis.infrastructure.svc.cluster.local:6379'},...['username','password'].map(key=>({name:'PREAUTHBRIDGE_REDIS_'+key.toUpperCase(),valueFrom:{secretKeyRef:{name:secret.metadata.name,key}}}))];
- const deployment=name=>({metadata:{name,uid:name,generation:1,resourceVersion:'7'},spec:{replicas:1,template:{metadata:{annotations:{}},spec:{containers:[{name,image:'native:reviewed',env:name===core.BRIDGE?e:[{name:'WELLKNOWN_SERVICE_NATS_URL',value:'nats://nats.infrastructure.svc.cluster.local:4222'}]}]}}},status:{observedGeneration:1,replicas:1,updatedReplicas:1,readyReplicas:1,availableReplicas:1}});
+ const deployment=name=>({metadata:{name,uid:name,generation:1,resourceVersion:'7'},spec:{replicas:1,template:{metadata:{annotations:{}},spec:{containers:[{name,image:'native:reviewed',env:name===core.BRIDGE?e:name===core.VERIFICATION?Object.entries(core.VERIFICATION_NATS_ENV).map(([name,value])=>({name,value})):[{name:'WELLKNOWN_SERVICE_NATS_URL',value:'nats://nats.infrastructure.svc.cluster.local:4222'}]}]}}},status:{observedGeneration:1,replicas:1,updatedReplicas:1,readyReplicas:1,availableReplicas:1}});
  const bridge=deployment(core.BRIDGE),wk=deployment(core.WELLKNOWN),secrets=new Map([[secret.metadata.name,secret]]);
  bridge.spec.template.metadata.annotations[core.ANNOTATION]=core.credentialDigest(bridge,secrets);
- const deployments=[bridge,wk];
+ const deployments=[bridge,wk,deployment(core.VERIFICATION)];
  const replicasets=deployments.map(d=>({metadata:{uid:d.metadata.name+'-rs',ownerReferences:[{uid:d.metadata.uid,controller:true}]}}));
  const pods=deployments.map((d,i)=>({metadata:{name:d.metadata.name+'-pod',uid:d.metadata.name+'-pod-uid',annotations:{...d.spec.template.metadata.annotations},ownerReferences:[{uid:d.metadata.name+'-rs',controller:true}]},spec:d.spec.template.spec,status:{phase:'Running',podIP:'10.0.0.'+(i+1)}}));
  const claims=[{metadata:{name:'bridge-redis'},spec:{type:'redis',providerRef:{name:'redis'},externalSecretRef:{name:secret.metadata.name},parameters:{acl:{keys:['auth:*']},database:0}},status:{phase:'Pending'}}];
@@ -81,6 +81,30 @@ test('stale, incomplete and unauthenticated guard reports cannot mark deployment
  report.checkedAt=new Date().toISOString();report.redis.authenticated=false;assert.equal((await guard.status(r)).ready,false);
  report.redis.authenticated=true;report.services[1].subjects=[];assert.equal((await guard.status(r)).ready,false);
  report.services[1].subjects=core.SUBJECTS[core.WELLKNOWN];f.pods[1].metadata.uid='replacement-pod';assert.equal((await guard.status(r)).ready,false);
+});
+test('verification permits reordered NATS entries but blocks missing, duplicate, referenced or incorrect values',async()=>{
+ const f=fixture(),d=f.deployments.find(d=>d.metadata.name===core.VERIFICATION),entries=d.spec.template.spec.containers[0].env;
+ entries.reverse();assert.equal((await core.reconcile(f.api,{connect:f.connect})).ready,true);
+ for(const [name,value] of Object.entries(core.VERIFICATION_NATS_ENV)){
+  const item=entries.find(e=>e.name===name),old={...item};
+  item.value='incorrect';assert.equal((await core.reconcile(f.api,{connect:f.connect})).code,'VERIFICATION_NATS_CONTRACT');
+  item.value=value;item.valueFrom={secretKeyRef:{name:'some-secret',key:'value'}};assert.equal(core.verificationNatsContract(d),false);delete item.valueFrom;
+  const index=entries.indexOf(item);entries.splice(index,1);assert.equal(core.verificationNatsContract(d),false);entries.splice(index,0,old);
+  entries.push({...old});assert.equal(core.verificationNatsContract(d),false);entries.pop();
+ }
+ assert.equal((await core.reconcile(f.api,{connect:f.connect})).ready,true);
+ f.deployments.splice(f.deployments.indexOf(d),1);assert.equal((await core.reconcile(f.api,{connect:f.connect})).ready,false);
+});
+test('verification checks actual current pods and rejects a ready report after its configuration changes',async()=>{
+ const f=fixture(),report=await core.reconcile(f.api,{connect:f.connect});
+ const r={run:async()=>({code:0,stdout:JSON.stringify(report)}),json:async(cmd,args)=>({items:args.includes('deployments')?f.deployments:args.includes('pods')?f.pods:f.replicasets})};
+ assert.equal((await guard.status(r)).ready,true);
+ const pod=f.pods.find(p=>p.spec.containers[0].name===core.VERIFICATION);pod.spec=structuredClone(pod.spec);
+ pod.spec.containers[0].env[0].value='incorrect';assert.equal((await guard.status(r)).ready,false);
+ assert.equal((await core.reconcile(f.api,{connect:f.connect})).code,'VERIFICATION_NATS_CONTRACT');
+ pod.spec=structuredClone(f.deployments.find(d=>d.metadata.name===core.VERIFICATION).spec.template.spec);
+ pod.metadata.annotations[core.ANNOTATION]='stale';assert.equal((await guard.status(r)).ready,false);delete pod.metadata.annotations[core.ANNOTATION];
+ pod.spec.containers[0].image='obsolete:tag';assert.equal((await guard.status(r)).ready,false);
 });
 test('guard resources use namespace-scoped permissions, reuse the ORCE image and never retain uploaded kubeconfig',()=>{
  const docs=guard.resources('ecofacis/xfsc-orce:2.0.15',{'ocm-guard.js':'source','ocm-guard-core.js':'source'});const cluster=docs.find(x=>x.kind==='ClusterRole');assert.deepEqual(cluster.rules,[{apiGroups:['resources.xfsc.io'],resources:['resourceproviders'],resourceNames:['redis'],verbs:['get']}]);
