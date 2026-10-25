@@ -158,6 +158,7 @@ async function validate(r,c) {
   }
   report.credentialLifecycle='not-tested';
   report.internetVerified=report.native.every(x=>x.ok)&&(!c.runtimeEnabled||report.ui.checks.every(x=>x.ok))&&(!c.publicDashboards||report.dashboards.checks.every(x=>x.ok));
+  if(report.internetVerified)report.dns.instructions='Public endpoints verified reachable. No DNS change is required.';
   return report;
 }
 async function waitValidation(r,c,{check=validate,now=Date.now,pause=delay}={}){
@@ -246,7 +247,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const ocmValues=await privateFile(dir,'ocm-values.json',JSON.stringify(ocm.values(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));
-    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile,ESB_OCM_STARTUP:path.join(__dirname,'../scripts/ocm-startup.js'),ESB_NATIVE_DIDCOMM:String(!!(c.runtimeEnabled&&!c.runtimeServices?.didcomm))};
+    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_STORAGE_VALUES:coreValues,ESB_NATIVE_COMPAT:path.join(__dirname,'../scripts/native-compatibility.js'),ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile,ESB_OCM_STARTUP:path.join(__dirname,'../scripts/ocm-startup.js'),ESB_NATIVE_DIDCOMM:String(!!(c.runtimeEnabled&&!c.runtimeServices?.didcomm))};
     if(action==='install-ui'){await tls.install(r,c,certificate);if(marker.data.bootstrapComplete!=='true')fail('OWNERSHIP','Complete the native bootstrap before install-ui.');if(!c.runtimeEnabled)fail('CONFIG','Enable the ORCE runtime before install-ui.');await gatewayConfig.internalRouting(r,c);await gatewayConfig.waitTenantTls(r,c);const ui=await runtime.install(r,c,credentials,dir);const report=await validate(r,c);return {...report,ui:{...report.ui,...ui}};}
     let lastAddresses='',observing=false;
     dnsTimer=setInterval(async()=>{
@@ -269,7 +270,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
       await gatewayConfig.reconcile(r,c);
       if(action==='repair-network'){return await inspect(r,c);}
       for(const [name,file] of [['storage','03_storage'],['core','05_core']]){
-        await helmUpgrade(r,['upgrade','--install',name,path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,`XFSC/Applicationsets/values/${file}-values.yaml`),...(name==='core'?['-f',coreValues]:[]),'--set-string',`tag=${lock.argoRevision}`,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','infrastructure','--timeout',`${c.timeoutSeconds}s`],{namespace:'infrastructure',release:name,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
+        await helmUpgrade(r,['upgrade','--install',name,path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,`XFSC/Applicationsets/values/${file}-values.yaml`),...(['core','storage'].includes(name)?['-f',coreValues]:[]),'--set-string',`tag=${lock.argoRevision}`,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','infrastructure','--timeout',`${c.timeoutSeconds}s`],{namespace:'infrastructure',release:name,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
         await r.run('bash',['check-applicationset.sh',name,'argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
       }
     }
@@ -305,7 +306,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     c.publicDnsRecords=await require('./connectivity').waitDns(r,c);
     emit({type:'phase',phase:'native-validation'});
     const report=await waitValidation(r,c);report.ui={...report.ui,...ui};report.dashboards={...report.dashboards,...admin};
-    if(/STORAGE_(REGION|COUNTRY)_MISSING/.test(JSON.stringify(report))){
+    if(report.ui?.checks?.find(x=>x.name==='ui-ready')?.dependencies?.some(x=>x.name==='storage'&&!x.ok)){
       try{report.storageDiagnostics=await require('./storage-diagnostics').diagnose(r);emit({type:'storage-diagnostics',...report.storageDiagnostics});}
       catch(e){emit({type:'storage-diagnostics',error:e.code||'DIAGNOSTIC_FAILED'});}
     }

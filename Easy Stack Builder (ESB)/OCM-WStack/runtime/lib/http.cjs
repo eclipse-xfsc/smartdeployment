@@ -15,7 +15,7 @@ function request(url,{method='GET',headers={},body,timeout=5000,maxBytes=2097152
      const err=new AppError(res.statusCode===404?404:res.statusCode>=500?503:502,res.statusCode===404?'RESOURCE_NOT_FOUND':'UPSTREAM_REJECTED');
      err.upstreamStatus=res.statusCode;
      // Only known, non-sensitive reasons. Never return arbitrary upstream bodies.
-     const reasons={'Region Id Missing.':'STORAGE_REGION_MISSING','Country Id Missing.':'STORAGE_COUNTRY_MISSING','tenant not found':'ISSUER_TENANT_NOT_REGISTERED'};
+     const reasons={'Region Id Missing.':'STORAGE_REGION_MISSING','Country Id Missing.':'STORAGE_COUNTRY_MISSING','Tenant Id Missing.':'STORAGE_TENANT_MISSING','Account Id Missing.':'STORAGE_ACCOUNT_MISSING','Bad content type':'STORAGE_CONTENT_TYPE_INVALID','Body error':'STORAGE_QUERY_INVALID','Error during record get.':'STORAGE_READ_FAILED','Token Invalid.':'STORAGE_TOKEN_INVALID','tenant not found':'ISSUER_TENANT_NOT_REGISTERED'};
      try{const b=JSON.parse(Buffer.concat(chunks).toString());err.reason=reasons[b.message||b.error];}catch{}
      return reject(err);
     }
@@ -35,7 +35,7 @@ class Client {
   if(!path.startsWith('/')||path.startsWith('//'))throw new AppError(500,'CONFIGURATION_ERROR');
   let state=this.states.get(name)||{failures:0,openUntil:0};this.states.set(name,state);
   if(state.openUntil>Date.now())throw new AppError(503,'UPSTREAM_CIRCUIT_OPEN');
-  try{const r=await request(this.urls[name]+path,options);state.failures=0;state.openUntil=0;state.lastSuccessAt=new Date().toISOString();state.lastErrorCode=null;state.lastUpstreamStatus=null;state.lastReason=null;return r;}
+  try{const r=await request(String(this.urls[name]||'').replace(/\/+$/,'')+path,options);state.failures=0;state.openUntil=0;state.lastSuccessAt=new Date().toISOString();state.lastErrorCode=null;state.lastUpstreamStatus=null;state.lastReason=null;return r;}
   catch(e){e.upstream=name;state.lastErrorCode=e.code;state.lastUpstreamStatus=e.upstreamStatus||null;state.lastReason=e.reason||null;const transient=e.upstreamStatus?e.upstreamStatus>=500:e.status>=500;if(transient){if(++state.failures>=3)state.openUntil=Date.now()+30000;}else{state.failures=0;state.openUntil=0;}throw e;}
  }
  health(){return [...this.states].map(([name,s])=>({name,circuit:s.openUntil>Date.now()?'open':'closed',lastSuccessAt:s.lastSuccessAt||null,lastErrorCode:s.lastErrorCode||null,lastUpstreamStatus:s.lastUpstreamStatus||null,lastReason:s.lastReason||null}));}

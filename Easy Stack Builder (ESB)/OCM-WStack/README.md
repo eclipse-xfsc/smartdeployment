@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.3
+# OCM W-Stack ESB 12.3.4
 
-This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. Storage listing is confirmed fixed by the user. This version repairs OCM context JSON mutation handling and deploys the native DIDComm connector for Relationships. Argo CD continues following deployment main; live acceptance of these new fixes remains required.
+This package implements the approved uploaded-certificate deployment and OCM-CR OCM W-Stack UI, retaining the 11.1.0 design. Version 12.3.4 repairs the Cassandra probe restart loop and Verification's malformed registry reference, and aligns credential-list requests with Storage 1.3.0. Argo CD continuously follows deployment main. The local checks pass; full live credential lifecycle acceptance remains required.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.3.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.4.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.3.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.4.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.3, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. This release fixes the resolver Service name in DIDComm, Policy and Verification, serializes Retrieval rollouts, and automatically checks the known Retrieval 1.1.5 dirty V001 migration. Recovery verifies the image digest, upstream migration checksum, five-minute settling period and exact table schema, saves the original migration metadata, replays only the official idempotent CREATE TABLE, and conditionally marks the verified migration clean. Unsupported or conflicting state stops with an error. No offer or credential rows, Secrets or PVCs are deleted; migrations remain enabled. Argo CD continues following main. See docs/REPAIR-12.3.3.md and VALIDATION.md.
+Install 12.3.4, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. Cassandra probe protection is installed before fresh Storage bootstrap and reconciles the existing StatefulSet on upgrades. Verification gets a valid anonymous registry reference; malformed existing entries are removed automatically without deleting valid registry references. Storage lists every format with the documented empty POST payload and explicit application/json. Automatic diagnostics now exercise the installed OCM context adapter for any failed Storage dependency. No additional configuration or cleanup is required. Previous resolver, Retrieval migration, TLS, DNS and OCM context changes are retained. See docs/REPAIR-12.3.4.md and VALIDATION.md.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
@@ -36,7 +36,7 @@ It records image identities and native HTTP status/routes without displaying sto
 
 The OCM context API parses JSON request bodies once, before ORCE's HTTP-in JSON/raw parser chain, with a 1 MiB limit and JSON error responses. Existing persisted flows are retained. The browser displays HTTP status and request ID for invalid/non-JSON responses and retains the original idempotency key after uncertain failures. Deploy tests unauthenticated POST, PATCH and DELETE requests: each must reach the OCM context's JSON authentication boundary, without creating credentials or changing data. GET readiness alone is insufficient.
 
-Relationships uses the official native DIDComm service and its persistent Cassandra database. Argo manages its chart from deployment main, with only the required configuration overrides. The native service runs its own schema migration. A startup probe allows migration to finish before liveness checks. Only POST `/api/didcomm/message/receive` is exposed publicly; `/admin` operations stay behind the OCM context's authenticated, scoped API. Existing externally configured DIDComm services remain operator-owned. See `docs/REPAIR-12.3.3.md` for evidence and limits.
+Relationships uses the official native DIDComm service and its persistent Cassandra database. Argo manages its chart from deployment main, with only the required configuration overrides. The native service runs its own schema migration. A startup probe allows migration to finish before liveness checks. Only POST `/api/didcomm/message/receive` is exposed publicly; `/admin` operations stay behind the OCM context's authenticated, scoped API. Existing externally configured DIDComm services remain operator-owned. See `docs/REPAIR-12.3.3.md` for the earlier DIDComm evidence and limits.
 
 ## DNS and internet access
 

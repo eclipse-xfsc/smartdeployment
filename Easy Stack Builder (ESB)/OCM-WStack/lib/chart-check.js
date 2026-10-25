@@ -55,7 +55,7 @@ async function plan(r, source, argoSource, c, directory) {
     if(name==='network')excluded.add('INFRA/network/cluster-issuer');
     const values={storageClass:c.actualStorageClass,tag:lock.argoRevision};
     if(name==='network')Object.assign(values,{profile:c.profile,domain:c.domain,email:c.email,excludes:[...excluded]},networkValues(c));
-    if(name==='core')Object.assign(values,ocm.routingValues());
+    if(['core','storage'].includes(name))Object.assign(values,ocm.routingValues());
     if(name==='ocm-wstack')Object.assign(values,ocm.values(c));
     jobs.push({release:name,chart:'XFSC/Applicationsets/chart',namespace:set.namespace,root:source,files:[`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`],values,parameters:[]});
     const parent=set.path.slice(0,-2);

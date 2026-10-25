@@ -1,0 +1,36 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: esb-ocm-cassandra-probes
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: esb-ocm-gateway
+    meta.helm.sh/release-namespace: security
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  background: false
+  failurePolicy: Fail
+  rules:
+    - name: allow-cassandra-jmx-probe-time
+      match:
+        any:
+          - resources:
+              kinds: [StatefulSet]
+              namespaces: [infrastructure]
+              names: [cassandra]
+              operations: [CREATE, UPDATE]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            template:
+              spec:
+                containers:
+                  - (name): cassandra
+                    startupProbe:
+                      timeoutSeconds: 10
+                    readinessProbe:
+                      timeoutSeconds: 10
+                    livenessProbe:
+                      timeoutSeconds: 10
+                      failureThreshold: 6

@@ -121,9 +121,10 @@ async function adapt(dir) {
       if (['storage','network','core','ocm-wstack'].includes(nameMatch[2])) command += ' --set-string tag='+lock.argoRevision;
       if (nameMatch[2] === 'network') command = command.replace('"${NETWORK_ARGS[@]}"','')+' -f "$ESB_NETWORK_VALUES"';
       if (nameMatch[2] === 'core') command += ' -f "$ESB_CORE_VALUES"';
+      if (nameMatch[2] === 'storage') command += ' -f "$ESB_STORAGE_VALUES"';
       if (nameMatch[2] === 'ocm-wstack') command += ' -f "$ESB_OCM_VALUES"';
       command = command.replace(/^helm /, `node "\${ESB_HELM_UPGRADE:?ESB Helm runner is required}" ${nameMatch[1]} ${nameMatch[2]} `);
-      const prerequisites=nameMatch[2]==='ocm-wstack'?'node "${ESB_OCM_PREREQUISITES:?ESB OCM prerequisites are required}"\n':'';
+      const prerequisites=nameMatch[2]==='ocm-wstack'?'node "${ESB_OCM_PREREQUISITES:?ESB OCM prerequisites are required}"\n':nameMatch[2]==='storage'?'node "${ESB_NATIVE_COMPAT:?ESB native compatibility runner is required}"\n':'';
       return `echo "[ESB_PHASE] ${nameMatch[2]}"\n${prerequisites}${command}${waits[nameMatch[2]] ? '\n'+waits[nameMatch[2]] : ''}`;
     }).join('\n');
     if(name==='ocm-wstack-init.sh')text=once(text,'./check-applicationset.sh ocm-wstack argocd','node "${ESB_OCM_STARTUP:?ESB OCM startup runner is required}"\n./check-applicationset.sh ocm-wstack argocd',name);

@@ -6,7 +6,7 @@ const {Adapters}=require('../runtime/lib/adapters.cjs');
 test('Storage 1.2.5 scopes list, import, deletion and chain requests to configured geography',async()=>{
  const calls=[],a=new Adapters({storageRegion:'EU',storageCountry:'NL'},{call:async(n,p,o)=>{calls.push({n,p,o});return {credentials:{}};}}),ctx={tenant:'demo-tenant',account:'ocm-wstack',group:'ocm-wstack'};
  await a.records(ctx);await a.remove(ctx,'record-1');
- assert.equal(calls[0].p,'/v1/tenants/demo-tenant/storage/EU/NL/ocm-wstack/credentials');assert.equal(calls[0].o.method,'POST');assert.deepEqual(calls[0].o.body,{});
+ assert.equal(calls[0].p,'/v1/tenants/demo-tenant/storage/EU/NL/ocm-wstack/credentials');assert.equal(calls[0].o.method,'POST');assert.equal(calls[0].o.body,undefined);
  assert.equal(calls[1].p,calls[0].p+'/record-1');assert.equal(calls[1].o.method,'DELETE');
  assert.equal(credentialsPath({tenant:'demo-tenant',account:'ocm-wstack'}),'/v1/tenants/demo-tenant/storage/EU/DE/ocm-wstack/credentials');
  assert.throws(()=>credentialsPath({tenant:'demo-tenant',account:'..'}));

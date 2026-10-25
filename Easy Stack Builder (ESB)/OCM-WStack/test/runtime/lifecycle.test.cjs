@@ -12,7 +12,7 @@ const vc={type:['VerifiableCredential','Participant'],issuer:'did:web:issuer.exa
 const wrapped={groups:[{credentials:{one:{type:'ldp_vc',data:JSON.stringify(vc)}}}]};
 
 test('Storage list requests no descriptors and unwraps native credential results',async()=>{
- const a=new Adapters(config,{call:async(n,p,o)=>{assert.equal(n,'storage');assert.deepEqual(o.body,{});return wrapped;}});
+ const a=new Adapters(config,{call:async(n,p,o)=>{assert.equal(n,'storage');assert.equal(o.body,undefined);assert.equal(o.headers['content-type'],'application/json');return wrapped;}});
  const list=await a.list(org);assert.equal(list.items[0].issuer.id,vc.issuer);assert.equal(list.items[0].types[1],'Participant');
  assert.equal((await a.detail(org,'one')).raw,JSON.stringify(vc));
 });

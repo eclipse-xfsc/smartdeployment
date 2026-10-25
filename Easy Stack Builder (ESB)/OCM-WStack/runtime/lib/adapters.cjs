@@ -7,8 +7,8 @@ const {decode,summarize,overall,statusRef}=require('./credentials.cjs');
 class Adapters {
  constructor(config,http){this.c=config;this.http=http;}
  async statusConfiguration(){return this.c;}
- headers(c){return {authorization:'Bearer '+c.token,'x-tenantid':c.tenant,'x-groupid':c.group,'x-group':this.c.cryptoGroup,'x-namespace':this.c.cryptoNamespace,'x-origin':this.c.publicOrigin};}
- call(c,name,path,method='GET',body){return this.http.call(name,path,{method,body,headers:this.headers(c),timeout:method==='GET'?5000:15000,responseType:name==='didcomm'&&path==='/admin/invitation'?'text':'json'});}
+ headers(c){return {...(c.token?{authorization:'Bearer '+c.token}:{}),'x-tenantid':c.tenant,'x-groupid':c.group,'x-group':this.c.cryptoGroup,'x-namespace':this.c.cryptoNamespace,'x-origin':this.c.publicOrigin};}
+ call(c,name,path,method='GET',body){return this.http.call(name,path,{method,body,headers:{...this.headers(c),...(name==='storage'&&method==='POST'?{'content-type':'application/json'}:{})},timeout:method==='GET'?5000:15000,responseType:name==='didcomm'&&path==='/admin/invitation'?'text':'json'});}
  storagePath(c){return require('./storage-path.cjs').credentialsPath({...c,storageRegion:this.c.storageRegion,storageCountry:this.c.storageCountry});}
  unpack(r){
   if(!r||typeof r!=='object')fail(502,'UPSTREAM_PROTOCOL_ERROR');
@@ -23,9 +23,10 @@ class Adapters {
   return entries;
  }
  async records(c){
-  // Native Filter with zero descriptors returns all records. A descriptor
-  // with zero fields returns false for every record in the upstream library.
-  return this.unpack(await this.call(c,'storage',this.storagePath(c),'POST',{}));
+  // Storage 1.3.0 accepts DCQL directly. Its documented empty payload lists
+  // every format; a format-specific DCQL query would omit other credentials.
+  // application/json remains required even when the request has no payload.
+  return this.unpack(await this.call(c,'storage',this.storagePath(c),'POST'));
  }
  async list(c,q={}){
   const records=await this.records(c),pageSize=Math.min(100,Math.max(1,Number(q.pageSize)||25));

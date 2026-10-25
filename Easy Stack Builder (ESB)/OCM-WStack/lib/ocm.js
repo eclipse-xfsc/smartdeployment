@@ -12,6 +12,7 @@ const REGISTRY='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io';
 // incorrectly replaces it with a repository at the registry root.
 const POLICY_IMAGE=`${REGISTRY}/tsa/policy:1.0.0`;
 const CASSANDRA_SECRET='esb-credential-verification-cassandra';
+const PUBLIC_REGISTRY_SECRET='esb-ocm-public-registry';
 function overrides(c) {
   return {
     [POLICY]: {policy:{image:{repository:REGISTRY,name:'tsa/policy',tag:'1.0.0',sha:'',pullSecrets:''},
@@ -22,6 +23,7 @@ function overrides(c) {
       addresses:{didResolver:'http://universal-resolver-service.infrastructure.svc.cluster.local:8080',
         signer:'http://signer.ocm-wstack.svc.cluster.local:8080',ocm:c.tenantUrl,NAMESPACE:null}}},
     [VERIFICATION]: {'credential-verification-service':{
+      image:{pullSecrets:PUBLIC_REGISTRY_SECRET},
       podAnnotations:{'inject.xfsc.io/enabled':'true','inject.xfsc.io/needs':'nats',
         'inject.xfsc.io/env-prefix':'CREDENTIALVERIFICATION',
         'inject.xfsc.io/env-replacements':JSON.stringify({NATS_URL:'MESSAGING_NATS_URL'})},
@@ -47,6 +49,15 @@ function routingValues(){
     - group: apps
       kind: StatefulSet
       jsonPointers: [/spec/template/spec/hostAliases]
+    - group: apps
+      kind: StatefulSet
+      namespace: infrastructure
+      name: cassandra
+      jqPathExpressions:
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .startupProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .readinessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.failureThreshold'
     - group: apps
       kind: Deployment
       namespace: ocm-wstack
@@ -88,6 +99,7 @@ function validateKey(value) {
 }
 async function prerequisites(r,timeoutSeconds) {
   await require('./ocm-startup').resolver(r);
+  await verificationPullSecret(r);
   const current=await r.json('kubectl',['-n','ocm-wstack','get','secret','signing','--ignore-not-found','-o','json']);
   if(current) {
     const encoded=current.data?.['signing-key'];
@@ -111,6 +123,24 @@ async function prerequisites(r,timeoutSeconds) {
   await r.run('kubectl',['-n','ocm-wstack','apply','--field-manager=esb-ocmwstack','-f','-'],{input:JSON.stringify(doc)});
   await r.run('kubectl',['-n','ocm-wstack','wait','--for=condition=Ready',`externalsecret/${CASSANDRA_SECRET}`,`--timeout=${timeoutSeconds}s`],{timeout:(timeoutSeconds+15)*1000});
   r.emit({type:'ocm-prerequisites',signing:current?'retained':'created',cassandraSecret:CASSANDRA_SECRET});
+}
+async function verificationPullSecret(r){
+  // The native 1.0.2 template unconditionally emits imagePullSecrets[].name.
+  // An empty Docker config preserves anonymous registry access with a valid key.
+  const secret=await r.json('kubectl',['-n','ocm-wstack','get','secret',PUBLIC_REGISTRY_SECRET,'--ignore-not-found','-o','json']);
+  if(secret){
+    if(secret.metadata?.labels?.['app.kubernetes.io/managed-by']!=='esb-ocmwstack'||secret.type!=='kubernetes.io/dockerconfigjson')fail('OWNERSHIP','Verification registry compatibility Secret belongs to another installation.');
+    let config;try{config=JSON.parse(Buffer.from(secret.data?.['.dockerconfigjson']||'','base64').toString());}catch{}
+    if(JSON.stringify(config)!==JSON.stringify({auths:{}}))fail('OWNERSHIP','Existing registry configuration is retained; the anonymous compatibility Secret must contain only empty auths.');
+  }else await r.run('kubectl',['-n','ocm-wstack','create','-f','-'],{input:JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:PUBLIC_REGISTRY_SECRET,namespace:'ocm-wstack',labels:{'app.kubernetes.io/managed-by':'esb-ocmwstack'}},type:'kubernetes.io/dockerconfigjson',stringData:{'.dockerconfigjson':JSON.stringify({auths:{}})}})});
+  const d=await r.json('kubectl',['-n','ocm-wstack','get','deployment','credential-verification-service','--ignore-not-found','-o','json']);
+  const list=d?.spec?.template?.spec?.imagePullSecrets;
+  if(!Array.isArray(list))return;
+  const invalid=list.map((x,i)=>!x||typeof x.name!=='string'||!x.name.trim()?i:null).filter(x=>x!==null).reverse();
+  if(!invalid.length)return;
+  const patch=[{op:'test',path:'/metadata/resourceVersion',value:d.metadata.resourceVersion},...invalid.map(i=>({op:'remove',path:`/spec/template/spec/imagePullSecrets/${i}`}))];
+  await r.run('kubectl',['-n','ocm-wstack','patch','deployment','credential-verification-service','--type=json','-p',JSON.stringify(patch)]);
+  r.emit({type:'verification-pull-secret',removedInvalidEntries:invalid.length,anonymous:true});
 }
 async function imagePreflight(r,directory) {
   let result;
@@ -153,6 +183,7 @@ function validateManifests(documents,chart) {
     const service=Object.values(documents).find(d=>d?.kind==='Service'&&d.metadata?.name==='policy');
     if(port!==8080||!service?.spec?.ports?.some(x=>x.port===8080&&x.targetPort===8080))fail('OCM_VALUES','Policy Service does not route to its configured HTTP listener.');
   } else {
+    if(pod.spec.imagePullSecrets?.some(x=>!x?.name)||!pod.spec.imagePullSecrets?.some(x=>x.name===PUBLIC_REGISTRY_SECRET))fail('OCM_VALUES','Verification must render a named anonymous registry reference; empty merge keys break Argo comparison.');
     for(const [key,secret,field] of [['CREDENTIALVERIFICATION_SIGNINGKEY','signing','signing-key'],['CREDENTIALVERIFICATION_CASSANDRAPASSWORD',CASSANDRA_SECRET,'cassandra-password']]) {
       const ref=env[key]?.valueFrom?.secretKeyRef;
       if(ref?.name!==secret||ref.key!==field)fail('OCM_VALUES',`Verification ${key} does not reference its prepared Secret.`);
@@ -169,4 +200,4 @@ async function inspect(r,root,directory,readYaml,chart) {
   }}
   await walk(root);validateManifests(await readYaml(r,directory,sources),chart);
 }
-module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,DIDCOMM,RESOLVER_CHART};
+module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,verificationPullSecret,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,PUBLIC_REGISTRY_SECRET,DIDCOMM,RESOLVER_CHART};
