@@ -24,7 +24,7 @@ credential-retrieval-service:
     offeringTopic: offering
     offeringPolicy: null
     metadataPolicy: null
-    signerTopic: signer-topic
+    signerTopic: sign
     storageTopic: storage.service.store
     nats:
       url: nats://nats.NAMESPACE.svc.cluster.local:4222

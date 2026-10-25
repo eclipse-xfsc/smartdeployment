@@ -1,6 +1,8 @@
-# OCM-WStack ESB 11.0.1
+# OCM-WStack ESB 11.0.2
 
 This package extends the original `orce-esb-ocmwstack` Node-RED node in `Easy Stack Builder (ESB)/OCM-WStack`. It includes the deployer, runtime flows, BFF, Vue UI, translations, Helm chart, tests and source provenance. 
+
+**For the latest deployment logs and image fallbacks, read `docs/DEPLOYMENT-FIXES-11.0.2.md`.**
 
 **Upgrading after the Vault mount failure? Read `docs/VAULT-FIX-11.0.1.md`.**
 
@@ -8,11 +10,11 @@ Read `docs/READINESS.md` for deployment prerequisites and acceptance checks. Ins
 
 ## Install on the existing ORCE deployer
 
-1. Download `orce-esb-ocmwstack-11.0.1.tgz` and install it through the ORCE/Node-RED palette upload option. Alternatively copy it into the existing ORCE container and run:
+1. Download `orce-esb-ocmwstack-11.0.2.tgz` and install it through the ORCE/Node-RED palette upload option. Alternatively copy it into the existing ORCE container and run:
 
    ```sh
    cd /data
-   npm install /path/to/orce-esb-ocmwstack-11.0.1.tgz
+   npm install /path/to/orce-esb-ocmwstack-11.0.2.tgz
    ```
 
 2. Restart that ORCE instance, then add or reopen the **OCM-W-Stack** node. Node.js 18+ is required; Node 20+ is recommended by the runtime dependencies. The deployer needs bash, kubectl, Helm, jq, openssl and curl, as before.
@@ -52,6 +54,7 @@ Version 11 replaces plaintext `clientSecret` with `clientSecretRef: {namespace, 
 ```sh
 npm test
 npm run test:legacy
+python3 test/config-regression.py # requires PyYAML
 python3 scripts/build-runtime.py
 npm pack --ignore-scripts
 ```

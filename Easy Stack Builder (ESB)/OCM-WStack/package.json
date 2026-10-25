@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "11.0.1",
+  "version": "11.0.2",
   "description": "OCM-W-Stack deployer node",
   "dependencies": {
     "tmp": "0.2.5",

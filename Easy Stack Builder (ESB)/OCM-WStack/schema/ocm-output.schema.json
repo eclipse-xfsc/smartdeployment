@@ -65,10 +65,10 @@
       "pattern": "^https://[^/]+/orce/$"
     },
     "releaseVersion": {
-      "const": "11.0.1"
+      "const": "11.0.2"
     },
     "runtimeVersion": {
-      "const": "11.0.1"
+      "const": "11.0.2"
     },
     "referenceRef": {
       "const": "main"

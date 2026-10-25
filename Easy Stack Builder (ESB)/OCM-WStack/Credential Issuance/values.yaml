@@ -1,7 +1,7 @@
 issuance-service:
   image:
     pullPolicy: Always
-    tag: 1.9.1
+    tag: v1.4.3
   ingress:
     enabled: true
     annotations:

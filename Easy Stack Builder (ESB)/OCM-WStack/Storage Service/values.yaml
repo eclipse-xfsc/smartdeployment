@@ -58,12 +58,14 @@ storage-service:
       address: 0.0.0.0:50051
       image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/crypto-provider-hashicorp-vault-plugin:2.0.6
       pullPolicy: IfNotPresent
-      env:
-        VAULT_ADRESS: http://vault.NAMESPACE.svc.cluster.local:8200
+      env: null
       secretEnv:
         VAULT_TOKEN:
           name: vault
           key: token
+        VAULT_ADRESS:
+          name: vault
+          key: address
   ingress:
     enabled: false
     annotations:

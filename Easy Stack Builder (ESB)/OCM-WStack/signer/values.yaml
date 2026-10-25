@@ -65,9 +65,11 @@ signer:
         VAULT_TOKEN:
           name: vault
           key: token
+        VAULT_ADRESS:
+          name: vault
+          key: address
       clusterAdress: 127.0.0.1:50051
-      env:
-        VAULT_ADRESS: http://vault.NAMESPACE.svc.cluster.local:8200
+      env: null
   ingress:
     enabled: false
     annotations:

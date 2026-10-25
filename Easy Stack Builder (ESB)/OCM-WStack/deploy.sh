@@ -643,6 +643,10 @@ else
   emit_event "vault" "running" "Reusing the persisted generated Vault root token"
 fi
 
+# Reconcile address separately so the existing token and key material are preserved.
+kubectl -n "$NAMESPACE" patch secret vault --type=merge \
+  -p "$(jq -cn --arg address "http://vault.${NAMESPACE}.svc.cluster.local:8200" '{stringData:{address:$address}}')" >/dev/null
+
 VAULT_RUNTIME_VALUES="$WORKDIR/vault-runtime-values.yaml"
 ( umask 077; cat > "$VAULT_RUNTIME_VALUES" <<YAML
 server:
@@ -666,7 +670,7 @@ sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g; s/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Sto
 helm dependency build "./Storage Service"
 helm upgrade --install storage-service "./Storage Service" --namespace "$NAMESPACE" -f "./Storage Service/values.yaml"
 mv ./Storage\ Service/values.yaml.bak ./Storage\ Service/values.yaml
-kubectl set env deployment/storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" STORAGESERVICE_NATS_URL="nats://nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
+kubectl set env deployment/storage-service -c storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" STORAGESERVICE_NATS_URL="nats://nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
 record_phase "storage" "done" "Storage service deployed"
 
 record_phase "status-list" "running" "Deploying status list service"
@@ -702,7 +706,7 @@ sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./signer/values.yaml"
 helm dependency build "./signer"
 helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "./signer/values.yaml"
 mv ./signer/values.yaml.bak ./signer/values.yaml
-kubectl set env deployment/signer \
+kubectl set env deployment/signer -c signer \
   -n "$NAMESPACE" \
   NATS_STATUS_TOPIC=status.data.verify \
   NATS_HOST="nats://nats.${NAMESPACE}.svc.cluster.local:4222" \
@@ -759,6 +763,11 @@ helm dependency build "./Credential Retrieval"
 helm upgrade --install credential-retrieval-service "./Credential Retrieval" \
   --values "./Credential Retrieval/values.yaml" --namespace "$NAMESPACE"
 mv ./Credential\ Retrieval/values.yaml.bak ./Credential\ Retrieval/values.yaml
+# The chart emits singular CASSANDRA_HOST; the current service reads HOSTS.
+# Keep its original env for compatibility and supply the expected plural alias.
+kubectl -n "$NAMESPACE" set env deployment/credential-retrieval-service \
+  -c credential-retrieval-service \
+  CREDENTIALRETRIEVAL_CASSANDRA_HOSTS="cassandra.${NAMESPACE}.svc.cluster.local:9042"
 record_phase "credential-retrieval" "done" "Credential retrieval service deployed"
 
 record_phase "credential-verification" "running" "Deploying credential verification service"
@@ -831,7 +840,7 @@ kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=15
 record_phase "didcomm" "done" "DIDComm connector deployed and healthy"
 
 record_phase "ocm-readiness" "running" "Waiting for every OCM Deployment before provisioning the UI"
-kubectl -n "$NAMESPACE" rollout status deployment --all --timeout=15m
+bash "$SCRIPT_DIR/scripts/wait-deployments.sh" "$NAMESPACE"
 record_phase "ocm-readiness" "done" "All OCM Deployments passed readiness"
 record_phase "orce-runtime" "running" "Provisioning ORCE, UI identity, persistent data and MongoDB"
 node "$SCRIPT_DIR/scripts/runtime-install.cjs" install "$NAMESPACE" "$DOMAIN" "$RUNTIME_INPUT" "$KC_POD" "$KCADM_CFG"
@@ -859,4 +868,4 @@ jq -cn \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.1",runtimeVersion:"11.0.1",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.2",runtimeVersion:"11.0.2",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'

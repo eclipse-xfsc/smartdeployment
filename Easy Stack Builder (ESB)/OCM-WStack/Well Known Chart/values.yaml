@@ -1,6 +1,6 @@
 well-known-service:
   image:
-    tag: 1.5.2
+    tag: v1.2.1
     pullPolicy: Always
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
     name: well-known-service
