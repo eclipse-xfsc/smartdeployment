@@ -4,7 +4,7 @@ const services=['storage-service','credential-retrieval-service'];
 function summarize(deployments,pods){
  return services.map(name=>{
   const d=deployments.items.find(x=>x.metadata.name===name),c=d?.spec.template.spec.containers.find(x=>x.name===name);
-  return {service:name,configuredImage:c?.image||null,
+  return {service:name,configuredImage:c?.image||null,imagePullPolicy:c?.imagePullPolicy||null,
    geography:Object.fromEntries((c?.env||[]).filter(e=>['STORAGESERVICE_REGION','STORAGESERVICE_COUNTRY'].includes(e.name)).map(e=>[e.name,e.value??'(valueFrom)'])),
    pods:pods.items.filter(x=>x.spec.containers.some(c=>c.name===name)).map(x=>{const s=x.status?.containerStatuses?.find(c=>c.name===name);return {name:x.metadata.name,node:x.spec.nodeName||null,image:x.spec.containers.find(c=>c.name===name).image,imageID:s?.imageID||null,ready:s?.ready===true,restarts:s?.restartCount||0};})};
  });

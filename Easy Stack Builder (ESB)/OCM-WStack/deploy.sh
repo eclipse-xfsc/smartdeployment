@@ -257,6 +257,7 @@ for cmd in kubectl helm jq openssl curl node; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
 done
 
+
 record_phase "preflight" "running" "Validating kubeconfig, domain, namespace, and TLS material"
 bash "$SCRIPT_DIR/preflight.sh" \
   "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE" \
@@ -844,4 +845,4 @@ jq -cn \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.7",runtimeVersion:"11.0.7",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.8",runtimeVersion:"11.0.8",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
