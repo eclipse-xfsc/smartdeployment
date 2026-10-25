@@ -54,6 +54,7 @@ async function adapt(dir) {
     const text = await fs.readFile(path.join(dir,name));
     if (crypto.createHash('sha256').update(text).digest('hex') !== sha) fail('UPSTREAM_CONTRACT', `Upstream contract differs: ${name}.`);
   }
+  await require('./openbao-bootstrap').adapt(dir);
   const chartFile=path.join(dir,'INFRA/observability/opentelemtry/Chart.yaml');
   let chart=await fs.readFile(chartFile,'utf8');
   chart=chart.replace(/(- name: ([\w-]+)[\s\S]*?\n    version:) [^\n]+/g,(match,prefix,name)=>{if(!lock.helmPins[name])fail('UPSTREAM_CONTRACT','Unreviewed observability dependency '+name);return prefix+' '+JSON.stringify(lock.helmPins[name]);});

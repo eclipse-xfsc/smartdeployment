@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.16
+# OCM W-Stack ESB 12.3.17
 
-Version 12.3.16 fixes the reported Grafana persistent-volume Multi-Attach rollout block. It sets the persistent Grafana Deployment to one replica with Recreate, and checks this strategy during both install and upgrade manifest preflight. The existing PVC and security settings are retained. All previous fixes, DNS-step removal and neutral placeholders remain. See docs/REPAIR-12.3.16.md and VALIDATION.md.
+Version 12.3.17 fixes the observed OpenBao empty-policy bootstrap failure by replacing the failing stdin transfer with a quoted exec argument and a non-empty file check. Failed bootstrap pods retain logs. It also includes the single-replica Recreate Grafana PVC rollout fix and all earlier OCM credential, rotation, listener and verification-order repairs. Native policy contents, root material and service images are retained; the separate DNS test step remains removed. See docs/REPAIR-12.3.17.md and VALIDATION.md.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.16.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.17.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.16.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.17.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.16, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known subscription startup recovery is included; this does not claim to repair unrelated metadata/database bugs. See docs/REPAIR-12.3.8.md and VALIDATION.md.
+Install 12.3.17, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. Upload the kubeconfig for the intended target cluster; the deployer uses this upload, not your workstation default context. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known subscription startup recovery is included; this does not claim to repair unrelated metadata/database bugs. See docs/REPAIR-12.3.8.md and VALIDATION.md.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 

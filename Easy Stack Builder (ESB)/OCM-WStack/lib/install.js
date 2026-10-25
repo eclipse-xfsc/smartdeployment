@@ -105,7 +105,7 @@ async function ensureMarker(r,c) {
 }
 async function inspect(r,c) {
   const ocmOperational=await require('./ocm-guard').status(r);
-  const [apps,pods,pvcs,gateway,certificates,proxy,proxyServices,policy] = await Promise.all([
+  const [apps,pods,pvcs,gateway,certificates,proxy,proxyServices,policy,jobs] = await Promise.all([
     r.json('kubectl',['-n','argocd','get','applications.argoproj.io','-o','json']),
     r.json('kubectl',['get','pods','-A','-o','json']),
     r.json('kubectl',['get','pvc','-A','-o','json']),
@@ -113,7 +113,8 @@ async function inspect(r,c) {
     optional(r,'secret',tls.secretName(c),'ocm-wstack'),
     optional(r,'envoyproxy','envoy','infrastructure'),
     r.json('kubectl',['-n','infrastructure','get','services','-l','gateway.envoyproxy.io/owning-gateway-name=envoy-gateway,gateway.envoyproxy.io/owning-gateway-namespace=infrastructure','-o','json']),
-    r.json('kubectl',['get','clusterpolicy','esb-ocm-envoy-traffic','--ignore-not-found','-o','json'])
+    r.json('kubectl',['get','clusterpolicy','esb-ocm-envoy-traffic','--ignore-not-found','-o','json']),
+    r.json('kubectl',['get','jobs','-A','-o','json'])
   ]);
   const ownedApps=apps.items.filter(x=>x.metadata.ownerReferences?.some(o=>o.kind==='ApplicationSet'&&['storage','network','core','ocm-wstack'].includes(o.name)));
   const names=new Set(ownedApps.flatMap(x=>x.metadata.ownerReferences.filter(o=>o.kind==='ApplicationSet').map(o=>o.name)));
@@ -131,10 +132,11 @@ async function inspect(r,c) {
   const gatewayConfigurationReady=internalRoutingReady&&proxyConfig?.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(proxyConfig.annotations).length===0&&policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')&&publicServices.length>0&&publicServices.every(s=>s.spec.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(s.metadata.annotations).length===0&&[80,443].every(p=>s.spec.ports?.some(x=>x.port===p)));
   const certReady=tls.ready(certificates,c.tenantHost);
   const managedPods=pods.items.filter(x=>MANAGED_NS.includes(x.metadata.namespace)&&!x.metadata.deletionTimestamp);
-  const podsReady=managedPods.some(x=>x.metadata.namespace==='ocm-wstack')&&managedPods.every(x=>x.status?.phase==='Succeeded'||(x.status?.phase==='Running'&&x.status?.containerStatuses?.length&&x.status.containerStatuses.every(s=>s.ready)));
+  const podReadiness=require('./pod-readiness').evaluate(managedPods,jobs.items||[],MANAGED_NS);
+  const podsReady=podReadiness.ready;
   return {upstreamCommit:lock.commit,argoRevision:lock.argoRevision,tenantId:c.tenantId,tenantUrl:c.tenantUrl,provider:c.actualProvider,providerLocations:c.providerLocations,externalTrafficPolicy:c.externalTrafficPolicy,storageClass:c.actualStorageClass,ui:c.runtimeEnabled?{enabled:true,url:c.tenantUrl+'/orce/',editorUrl:c.tenantUrl+'/orce/editor/'}:{enabled:false},
     applications,gatewayAddresses:addresses,pendingVolumes,certificateReady:certReady,gatewayConfigurationReady:Boolean(gatewayConfigurationReady),gatewayConfiguration:{tenantRouting:{mode:c.internalGatewayRouting?'internal':'public',hostname:c.tenantHost,clusterIP:publicServices[0]?.spec.clusterIP,certManagerMapped,runtimeMapped,ready:internalRoutingReady},expectedTrafficPolicy:c.externalTrafficPolicy,proxyTrafficPolicy:proxyConfig?.externalTrafficPolicy,foreignAnnotationKeys:foreignKeys(proxyConfig?.annotations),admissionPolicyReady:Boolean(policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')),services:publicServices.map(s=>({name:s.metadata.name,externalTrafficPolicy:s.spec.externalTrafficPolicy,ports:s.spec.ports.map(p=>p.port),foreignAnnotationKeys:foreignKeys(s.metadata.annotations)}))},
-    ocmOperational,clusterReady:ocmOperational.ready&&names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
+    ocmOperational,ignoredTerminalPods:podReadiness.ignored,failedJobs:podReadiness.failedJobs,clusterReady:ocmOperational.ready&&names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
     pods:managedPods.map(x=>({name:x.metadata.name,namespace:x.metadata.namespace,phase:x.status?.phase,containers:(x.status?.containerStatuses||[]).map(s=>({name:s.name,image:s.image,imageID:s.imageID,ready:s.ready,restarts:s.restartCount}))})),
     dns:{automatic:c.externalDns,hostname:c.tenantHost,targets:addresses.map(x=>x.value),instructions:c.externalDns?'ExternalDNS manages the tenant record.':'Point the tenant hostname'+(c.publicDashboards?', argocd.'+c.domain+' and grafana.'+c.domain:'')+' to these gateway addresses. Public TCP 443 must reach Envoy. Remove stale A/AAAA records.'}};
 }

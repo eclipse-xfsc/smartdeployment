@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/eclipse-xfsc/deployment.git",
   "commit": "5d09c7f1012d1e9bb792fda226da478ffcca27a0",
-  "reviewedAt": "2026-10-09",
+  "reviewedAt": "2026-10-17",
   "argoRevision": "main",
   "sha256": {
     "basic-cluster-init.sh": "af6918e713896585b8ae1c81c47e99cbd358439ef24890c186546ac486b11f82",
@@ -18,7 +18,8 @@
     "INFRA/network/envoy/values.yaml": "09543ec6ee0d2ad27af22cebdc1108e679783d601a7213ddd58b440b36b136e3",
     "INFRA/network/envoy/templates/envoyproxy.yaml": "39cc26b68f68622436078a5d940a63a3f68489ea781e792a12820611607417c5",
     "INFRA/observability/opentelemtry/Chart.yaml": "8d0db4a98718025a869af63f6a7cb0c83df9d06e94d2384affe1f27835d4c112",
-    "INFRA/observability/opentelemtry/templates/datasources.yaml": "a793a5f89efa60415cdf0ecce5f7a4838c1a1f3b6bc095d67fbc7a1b4e6f7e3c"
+    "INFRA/observability/opentelemtry/templates/datasources.yaml": "a793a5f89efa60415cdf0ecce5f7a4838c1a1f3b6bc095d67fbc7a1b4e6f7e3c",
+    "INFRA/security/openbao/templates/init-job.yaml": "0f03d1c96c990fff8bb89f004ac66277a29cebea5757725af856a3953d37a867"
   },
   "compatibleBootstrapCommits": [
     "739606691ecff72b3a40404a19fce44d9c22b0ee",
@@ -54,6 +55,7 @@
     "INFRA/network/envoy/values.yaml": "7ecc24d34f0e761cbe5fad188d12b7791fa6306e",
     "INFRA/network/envoy/templates/envoyproxy.yaml": "2fad9eb208255970e734a6d6299523dccd397de0",
     "INFRA/observability/opentelemtry/Chart.yaml": "50ddad14902eca8b7cb75c11c5a161f759bfac24",
-    "INFRA/observability/opentelemtry/templates/datasources.yaml": "8f5af3896e4965a102f039d32c70577b4a6214a0"
+    "INFRA/observability/opentelemtry/templates/datasources.yaml": "8f5af3896e4965a102f039d32c70577b4a6214a0",
+    "INFRA/security/openbao/templates/init-job.yaml": "c103a8eafa437e915746f76e89182ff294dd7197"
   }
 }
