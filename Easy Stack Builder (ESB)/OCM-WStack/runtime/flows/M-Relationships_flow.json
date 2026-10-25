@@ -1,0 +1,154 @@
+[
+  {
+    "id": "ocm-relationships",
+    "type": "tab",
+    "label": "Relationships",
+    "disabled": false
+  },
+  {
+    "id": "ocm-relationships-service",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-relationships",
+    "name": "Relationships service",
+    "module": "Relationships",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ocm-relationships-http-0",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "GET /relationships",
+    "url": "/orce/ui-api/v1/relationships",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 60,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-1",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "POST /relationships/invitations",
+    "url": "/orce/ui-api/v1/relationships/invitations",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 110,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-2",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "POST /relationships/accept",
+    "url": "/orce/ui-api/v1/relationships/accept",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-3",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "GET /relationships/:id",
+    "url": "/orce/ui-api/v1/relationships/:id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 210,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-4",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "PATCH /relationships/:id",
+    "url": "/orce/ui-api/v1/relationships/:id",
+    "method": "patch",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 260,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-5",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "DELETE /relationships/:id",
+    "url": "/orce/ui-api/v1/relationships/:id",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 310,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-6",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "POST /relationships/:id/block",
+    "url": "/orce/ui-api/v1/relationships/:id/block",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 360,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-relationships-http-7",
+    "type": "http in",
+    "z": "ocm-relationships",
+    "name": "POST /relationships/:id/unblock",
+    "url": "/orce/ui-api/v1/relationships/:id/unblock",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 410,
+    "wires": [
+      [
+        "ocm-relationships-service"
+      ]
+    ]
+  }
+]

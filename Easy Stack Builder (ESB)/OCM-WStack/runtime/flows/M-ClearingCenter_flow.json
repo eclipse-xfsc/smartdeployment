@@ -1,0 +1,52 @@
+[
+  {
+    "id": "ocm-clearingcenter",
+    "type": "tab",
+    "label": "ClearingCenter",
+    "disabled": false
+  },
+  {
+    "id": "ocm-clearingcenter-service",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-clearingcenter",
+    "name": "ClearingCenter service",
+    "module": "ClearingCenter",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ocm-clearingcenter-http-0",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
+    "name": "GET /clearing/providers",
+    "url": "/orce/ui-api/v1/clearing/providers",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 60,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-clearingcenter-http-1",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
+    "name": "POST /clearing/requests",
+    "url": "/orce/ui-api/v1/clearing/requests",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 110,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  }
+]

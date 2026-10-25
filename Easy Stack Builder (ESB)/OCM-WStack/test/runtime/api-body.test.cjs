@@ -7,7 +7,7 @@ async function server(t,after,before){
  await new Promise(r=>s.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>s.close(r)));return 'http://127.0.0.1:'+s.address().port;
 }
 test('JSON mutation bodies reach real runtime authentication without dispatch',async t=>{
- const app=new Runtime({services:{},credentialTypes:[]});app.execute=()=>assert.fail('unauthenticated mutation');
+ const app=new Runtime({services:{},credentialTypes:[]});app.ready=true;app.auth=new (require('../../runtime/lib/local-auth.cjs').LocalAuth)({},null,null);app.execute=()=>assert.fail('unauthenticated mutation');
  const origin=await server(t,(req,res)=>{assert.equal(req._body,true);assert.deepEqual(req.body,{});return app.handle(req,res);});
  const checks=await require('../../lib/api-check').checks(origin,{requester:require('../../lib/native').request});assert.equal(checks.length,3);assert.ok(checks.every(x=>x.ok),JSON.stringify(checks));
 });
@@ -28,5 +28,5 @@ test('already parsed bodies are retained and unrelated routes stay untouched',as
  let next=0;parseApiBody({url:'/orce/editor/flows',method:'POST'},null,()=>next++);assert.equal(next,1);
 });
 test('deployer rejects a plain-text 500 and accepts only authenticated API boundary responses',async()=>{
- for(const response of [{status:500,data:null},{status:200,data:{}},{status:401,data:{error:{code:'OTHER'}}}])assert.ok((await require('../../lib/api-check').checks('https://example.test',{requester:async()=>response})).every(x=>!x.ok));
+ for(const response of [{status:500,data:null},{status:200,data:{}},{status:503,data:{error:{code:'OTHER'}}}])assert.ok((await require('../../lib/api-check').checks('https://example.test',{requester:async()=>response})).every(x=>!x.ok));
 });

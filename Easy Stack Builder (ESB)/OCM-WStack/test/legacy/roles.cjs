@@ -1,7 +1,7 @@
 'use strict';
-const {Client}=require('./http.cjs');
-const {atomic}=require('./permissions.cjs');
-const {fail,object,string,id}=require('./errors.cjs');
+const {Client}=require('../../runtime/lib/http.cjs');
+const {atomic}=require('../../runtime/lib/permissions.cjs');
+const {fail,object,string,id}=require('../../runtime/lib/errors.cjs');
 class Roles {
  constructor(config,db,http){this.http=http||new Client({iam:config.keycloakInternal});this.c=config;this.db=db;this.token=null;this.client=null;}
  async call(path,method='GET',body){
@@ -68,7 +68,7 @@ class Roles {
   for(const user of all){
    if(!user.enabled||user.serviceAccountClientId)continue;
    const direct=user.id===uid?assigned:await this.call('/users/'+id(user.id)+'/role-mappings/clients/'+this.client);
-   if(direct.some(r=>(after.get(r.id)||[]).includes('roles.manage')))return;
+   if(direct.some(r=>(after.get(r.id)||[]).includes('admin.users')))return;
   }
   fail(409,'LAST_ROLE_MANAGER');
  }

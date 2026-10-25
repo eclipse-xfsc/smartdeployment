@@ -1,23 +1,31 @@
 #!/bin/sh
 set -eu
-export npm_config_cache=/tmp/npm-cache
-export npm_config_update_notifier=false
-SEED_HASH="$(sha256sum /seed/runtime.tgz | cut -d ' ' -f 1)"
-RELEASE="/data/releases/$SEED_HASH"
+# Dependencies and the Vue bundle are installed while building the image.
+# No npm invocation or external download is permitted during pod startup.
+SOURCE=/opt/ocm/runtime
+[ -f "$SOURCE/RELEASE.sha256" ] || { echo 'OCM image has not been built.' >&2; exit 1; }
+[ -f "$SOURCE/uibuilder/orce/dist/.vite/manifest.json" ] || { echo 'Vue production bundle is missing.' >&2; exit 1; }
+RELEASE_HASH="$(cat "$SOURCE/RELEASE.sha256")"
+RELEASE="/data/releases/$RELEASE_HASH"
 mkdir -p /data/releases
 if [ ! -f "$RELEASE/.ready" ]; then
   mkdir -p "$RELEASE"
-  tar -xzf /seed/runtime.tgz -C "$RELEASE"
-  cd "$RELEASE"
-  npm install --omit=dev --ignore-scripts --no-audit --no-fund --fetch-retries=3 --fetch-retry-mintimeout=3000 --fetch-retry-maxtimeout=20000 > /tmp/npm-install.log 2>&1 || { echo 'Runtime dependency installation failed; check registry access.' >&2; exit 1; }
-  cp node_modules/vue/dist/vue.runtime.esm-browser.prod.js uibuilder/orce/dist/vue.js
-  touch .ready
+  cp -R "$SOURCE/." "$RELEASE/"
+  touch "$RELEASE/.ready"
+fi
+# Existing 12.3.17 and earlier flows are not silently reused. The migration procedure requires
+# an isolated UI data volume; operator-created flows must be exported separately.
+if [ -f /data/flows.json ] && [ ! -f /data/OCM-UI-V3-MANAGED ]; then
+  echo 'An existing flow volume requires the documented 12.3.18 migration.' >&2
+  exit 1
 fi
 ln -sfn "$RELEASE" /data/current-new
 mv -Tf /data/current-new /data/current
 for entry in node_modules lib uibuilder; do
-  if [ ! -e "/data/$entry" ] && [ ! -L "/data/$entry" ]; then ln -s "current/$entry" "/data/$entry"; fi
+  ln -sfn "current/$entry" "/data/$entry-new"
+  mv -Tf "/data/$entry-new" "/data/$entry"
 done
-if [ ! -f /data/flows.json ]; then cp "$RELEASE/flows.json" /data/flows.json; fi
-if [ ! -f /data/package.json ]; then cp "$RELEASE/package.json" /data/package.json; fi
+cp "$RELEASE/flows.json" /data/flows.json
+cp "$RELEASE/package.json" /data/package.json
 printf '%s\n' "module.exports = require('/data/current/settings.js');" > /data/settings.js
+touch /data/OCM-UI-V3-MANAGED

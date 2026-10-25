@@ -11,11 +11,9 @@ test('native complete link is encoded once and import sends the complete link ex
  const a=new Adapters({offerIssuerHosts:['issuer.example']},{call:async(n,p,o)=>{assert.equal(n,'retrieval');assert.equal(p,'/v1/tenants/tenant_space/offering/retrieve/team');assert.deepEqual(o.body,{credential_offer:link});return 'retrieval-id';}});
  assert.equal((await a.importOffer({tenant:'tenant_space',group:'team'},offerUrl(native))).upstreamRequestId,'retrieval-id');
 });
-test('previous double-wrapped links and encrypted completed jobs recover without dispatch',()=>{
+test('previous double-wrapped links normalize without rewriting issuer parameters',()=>{
  const old='openid-credential-offer://?'+new URLSearchParams(native);
  assert.equal(offerUrl(old),link);
- const c=new Coordination(null,'ab'.repeat(32));const job=c.publicJob({state:'succeeded',encryptedOffer:c.seal(native)});
- assert.equal(offerUrl(job.offer),link);
 });
 test('normalization rejects ambiguous fields, duplicate query keys, nesting abuse and unsupported protocols',()=>{
  for(const bad of [link+'&credential_offer=x',link+'&credential_offer_uri=https://issuer.example/x',{...native,credential_offer_uri:'https://issuer.example/x'},'openid-credential-offer://evil/?credential_offer=x','https://issuer.example/x',null])assert.throws(()=>normalizeOffer(bad));

@@ -1,0 +1,137 @@
+[
+  {
+    "id": "ocm-issue",
+    "type": "tab",
+    "label": "Issue",
+    "disabled": false
+  },
+  {
+    "id": "ocm-issue-service",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-issue",
+    "name": "Issue service",
+    "module": "Issue",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ocm-issue-http-0",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "POST /credentials/:id/refresh",
+    "url": "/orce/ui-api/v1/credentials/:id/refresh",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 60,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-1",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "POST /credential-types",
+    "url": "/orce/ui-api/v1/credential-types",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 110,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-2",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "PATCH /credential-types/:id",
+    "url": "/orce/ui-api/v1/credential-types/:id",
+    "method": "patch",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-3",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "DELETE /credential-types/:id",
+    "url": "/orce/ui-api/v1/credential-types/:id",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 210,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-4",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "GET /credential-types",
+    "url": "/orce/ui-api/v1/credential-types",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 260,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-5",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "POST /issuance",
+    "url": "/orce/ui-api/v1/issuance",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 310,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-issue-http-6",
+    "type": "http in",
+    "z": "ocm-issue",
+    "name": "GET /issuance/:id",
+    "url": "/orce/ui-api/v1/issuance/:id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 360,
+    "wires": [
+      [
+        "ocm-issue-service"
+      ]
+    ]
+  }
+]

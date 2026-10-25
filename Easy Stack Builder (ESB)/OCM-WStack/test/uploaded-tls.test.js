@@ -33,5 +33,5 @@ test('uploaded TLS is programmed without querying ACME or changing cert-manager,
  assert.ok(reads.every(a=>!a.includes('certificate')&&!a.includes('deployments')&&!a.includes('challenges.acme.cert-manager.io')));assert.equal(events.at(-1).certificateSource,'uploaded');assert.equal(events.at(-1).clusterIP,'100.64.2.3');assert.equal(events.at(-1).httpsPortReady,true);
 });
 test('configuration always deploys the UI and supplied TLS without legacy public self-check mode',()=>{
- assert.equal(c.tlsMode,'uploaded');assert.equal(config({procedureVersion:12,domain:'*.example.com',runtimeEnabled:false,gatewayRouting:'public',pcm:{enabled:true}}).runtimeEnabled,true);assert.equal(c.gatewayRouting,'internal');assert.deepEqual(c.pcm,{enabled:false});
+ assert.equal(c.tlsMode,'uploaded');assert.equal(config({procedureVersion:12,domain:'*.example.com',runtimeEnabled:false,gatewayRouting:'public',pcm:{enabled:true}}).runtimeEnabled,true);assert.equal(c.gatewayRouting,'internal');assert.equal(c.pcm,undefined);
 });

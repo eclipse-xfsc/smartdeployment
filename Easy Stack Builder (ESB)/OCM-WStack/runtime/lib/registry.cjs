@@ -1,5 +1,6 @@
 'use strict';
 const {fail,object,string}=require('./errors.cjs');
+const BUSINESS_TYPES=['ComplianceCredential','MembershipCredential','ParticipantCredential','ServiceOfferingCredential'];
 function fields(value={}){
  object(value);const entries=Object.entries(value);if(entries.length>50)fail(400,'VALIDATION_ERROR');
  for(const [name,rule] of entries){
@@ -20,6 +21,7 @@ class Registry {
    const bound=nativeTypes.find(x=>x.id===record.definition.issuerConfigurationId);
    items.set(record.id,{...record.definition,id:record.id,revision:record.revision,origin:'registry',editable:true,format:bound?.format||record.definition.format,available:Boolean(bound&&bound.available!==false),demo:Boolean(bound?.demo),schema:bound?.schema||null});
   }
+  for(const id of BUSINESS_TYPES)if(!items.has(id))items.set(id,{id,name:id,description:'',fields:{},issuerConfigurationId:id,revision:0,origin:'required-business-type',editable:false,available:false,blockedReason:'ISSUER_TEMPLATE_UNAVAILABLE',schema:null});
   return {items:[...items.values()],nativeTypes:nativeTypes.map(({id,format})=>({id,format})),source:native.source,...(nativeError?{nativeError}:{})};
  }
  validate(body){

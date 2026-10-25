@@ -36,7 +36,7 @@ spec:
     metadata:
       labels: {app: ocm-orce}
       annotations:
-        checksum/seed: {{ .Files.Get "files/runtime.tgz" | sha256sum }}
+        checksum/seed: {{ .Files.Get "files/seed.sh" | sha256sum }}
         checksum/config: {{ .Values.runtimeConfig | toJson | sha256sum }}
         checksum/secret: {{ .Values.secretChecksum | quote }}
     spec:
@@ -55,7 +55,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       initContainers:
         - name: seed-orce-runtime
-          image: {{ .Values.image | quote }}
+          image: {{ required "A built OCM 12.3.18 image is required" .Values.image | quote }}
           command: ["/bin/sh", "/seed/seed.sh"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -69,7 +69,7 @@ spec:
             - {name: tmp, mountPath: /tmp}
       containers:
         - name: orce
-          image: {{ .Values.image | quote }}
+          image: {{ required "A built OCM 12.3.18 image is required" .Values.image | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
@@ -132,10 +132,6 @@ spec:
       sectionName: https
   hostnames: [{{ required "host is required" .Values.host | quote }}]
   rules:
-    - matches:
-        - path: {type: PathPrefix, value: /orce/identity}
-      backendRefs:
-        - {name: ocm-ui-keycloak, port: 8080}
     - matches:
         - path: {type: PathPrefix, value: /orce}
       backendRefs:

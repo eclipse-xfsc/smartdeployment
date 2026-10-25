@@ -3,27 +3,35 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {environment}=require('./environment.cjs');
 const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
 const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
-const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.manage','roles.read','roles.manage','audit.read','system.health.read'];
+const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.write','clearing.request','roles.read','admin.users','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
-async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false,nativeLifecycle=false,nativeFailure=false}={}){
- const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
- Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
- w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
- let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'roles.manage',kind:'atomic',editable:false,permissions:['roles.manage']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false,connections={pcm:{enabled:false},trustedHosts:[],redirectUri:'https://wallet.example/orce/pcm/callback'};
- w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').replace(/^\/pcm/,'').split('?')[0];let data={items:[]};
+async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false,nativeLifecycle=false,nativeFailure=false,authenticated=true,passwordChangeRequired=false}={}){
+ const dom=await environment('https://ocm.example/orce/'),w=dom.window,calls=[],navigations=[],sockets=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
+ Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=(namespace,options)=>{sockets.push({namespace,options});return {on(){},disconnect(){}};};w.location.assign=url=>navigations.push(url);
+ let session=authenticated;const csrf='ui-session-csrf-token';
+ let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'admin.users',kind:'atomic',editable:false,permissions:['admin.users']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false;
+ w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').split('?')[0];let data={items:[]};
+  if(p==='/auth/csrf')return session
+   ? {ok:true,status:200,json:async()=>({data:{csrfToken:csrf}})}
+   : {ok:false,status:401,json:async()=>({error:{code:'AUTHENTICATION_REQUIRED'}})};
+  if(p==='/auth/login'){session=true;return {ok:true,status:200,json:async()=>({data:{csrfToken:csrf}})};}
+  if(p==='/auth/logout'||p==='/auth/password'){
+   assert.equal(o.headers['X-CSRF-Token'],csrf);session=false;
+   return {ok:true,status:200,json:async()=>({data:{state:'succeeded'}})};
+  }
+  assert.ok(session,'API request requires an authenticated UI session');
+  assert.equal(o.credentials,'same-origin');
+  assert.equal(o.headers['X-CSRF-Token'],csrf);
+  assert.equal(o.headers.Authorization,undefined);
   if(p==='/issuance'&&issuanceFailure)return {ok:false,status:500,headers:{get:()=> 'parser-request-1'},json:async()=>{throw new SyntaxError('Unexpected token I, Internal Server Error');}};
-  if(p==='/connections'){if(o.method==='PUT')connections={...connections,...JSON.parse(o.body)};data=connections;}
-  else if(p==='/connections/test')data={state:'partial',checkedAt:new Date().toISOString(),checks:[{name:'oidc',state:'passed'},{name:'accountEndpoint',state:'authentication_required',httpStatus:401},{name:'personalLogin',state:'not_tested'}]};
-  else if(p==='/connection-test')data={state:'succeeded',checks:[{name:'credentials',state:'passed'},{name:'offers',state:'passed'}]};
-  else if(p==='/credential-types'&&o.method==='GET')data={items:registry,nativeTypes:[{id:'Native',format:'ldp_vc'}]};
+  if(p==='/credential-types'&&o.method==='GET')data={items:registry,nativeTypes:[{id:'Native',format:'ldp_vc'}]};
   else if(p==='/credential-types'&&o.method==='POST'){registry.push({...JSON.parse(o.body),revision:1,available:false});data={state:'succeeded'};}
   else if(p.startsWith('/credential-types/')){const id=decodeURIComponent(p.split('/').at(-1));if(o.method==='DELETE')registry=registry.filter(x=>x.id!==id);else registry=registry.map(x=>x.id===id?{...JSON.parse(o.body),revision:x.revision+1}:x);data={state:'succeeded'};}
   else if(p==='/roles'&&o.method==='GET')data={items:roles};
   else if(p==='/role-assignments')data={items:users};
   else if(p.endsWith('/effective'))data={permissions:['credentials.read']};
   else if(p==='/audit')data={items:[{timestamp:new Date().toISOString(),actor:{username:'Alice',subject:'user-1'},action:'createType',outcome:'succeeded',requestId:'r1'},{timestamp:new Date().toISOString(),subject:'legacy-user',action:'accept',outcome:'succeeded',requestId:'r2'}]};
-  else if(p==='/auth/me')data={subject:'operator',username:'Mani',permissions};
-  else if(p==='/me')data={account:'alice'};
+  else if(p==='/auth/me')data={subject:'operator',username:'Mani',permissions,passwordChangeRequired};
   else if(p==='/preferences')data={locale:'en'};
   else if(p==='/credentials'&&failure)return {ok:false,status:502,json:async()=>({error:{code:'UPSTREAM_REJECTED',upstream:'storage',upstreamStatus:400,reason:'STORAGE_REGION_MISSING'},requestId:'req-1'})};
   else if(p==='/credentials')data={items:removed?[]:[summary],total:removed?0:1,counts:{total:removed?0:1,active:0,expired:0,revoked:0,notChecked:removed?0:1}};
@@ -40,40 +48,60 @@ async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false
   else if(p==='/keys')data={items:[{id:'key-1',did:'did:jwk:alice'}]};
   return {ok:true,status:200,json:async()=>({data})};
  };
+ const authSource=fs.readFileSync(path.join(ui,'auth.js'),'utf8').replace(/^export /gm,'');
+ w.eval('globalThis.auth=(()=>{'+authSource+';return {setup,login,headers,csrfToken,logout,changePassword};})();');
  w.eval(vue);w.eval('const {createApp,h,reactive,onMounted,onUnmounted}=Vue;'+fs.readFileSync(path.join(ui,'locales.js'),'utf8').replace('export const locales','const locales')+fs.readFileSync(path.join(ui,'app.js'),'utf8').replace(/^import .*;\n/gm,''));
  const settle=async()=>{for(let i=0;i<5;i++)await new Promise(r=>setImmediate(r));};await settle();
  const click=async text=>{const b=[...w.document.querySelectorAll('button')].find(x=>x.textContent.trim()===text&&!x.disabled);assert.ok(b,'button '+text);b.click();await settle();};
- return {w,calls,click,settle,text:()=>w.document.body.textContent};
+ return {w,calls,navigations,sockets,click,settle,text:()=>w.document.body.textContent};
 }
-test('real Vue DOM: details, verification, unsupported revocation and deletion',async t=>{
+test('UI: details, verification, unsupported revocation and deletion',async t=>{
  const b=await boot(t);assert.ok(b.w.document.querySelector('img[alt="FACIS"]'));assert.match(b.text(),/Participant/);await b.click('View');assert.ok(b.w.document.querySelector('[role="dialog"]'));assert.equal([...b.w.document.querySelectorAll('.dialog button')].some(x=>x.textContent==='Revoke'),false);
  await b.click('Verify');assert.match(b.text(),/Alice/);await b.click('Delete local copy');assert.equal(b.w.document.querySelector('[role="dialog"]'),null);
 });
-test('real Vue DOM: offer import is distinct from asynchronous acceptance',async t=>{
+test('UI: offer import is distinct from asynchronous acceptance',async t=>{
  const b=await boot(t);await b.click('Receive credential');const a=b.w.document.querySelector('textarea');a.value='openid-credential-offer://?credential_offer=test';a.dispatchEvent(new b.w.Event('input',{bubbles:true}));
  await b.click('Import offer');assert.match(b.text(),/offer-1/);assert.doesNotMatch(b.text(),/Retrieval accepted the request/);await b.click('Accept');assert.match(b.text(),/does not confirm persistence/);
 });
-test('real Vue DOM: confirmed acceptance reports exact Storage read-back rather than pending persistence',async t=>{
+test('UI: confirmed acceptance reports exact Storage read-back after acceptance',async t=>{
  const b=await boot(t,{acceptedStorage:true});await b.click('Receive credential');await b.click('Accept');
  assert.match(b.text(),/Accepted and saved to Storage/);assert.match(b.text(),/exact credential was confirmed/);assert.doesNotMatch(b.text(),/does not confirm persistence/);
 });
-test('real Vue DOM: DeveloperCredential failure explains native format support and preserves request evidence',async t=>{
+test('UI: DeveloperCredential failure explains native format support and preserves request evidence',async t=>{
  const b=await boot(t,{acceptanceFailure:true});await b.click('Receive credential');await b.click('Accept');
  const alert=b.w.document.querySelector('[role="alert"]').textContent;
  assert.match(alert,/DeveloperCredential/);assert.match(alert,/verifier supports JWT and SD-JWT/);assert.match(alert,/retrieval.*HTTP 400/);assert.match(alert,/acceptance-1/);assert.doesNotMatch(alert,/UPSTREAM_REJECTED/);
 });
-test('real Vue DOM: PCM requires a distinct login and forwards only its own bearer header',async t=>{
- const b=await boot(t);await b.click('Personal OCM context');assert.equal(b.calls.filter(x=>x.url.includes('/pcm/')).length,0);await b.click('Connect PCM Cloud');assert.ok(b.calls.some(x=>x.url.includes('/pcm/credentials')&&x.o.headers['X-PCM-Authorization']==='Bearer pcm-token'));assert.match(b.text(),/alice/);await b.click('Disconnect');assert.doesNotMatch(b.text(),/Participant/);
+test('UI session restores credentials and supplies CSRF to API and socket requests',async t=>{
+ const b=await boot(t);
+ assert.match(b.text(),/Participant/);
+ assert.ok(b.calls.some(x=>x.url.endsWith('/auth/csrf')&&x.o.method==='POST'));
+ assert.equal(b.sockets.length,1);
+ assert.equal(b.sockets[0].options.auth.csrfToken,'ui-session-csrf-token');
+ assert.equal(b.calls.some(x=>x.url.includes('/pcm/')),false);
+ assert.equal(b.w.document.querySelector('nav').textContent.includes('Connections'),false);
+ await b.click('View');await b.click('Verify');
+ const verify=b.calls.find(x=>x.url.endsWith('/verify'));
+ assert.equal(verify.o.credentials,'same-origin');
+ assert.equal(verify.o.headers['X-CSRF-Token'],'ui-session-csrf-token');
+ assert.equal(verify.o.headers.Authorization,undefined);
 });
-test('real Vue DOM: upstream rejection stays visible and does not become an empty-success state',async t=>{
+test('UI: upstream rejection stays visible and does not become an empty-success state',async t=>{
  const b=await boot(t,{failure:true});assert.match(b.w.document.querySelector('[role="alert"]').textContent,/HTTP 400.*STORAGE_REGION_MISSING/);assert.doesNotMatch(b.text(),/Total: 0/);
 });
-test('OCM Connections page saves PCM and trusted peers without a deployer configuration',async t=>{
- const b=await boot(t);await b.click('Connections');assert.match(b.text(),/Personal OCM context connection/);
- const enabled=b.w.document.querySelector('input[type=checkbox]');enabled.checked=true;enabled.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.settle();
- for(const [id,value]of Object.entries({'f-pcmIssuer':'https://identity.pcm.example/realms/pcm','f-pcmClient':'wallet','f-pcmTenant':'pcm','f-pcmAccountUrl':'https://pcm.example'})){const field=b.w.document.getElementById(id);assert.ok(field);field.value=value;field.dispatchEvent(new b.w.Event('input',{bubbles:true}));}
- const trusted=b.w.document.getElementById('a-trustedHosts');trusted.value='peer.example';trusted.dispatchEvent(new b.w.Event('input',{bubbles:true}));await b.click('Test connection');assert.match(b.text(),/Discovery and endpoint checks completed/);await b.click('Save');
- const call=b.calls.find(x=>x.url.endsWith('/connections')&&x.o.method==='PUT');assert.ok(call);assert.equal(JSON.parse(call.o.body).pcm.accountUrl,'https://pcm.example');assert.deepEqual(JSON.parse(call.o.body).trustedHosts,['peer.example']);assert.match(b.text(),/Connection settings saved/);
+test('UI sign-in submits credentials and restores the session token',async t=>{
+ const b=await boot(t,{authenticated:false});
+ assert.equal(b.w.document.querySelector('nav'),null);
+ assert.equal(b.calls.length,1);
+ assert.ok(b.calls[0].url.endsWith('/auth/csrf'));
+ await fill(b,'f-username','operator');await fill(b,'f-password','test-password-123');
+ await b.click('Sign in');
+ const login=b.calls.find(x=>x.url.endsWith('/auth/login'));
+ assert.deepEqual(JSON.parse(login.o.body),{username:'operator',password:'test-password-123'});
+ assert.equal(login.o.credentials,'same-origin');
+ assert.equal(login.o.headers.Authorization,undefined);
+ assert.deepEqual(b.navigations,['/orce/']);
+ assert.equal(b.w.auth.csrfToken(),'ui-session-csrf-token');
 });
 async function fill(b,id,value){const el=b.w.document.getElementById(id);assert.ok(el,id);el.value=value;el.dispatchEvent(new b.w.Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));await b.settle();}
 test('SVG logo and registry create, edit, delete interactions work in the real DOM',async t=>{
@@ -97,10 +125,16 @@ test('users panel supports profile creation and displays effective role permissi
 test('audit shows actor usernames and stable fallback IDs for earlier events',async t=>{
  const b=await boot(t);await b.click('Audit log');assert.match(b.text(),/Alice/);assert.match(b.text(),/user-1/);assert.match(b.text(),/legacy-user/);
 });
-test('PCM test results distinguish reachable endpoints and test signed-in operations',async t=>{
- const b=await boot(t);await b.click('Connections');const enabled=b.w.document.querySelector('input[type=checkbox]');enabled.checked=true;enabled.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.settle();
- for(const [id,value]of Object.entries({'f-pcmIssuer':'https://identity.example/realms/pcm','f-pcmClient':'wallet','f-pcmTenant':'pcm','f-pcmAccountUrl':'https://pcm.example'}))await fill(b,id,value);
- await b.click('Test connection');assert.match(b.text(),/Reachable; login required/);assert.match(b.text(),/Not tested/);await b.click('Save');await b.click('Connect PCM Cloud');await b.click('Test signed-in account');assert.ok(b.calls.some(x=>x.url.endsWith('/pcm/connection-test')&&x.o.headers['X-PCM-Authorization']==='Bearer pcm-token'));
+test('UI sign-out clears the displayed credentials and session token',async t=>{
+ const b=await boot(t);assert.match(b.text(),/Participant/);
+ await b.click('Sign out');
+ const logout=b.calls.find(x=>x.url.endsWith('/auth/logout'));
+ assert.ok(logout);assert.equal(logout.o.method,'POST');
+ assert.equal(logout.o.headers['X-CSRF-Token'],'ui-session-csrf-token');
+ assert.equal(b.w.auth.csrfToken(),undefined);
+ assert.equal(b.w.document.querySelector('nav'),null);
+ assert.doesNotMatch(b.text(),/Participant/);
+ assert.deepEqual(b.navigations,['/orce/']);
 });
 test('credential import renders lifecycle checks without offering unsupported revocation',async t=>{
  const b=await boot(t);await b.click('Receive credential');await fill(b,'a-credentialJson','{"type":["VerifiableCredential"]}');await b.click('Import credential file');assert.match(b.text(),/Credential lifecycle checks/);assert.match(b.text(),/Storage confirmed/);assert.match(b.text(),/STATUS_NOT_MANAGED_HERE/);
@@ -116,6 +150,22 @@ test('native lifecycle UI: holder binding and verifier actor/service remain dist
 test('native lifecycle UI: revoke acknowledgement retains copy and delete stays a separate action',async t=>{
  const b=await boot(t,{nativeLifecycle:true});await b.click('View');await b.click('Revoke');assert.match(b.w.document.querySelector('[role="dialog"]').textContent,/Revocation confirmed by the native Status service/);assert.match(b.text(),/local copy is retained/);assert.equal(b.calls.filter(x=>x.url.endsWith('/revoke')).length,1);assert.equal(b.calls.filter(x=>x.o.method==='DELETE').length,0);assert.equal(b.calls.filter(x=>x.url.endsWith('/verify')).length,0);assert.ok(b.w.document.querySelector('[role="dialog"]'));await b.click('Delete local copy');assert.equal(b.calls.filter(x=>x.o.method==='DELETE').length,1);
 });
-test('native lifecycle UI: native verification errors show evidence rather than unexplained Unknown',async t=>{
+test('native lifecycle UI: native verification errors show evidence with the request context',async t=>{
  const b=await boot(t,{nativeLifecycle:true,nativeFailure:true});assert.match(b.text(),/does not mean active or revoked/);await b.click('View');await b.click('Verify');const dialog=b.w.document.querySelector('[role="dialog"]').textContent;assert.match(dialog,/UPSTREAM_REJECTED.*HTTP 500/);assert.match(dialog,/Not separately reported by the native service/);assert.match(dialog,/Requested by.*Mani/);assert.doesNotMatch(dialog,/Verified successfully/);
+});
+
+test('Required password change precedes credential access',async t=>{
+ const b=await boot(t,{passwordChangeRequired:true});
+ assert.equal(b.w.document.querySelector('nav'),null);
+ assert.equal(b.calls.some(x=>x.url.includes('/credentials')),false);
+ await fill(b,'f-currentPassword','initial-password-123');
+ await fill(b,'f-newPassword','replacement-password-456');
+ await b.click('Save');
+ const change=b.calls.find(x=>x.url.endsWith('/auth/password'));
+ assert.ok(change);assert.deepEqual(JSON.parse(change.o.body),{
+  currentPassword:'initial-password-123',newPassword:'replacement-password-456'
+ });
+ assert.equal(change.o.headers['X-CSRF-Token'],'ui-session-csrf-token');
+ assert.equal(b.w.auth.csrfToken(),undefined);
+ assert.deepEqual(b.navigations,['/orce/']);
 });

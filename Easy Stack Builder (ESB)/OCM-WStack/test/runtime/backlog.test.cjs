@@ -1,8 +1,8 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {Registry}=require('../../runtime/lib/registry.cjs'),{Runtime,routes}=require('../../runtime/lib/runtime.cjs');
-const {Roles}=require('../../runtime/lib/roles.cjs'),{Coordination}=require('../../runtime/lib/coordination.cjs');
-const {Integrations}=require('../../runtime/lib/integrations.cjs'),lifecycle=require('../../runtime/lib/lifecycle.cjs');
+const {Roles}=require('../legacy/roles.cjs'),{Coordination}=require('../../runtime/lib/coordination.cjs');
+const lifecycle=require('../../runtime/lib/lifecycle.cjs');
 const scope={tenant:'org',account:'wallet',group:'wallet',subject:'user-1',username:'Mani',permissions:['credentials.read','credentials.verify']};
 function registry(){
  const rows=[],matches=(r,q)=>Object.entries(q).every(([k,v])=>r[k]===v);
@@ -35,19 +35,19 @@ test('registry cannot set native dispatch subjects or change IDs',async()=>{
  await r.change(scope,null,definition);await assert.rejects(r.change(scope,'Custom',{...definition,id:'Other',revision:1}),{code:'TYPE_ID_IMMUTABLE'});
 });
 test('audit records authenticated actor identity alongside stable subject',async()=>{
- let record;const c=new Coordination({collection:name=>({insertOne:async x=>{assert.equal(name,'audit_events');record=x;}})});
+ let record;const c=new Coordination({collection:name=>({insertOne:async x=>{assert.equal(name,'ui_audit_log');record=x;}})});
  await c.audit(scope,'createType','succeeded','request');assert.deepEqual(record.actor,{subject:'user-1',username:'Mani'});assert.equal(record.subject,'user-1');assert.equal(record.token,undefined);
 });
 test('role permission payload reaches its handler while scope injection is rejected',async()=>{
  const run=async(path,body)=>{
   let dispatched=false,code=200,payload;
-  const r={c:{publicOrigin:'https://wallet.example'},auth:{fromRequest:async()=>scope,require(){}},limit(){},ready:true,coordination:{run:async(c,a,k,b,fn)=>fn('op'),audit:async()=>{}},events:{emit(){}},counts:new Map(),execute:async()=>{dispatched=true;return {state:'succeeded'};}};
+  const r={c:{publicOrigin:'https://wallet.example'},auth:{fromRequest:async()=>scope,require(){},csrf(){}},limit(){},ready:true,coordination:{run:async(c,a,k,b,fn)=>fn('op'),audit:async()=>{}},events:{emit(){}},counts:new Map(),execute:async()=>{dispatched=true;return {state:'succeeded'};}};
   const res={setHeader(){},status(n){code=n;return this;},json(x){payload=x;return this;}};
   await Runtime.prototype.handle.call(r,{method:'POST',url:path,headers:{},body},res);return {code,payload,dispatched};
  };
  assert.equal((await run('/roles',{name:'custom',permissions:['credentials.read']})).dispatched,true);
  assert.equal((await run('/roles',{name:'custom',permissions:[],tenant:'other'})).code,403);
- assert.equal((await run('/credential-types',{permissions:['roles.manage']})).code,403);
+ assert.equal((await run('/credential-types',{permissions:['admin.users']})).code,403);
  for(const action of ['createType','updateType','deleteType'])assert.equal(routes.find(x=>x.action===action).permission,'credentials.issue');
 });
 test('user management protects service accounts and last role manager; new users require a password change',async()=>{
@@ -65,11 +65,4 @@ test('lifecycle checks permissions and native capabilities without mutating or c
 test('successful import remains successful when its lifecycle readback is blocked',async()=>{
  const r={adapters:{importCredential:async()=>({state:'succeeded',credentialId:'new'}),detail:async()=>{throw {reason:'STORAGE_REGION_MISSING'};}}};
  const result=await Runtime.prototype.execute.call(r,'importCredential',scope,null,{}, {},'op');assert.equal(result.state,'succeeded');assert.equal(result.lifecycle.state,'blocked');
-});
-test('PCM test distinguishes protected endpoint reachability from authenticated account access',async()=>{
- const issuer='https://id.example/realms/pcm',calls=[];
- const i=new Integrations({c:{publicOrigin:'https://wallet.example'}},{},async(url,options)=>{calls.push({url,options});if(url.includes('.well-known'))return {issuer,code_challenge_methods_supported:['S256'],authorization_endpoint:issuer+'/auth',token_endpoint:issuer+'/token',userinfo_endpoint:issuer+'/userinfo'};throw {upstreamStatus:401,code:'UPSTREAM_REJECTED'};});
- const report=await i.test({pcm:{enabled:true,issuer,clientId:'ui',tenant:'pcm',accountUrl:'https://account.example'},trustedHosts:[]});
- assert.equal(report.state,'partial');assert.equal(report.checks.find(x=>x.name==='accountEndpoint').state,'authentication_required');assert.equal(report.checks.find(x=>x.name==='personalLogin').state,'not_tested');assert.ok(calls.every(x=>!x.options.headers?.authorization));
- const live=await Runtime.prototype.execute.call({pcm:{records:async()=>({}),offers:async()=>({}),keys:async()=>{throw {code:'DENIED'};}}},'pcmTest',{...scope,pcm:true});assert.equal(live.state,'failed');
 });

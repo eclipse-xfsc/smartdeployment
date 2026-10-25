@@ -11,7 +11,7 @@
 .esb-ocm-form .esb-preview{padding:12px;border-left:3px solid var(--esb-accent);background:var(--red-ui-secondary-background,#f0f5f6);overflow-wrap:anywhere;margin:12px 0}.esb-ocm-form summary{cursor:pointer;font-weight:600;padding:10px 0}.esb-ocm-form details>div{padding-top:10px}
 </style>
 <div class="esb-ocm-form">
- <div class="esb-ocm-hero"><h3>OCM W-Stack</h3><p>Your OCM W-Stack UI, native services and infrastructure in one deployment.</p><small>ESB 12.3.14 · Automatic upstream updates</small></div>
+ <div class="esb-ocm-hero"><h3>OCM W-Stack</h3><p>Your OCM W-Stack UI, native services and infrastructure in one deployment.</p><small>ESB 12.3.18</small></div>
  <ul id="esb-ocm-tabs"></ul><div id="esb-ocm-panels">
  <div id="esb-ocm-connect">
   <div class="esb-card"><h4>Connect your cluster</h4>
@@ -35,7 +35,7 @@
    <div class="form-row"><label for="node-input-provider">Cluster provider</label><select id="node-input-provider"><option value="auto">Detect automatically</option><option value="hetzner">Hetzner</option><option value="ionos">IONOS Cloud</option><option value="generic">Generic Kubernetes</option><option value="aws">AWS</option><option value="azure">Azure</option><option value="gcp">Google Cloud</option><option value="openstack">OpenStack</option><option value="digitalocean">DigitalOcean</option><option value="oci">Oracle Cloud</option><option value="scaleway">Scaleway</option><option value="alibaba">Alibaba Cloud</option></select></div>
    <div id="esb-hetzner"><div class="form-row"><label for="node-input-lbLocation">Hetzner location</label><input id="node-input-lbLocation" placeholder="Detected from node topology"></div><p class="esb-note">Only set a location if your cluster spans regions. Annotations are generated from the detected topology.</p></div>
    <div class="form-row"><label for="node-input-storageClass">StorageClass</label><input id="node-input-storageClass" placeholder="Cluster default"></div>
-   <div class="form-row"><label for="node-input-runtimeImage">ORCE version</label><select id="node-input-runtimeImage"><option value="ecofacis/xfsc-orce:2.0.15">2.0.15</option><option value="ecofacis/xfsc-orce:2.0.13">2.0.13</option></select></div>
+   <div class="form-row"><label for="node-input-runtimeImage">OCM UI image</label><input type="text" id="node-input-runtimeImage" placeholder="registry.example/ocm-ui@sha256:…"></div>
    <div class="form-row"><label for="node-input-useExternalMongo">External MongoDB</label><input id="node-input-useExternalMongo" type="checkbox"></div>
    <div id="esb-mongo-uri" class="form-row"><label for="node-input-mongoUri">MongoDB URI</label><input type="password" id="node-input-mongoUri" autocomplete="new-password"></div>
    <div class="form-row"><label for="node-input-orceStorageSize">ORCE storage</label><input id="node-input-orceStorageSize"></div><div class="form-row"><label for="node-input-mongoStorageSize">MongoDB storage</label><input id="node-input-mongoStorageSize"></div>
@@ -64,7 +64,7 @@
    <div class="form-row"><label for="node-input-editorPassword">Initial password</label><input type="password" id="node-input-editorPassword" autocomplete="new-password"></div>
    <p class="esb-note">Use a separate password of at least 12 characters. Optional dashboards initially use this password with username admin. Later password changes are retained.</p>
   </div>
-  <div class="esb-preview">PCM connections are configured after login in the OCM W-Stack UI Connections page.</div>
+  <div class="esb-preview">Supply the built OCM UI image. For an existing installation, follow the UI identity migration guide.</div>
  </div></div>
  <p class="esb-note">Connect an Inject node to start Deploy. Output 1 returns the result; output 2 shows progress, detected settings and DNS targets. An existing matching installation resumes safely.</p>
 </div>
@@ -74,7 +74,7 @@
  function jsonObject(v){if(!v)return true;try{var x=JSON.parse(v);return x&&typeof x==='object'&&!Array.isArray(x);}catch(e){return false;}}
  RED.nodes.registerType('OCM-W-Stack',{
  category:'Easy Stack Builder',color:'#c7e2e4',icon:'font-awesome/fa-cubes',inputs:1,outputs:2,outputLabels:['Result','Progress'],label:function(){return this.name||'OCM W-Stack';},
- defaults:{name:{value:''},procedureVersion:{value:12},instanceName:{value:'ocm-wstack'},domainAddress:{value:'',required:true},emailAddress:{value:''},tenantId:{value:'demo-tenant',required:true},tenantRelease:{value:'demotenant'},tenantSubdomain:{value:''},provider:{value:'auto'},storageClass:{value:''},lbLocation:{value:''},lbNetworkZone:{value:''},lbType:{value:''},lbPrivate:{value:false},lbAnnotations:{value:'{}'},externalTrafficPolicy:{value:'Cluster'},gatewayRouting:{value:'internal'},externalDns:{value:false},dnsProvider:{value:'auto'},dnsValues:{value:'{}',validate:jsonObject},publicDashboards:{value:false},runtimeEnabled:{value:true},runtimeImage:{value:'ecofacis/xfsc-orce:2.0.15'},runtimeServices:{value:'{}'},pcm:{value:'{"enabled":false}'},orceStorageSize:{value:'3Gi'},mongoStorageSize:{value:'5Gi'},useExternalMongo:{value:false},editorUsername:{value:'admin'},uiAdminUsername:{value:'admin'},uiAdminEmail:{value:''},timeoutSeconds:{value:1800,validate:function(v){return Number.isInteger(Number(v))&&v>=60&&v<=7200;}}},
+ defaults:{name:{value:''},procedureVersion:{value:12},instanceName:{value:'ocm-wstack'},domainAddress:{value:'',required:true},emailAddress:{value:''},tenantId:{value:'demo-tenant',required:true},tenantRelease:{value:'demotenant'},tenantSubdomain:{value:''},provider:{value:'auto'},storageClass:{value:''},lbLocation:{value:''},lbNetworkZone:{value:''},lbType:{value:''},lbPrivate:{value:false},lbAnnotations:{value:'{}'},externalTrafficPolicy:{value:'Cluster'},gatewayRouting:{value:'internal'},externalDns:{value:false},dnsProvider:{value:'auto'},dnsValues:{value:'{}',validate:jsonObject},publicDashboards:{value:false},runtimeEnabled:{value:true},runtimeImage:{value:''},runtimeServices:{value:'{}'},orceStorageSize:{value:'3Gi'},mongoStorageSize:{value:'5Gi'},useExternalMongo:{value:false},editorUsername:{value:'admin'},uiAdminUsername:{value:'admin'},uiAdminEmail:{value:''},timeoutSeconds:{value:1800,validate:function(v){return Number.isInteger(Number(v))&&v>=60&&v<=7200;}}},
  credentials:{kubeconfig:{type:'password'},tlsCertificate:{type:'password'},tlsPrivateKey:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'},editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}},
  oneditprepare:function(){
   var node=this,tabs=RED.tabs.create({id:'esb-ocm-tabs',onchange:function(tab){$('#esb-ocm-panels').children().hide();$('#'+tab.id).show();}});
@@ -88,7 +88,7 @@
   function preview(){var domain=$('#node-input-domainAddress').val().replace(/^\*\./,'')||'example.com',tenant=(node.tenantSubdomain||$('#node-input-tenantId').val()||'demo-tenant').toLowerCase().replace(/_/g,'-');$('#esb-tenant-preview').text('OCM W-Stack UI: https://'+tenant+'.'+domain+'/orce/');}
   $('#node-input-externalDns,#node-input-dnsProvider,#node-input-provider,#node-input-useExternalMongo').on('change',options);options();$('#node-input-domainAddress,#node-input-tenantId').on('input',preview);preview();
  },
- oneditsave:function(){this.procedureVersion=12;this.runtimeEnabled=true;this.gatewayRouting='internal';this.externalTrafficPolicy='Cluster';this.pcm='{"enabled":false}';}
+ oneditsave:function(){this.procedureVersion=12;this.runtimeEnabled=true;this.gatewayRouting='internal';this.externalTrafficPolicy='Cluster';}
  });
 })();
 </script>

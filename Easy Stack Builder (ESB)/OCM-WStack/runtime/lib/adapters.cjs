@@ -2,7 +2,7 @@
 const {request}=require('./http.cjs');
 const {normalizeOffer,offerUrl}=require('./offers.cjs');
 const {fail,object,string,id}=require('./errors.cjs');
-const {decode,summarize,statusRef}=require('./credentials.cjs');
+const {decode,summarize,statusRef,lifecycleStatus}=require('./credentials.cjs');
 class Adapters {
  constructor(config,http){this.c=config;this.http=http;}
  async statusConfiguration(){return this.c;}
@@ -39,22 +39,24 @@ class Adapters {
   let checks=0;
   const worker=async()=>{while(pending.length&&checks++<16){const {item,ref}=pending.shift();try{item.status={state:await this.readStatus(c,ref),checkedAt:new Date().toISOString(),source:'XFSC Status'};}catch(e){item.status.reason=e.code||'NATIVE_STATUS_UNAVAILABLE';}}};
   await Promise.all(Array.from({length:Math.min(4,pending.length)},worker));
+  for(const item of items)item.status=lifecycleStatus(item,item.status);
   const sort=q.sort||'id';if(!['id','issuedAt','expiresAt'].includes(sort))fail(400,'VALIDATION_ERROR');
   if(q.direction&&!['asc','desc'].includes(q.direction))fail(400,'VALIDATION_ERROR');
   items.sort((a,b)=>(q.direction==='desc'?-1:1)*String(a[sort]||'').localeCompare(String(b[sort]||'')));
-  const counts={total:items.length,expired:items.filter(x=>x.status.state==='expired').length,active:items.filter(x=>x.status.state==='active').length,revoked:items.filter(x=>x.status.state==='revoked').length,notChecked:items.filter(x=>x.status.state==='not_checked').length};
-  if(q.status){if(!['expired','active','revoked','not_checked'].includes(q.status))fail(400,'VALIDATION_ERROR');items=items.filter(x=>x.status.state===q.status);}
+  const counts={total:items.length,expired:items.filter(x=>x.status.state==='expired').length,active:items.filter(x=>x.status.state==='active').length,revoked:items.filter(x=>x.status.state==='revoked').length,suspended:items.filter(x=>x.status.state==='suspended').length,notYetValid:items.filter(x=>x.status.state==='not_yet_valid').length,notChecked:items.filter(x=>x.status.state==='not_checked').length};
+  if(q.status){if(!['expired','active','revoked','suspended','not_yet_valid','not_checked'].includes(q.status))fail(400,'VALIDATION_ERROR');items=items.filter(x=>x.status.state===q.status);}
   let offset=0;if(q.cursor){try{offset=Number(Buffer.from(q.cursor,'base64url').toString());}catch{fail(400,'VALIDATION_ERROR');}if(!Number.isSafeInteger(offset)||offset<0||offset>5000)fail(400,'VALIDATION_ERROR');}
   return {items:items.slice(offset,offset+pageSize),counts,total:items.length,nextCursor:offset+pageSize<items.length?Buffer.from(String(offset+pageSize)).toString('base64url'):null,refreshedAt:new Date().toISOString()};
  }
  async raw(c,key){const all=await this.records(c);if(!Object.hasOwn(all,key))fail(404,'RESOURCE_NOT_FOUND');return all[key];}
- async detail(c,key){const raw=await this.raw(c,key);let revocable=true,revocationReason=null;try{statusRef(raw,await this.statusConfiguration(c));}catch(e){revocable=false;revocationReason=e.code;}return {...summarize(key,raw),claims:decode(raw).claims,raw,capabilities:{verify:true,delete:true,revoke:revocable,revocationReason},provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).holder,verifier:null,source:'credential-declarations',verified:false}};}
+ async detail(c,key){const raw=await this.raw(c,key);let revocable=true,revocationReason=null;try{statusRef(raw,await this.statusConfiguration(c));}catch(e){revocable=false;revocationReason=e.code;}const summary=summarize(key,raw);summary.status=lifecycleStatus(summary,summary.status);return {...summary,claims:decode(raw).claims,raw,capabilities:{verify:true,delete:true,revoke:revocable,revocationReason},provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).holder,verifier:null,source:'credential-declarations',verified:false}};}
  async provenance(c,key){
   const records=await this.records(c),graph=require('./provenance.cjs').graph(records,key);
+  try{require('./provenance.cjs').joinConnections(graph,(await this.relationships(c)).items);graph.connectionJoin={state:'resolved'};}catch(e){graph.connectionJoin={state:'unavailable',code:e.code||'UPSTREAM_UNAVAILABLE'};}
   const selected=graph.nodes.filter(n=>n.kind==='credential').map(n=>n.credentialId);
   // The upstream chain handler asserts JSON objects; JWT strings cannot use it.
   if(selected.every(k=>records[k]&&typeof records[k]==='object'&&!Array.isArray(records[k]))){
-   try{graph.native={state:'resolved',source:'storage-chain',result:(await this.chain(c,{root:key,chainName:'credentialChain',chain:selected.filter(k=>k!==key).map(item=>({item}))})).result};}
+   try{graph.native={state:'resolved',source:'storage-chain-composition',verified:false,result:(await this.chain(c,{root:key,chainName:'credentialChain',chain:selected.filter(k=>k!==key).map(item=>({item}))})).result};}
    catch(e){graph.native={state:'unavailable',code:e.code,reason:e.reason||null};}
   }else graph.native={state:'unsupported-format',source:'storage-chain'};
   return graph;
@@ -124,7 +126,7 @@ class Adapters {
   const r=await this.call(c,'didcomm','/admin/connections/'+id(key));const m=r?.mediatee||r?.Mediatee||r;
   if(!m||m.group!==c.group)fail(404,'RESOURCE_NOT_FOUND');return m;
  }
- async relationships(c){const r=await this.call(c,'didcomm','/admin/connections?group='+id(c.group));if(!Array.isArray(r))fail(502,'UPSTREAM_PROTOCOL_ERROR');return {items:r.map(o=>o.mediatee||o.Mediatee||o).filter(o=>o.group===c.group).map(o=>({did:o.remoteDid,label:o.properties?.label||'',createdAt:o.added,group:o.group}))};}
+ async relationships(c){const r=await this.call(c,'didcomm','/admin/connections?group='+id(c.group));if(!Array.isArray(r))fail(502,'UPSTREAM_PROTOCOL_ERROR');return {items:r.map(o=>o.mediatee||o.Mediatee||o).filter(o=>o.group===c.group).map(o=>({did:o.remoteDid,label:o.properties?.label||'',createdAt:o.added,group:o.group,issuer:o.properties?.issuer||null,holder:o.properties?.holder||null,credential:o.properties?.credential||null,direction:['inbound','outbound','bidirectional'].includes(o.properties?.direction)?o.properties.direction:'unknown',status:typeof o.blocked==='boolean'?(o.blocked?'blocked':'connected'):['active','blocked','pending','connected'].includes(o.status)?o.status:'unknown'}))};}
  async relationAction(c,key,action,body){
   if(action==='invitations'){object(body,[]);return {state:'succeeded',invitation:await this.call(c,'didcomm','/admin/invitation','POST',{protocol:'nats',topic:this.c.didcommTopic,eventType:this.c.didcommEventType,properties:{},group:c.group})};}
   if(action==='accept'){

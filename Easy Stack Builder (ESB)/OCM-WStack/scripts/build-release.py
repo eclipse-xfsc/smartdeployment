@@ -20,7 +20,9 @@ with tarfile.open(fileobj=buffer, mode='w', format=tarfile.PAX_FORMAT) as archiv
     for p in sorted(source.rglob('*')):
         if not p.is_file():
             continue
-        if p.is_symlink() or 'node_modules' in p.parts:
+        if any(part in {'node_modules', '.git', '__pycache__'} for part in p.relative_to(source).parts):
+            continue
+        if p.is_symlink():
             raise SystemExit(f'Unexpected runtime content: {p.relative_to(root)}')
         info = tarfile.TarInfo(p.relative_to(source).as_posix())
         data = p.read_bytes()
@@ -32,7 +34,9 @@ files = []
 for p in sorted(root.rglob('*')):
     if not p.is_file() or p.name == 'SOURCE-MANIFEST.sha256' or (p.parent == root and p.suffix in {'.tgz', '.zip'}):
         continue
-    if p.is_symlink() or any(part in {'node_modules', '.git', '__pycache__'} for part in p.relative_to(root).parts):
+    if any(part in {'node_modules', '.git', '__pycache__'} for part in p.relative_to(root).parts):
+        continue
+    if p.is_symlink():
         raise SystemExit(f'Unexpected package content: {p.relative_to(root)}')
     files.append(p)
 manifest = root / 'SOURCE-MANIFEST.sha256'
@@ -46,7 +50,7 @@ source_zip = out / f'OCM-WStack-{version}-Source.zip'
 with zipfile.ZipFile(source_zip, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for p in sorted(files):
         name = 'Easy Stack Builder (ESB)/OCM-WStack/' + p.relative_to(root).as_posix()
-        info = zipfile.ZipInfo(name, date_time=(2026, 10, 2, 0, 0, 0))
+        info = zipfile.ZipInfo(name, date_time=(2026, 10, 23, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         info.external_attr = (0o100755 if p.stat().st_mode & 0o111 else 0o100644) << 16
         archive.writestr(info, p.read_bytes())

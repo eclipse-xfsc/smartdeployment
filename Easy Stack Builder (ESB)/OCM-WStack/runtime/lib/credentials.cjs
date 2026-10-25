@@ -14,8 +14,30 @@ function decode(raw){
 }
 function summarize(id,raw){
  const {claims:v,tokenClaims:p,format}=decode(raw);
- const timestamp=(s,n)=>s||(Number.isFinite(n)?new Date(n*1000).toISOString():null);
- return {id,format,types:Array.isArray(v.type)?v.type:typeof v.type==='string'?[v.type]:v.vct?[v.vct]:[],issuer:{id:typeof v.issuer==='string'?v.issuer:v.issuer?.id||p.iss||null},subject:{id:v.credentialSubject?.id||p.sub||null},holder:holder(v,p),issuedAt:timestamp(v.issuanceDate||v.validFrom,p.iat||p.nbf),expiresAt:timestamp(v.expirationDate||v.validUntil,p.exp),status:{state:'not_checked',checkedAt:null}};
+ const timestamp=(s,n)=>{
+  if(s!==undefined&&s!==null)return typeof s==='string'?s:'invalid';
+  if(n===undefined||n===null)return null;
+  if(!Number.isFinite(n)||Math.abs(n*1000)>8640000000000000)return 'invalid';
+  return new Date(n*1000).toISOString();
+ };
+ return {id,format,types:Array.isArray(v.type)?v.type:typeof v.type==='string'?[v.type]:v.vct?[v.vct]:[],issuer:{id:typeof v.issuer==='string'?v.issuer:v.issuer?.id||p.iss||null},subject:{id:v.credentialSubject?.id||p.sub||null},holder:holder(v,p),issuedAt:timestamp(v.issuanceDate??v.validFrom,p.iat??p.nbf),validFrom:timestamp(v.validFrom??v.issuanceDate,p.nbf),expiresAt:timestamp(v.expirationDate??v.validUntil,p.exp),status:{state:'not_checked',checkedAt:null}};
+}
+
+// Display lifecycle combines declared validity with the native status decision.
+// It never changes a cryptographic verification verdict from the Signer.
+function lifecycleStatus(credential, nativeStatus, now = Date.now()) {
+ const checkedAt = new Date(now).toISOString();
+ const state = nativeStatus?.state || 'not_checked';
+ if (['revoked', 'suspended'].includes(state)) return nativeStatus;
+ const end = credential.expiresAt === null || credential.expiresAt === undefined ? null : Date.parse(credential.expiresAt);
+ const start = credential.validFrom === null || credential.validFrom === undefined ? null : Date.parse(credential.validFrom);
+ if ((end !== null && !Number.isFinite(end)) || (start !== null && !Number.isFinite(start)) ||
+     (start !== null && end !== null && end <= start)) {
+  return { state: 'not_checked', reason: 'INVALID_VALIDITY_PERIOD', checkedAt, nativeState: state };
+ }
+ if (end !== null && end <= now) return { state: 'expired', checkedAt, source: 'declared-validity', nativeState: state };
+ if (start !== null && start > now) return { state: 'not_yet_valid', checkedAt, source: 'declared-validity', nativeState: state };
+ return nativeStatus || { state: 'not_checked', checkedAt: null };
 }
 // Display declarations only. Native services determine validity and lifecycle.
 function holder(v,p){
@@ -40,4 +62,4 @@ function statusRef(raw,config){
  const index=Number(s.statusListIndex);if(!/^\d+$/.test(String(s.statusListIndex))||!Number.isSafeInteger(index)||index<0||index>16777215)fail(422,'CREDENTIAL_NOT_REVOCABLE');
  return {listId:match[1],index,url:u.href,type:s.type==='StatusList2021Entry'?'StatusList2021':s.type==='BitstringStatusListEntry'?'BitstringStatusList':s.type};
 }
-module.exports={decode,summarize,statusRef};
+module.exports={decode,summarize,statusRef,lifecycleStatus};

@@ -12,13 +12,13 @@ def render(chart,values,upgrade=False):
         args=[helm,'template','demotenant',str(chart),'-n','ocm-wstack','-f',f.name]
         if upgrade: args+=['--is-upgrade']
         return [d for d in yaml.safe_load_all(subprocess.check_output(args,text=True)) if d]
-base={'host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','issuer':'https://demo-tenant.example.com/orce/identity/realms/ocm-ui-demo-tenant'}}
+base={'image':'example.invalid/ocm-ui:12.3.18','host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','issuer':'https://demo-tenant.example.com/orce/identity/realms/ocm-ui-demo-tenant'}}
 checks=0
 for upgrade in [False,True]:
     for external in [False,True]:
         docs=render(root/'charts-runtime',{**base,'mongo':{'embedded':not external,'externalPorts':[27017]}},upgrade)
         route=next(d for d in docs if d['kind']=='HTTPRoute')
-        assert [r['matches'][0]['path']['value'] for r in route['spec']['rules']]==['/orce/identity','/orce','/']
+        assert [r['matches'][0]['path']['value'] for r in route['spec']['rules']]==['/orce','/']
         assert route['spec']['parentRefs'][0]['kind']=='ListenerSet'
         runtime=next(d for d in docs if d['kind']=='Deployment' and d['metadata']['name']=='ocm-orce')
         assert runtime['spec']['template']['spec']['hostAliases']==base['hostAliases']
@@ -26,7 +26,7 @@ for upgrade in [False,True]:
         assert {80,443,10080,10443}.issubset({p['port'] for p in policy['spec']['egress'][0]['ports']})
         assert not any(d['kind']=='Ingress' for d in docs)
         pvcs=[d for d in docs if d['kind']=='PersistentVolumeClaim']
-        assert len(pvcs)==(2 if external else 3)
+        assert len(pvcs)==(1 if external else 2)
         assert all(d['metadata']['annotations']['helm.sh/resource-policy']=='keep' for d in pvcs)
         assert not any(d['kind']=='Secret' for d in docs)
         for deployment in [d for d in docs if d['kind']=='Deployment']:

@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
 const {Adapters}=require('../../runtime/lib/adapters.cjs'),{Events}=require('../../runtime/lib/events.cjs'),{summarize,statusRef}=require('../../runtime/lib/credentials.cjs'),{graph}=require('../../runtime/lib/provenance.cjs'),{request}=require('../../runtime/lib/http.cjs'),{Runtime}=require('../../runtime/lib/runtime.cjs');
 const config={tenant:'tenant',account:'wallet',group:'wallet',cryptoNamespace:'ocm-wstack',cryptoGroup:'tenant',publicOrigin:'https://wallet.example',issuerDids:['did:web:wallet.example']},context={...config,subject:'user-1',username:'Mani',token:'user-token'};
-const payload={iss:config.issuerDids[0],vct:'SDJWT',cnf:{jwk:{kty:'EC',crv:'P-256',kid:'eckey',x:'public-x',y:'public-y'}},exp:1,status:{status_list:{idx:1,uri:config.publicOrigin+'/api/status/2'}}};
+const payload={iss:config.issuerDids[0],vct:'SDJWT',cnf:{jwk:{kty:'EC',crv:'P-256',kid:'eckey',x:'public-x',y:'public-y'}},exp:4102444800,status:{status_list:{idx:1,uri:config.publicOrigin+'/api/status/2'}}};
 const token=(p=payload)=>'e30.'+Buffer.from(JSON.stringify(p)).toString('base64url')+'.signature~';
 const native=(reply,records={one:token()})=>new Adapters(config,{call:async(n,p,o)=>n==='storage'?{credentials:records}:reply(n,p,o)});
 test('SD-JWT holder display uses key binding without inventing a person or verified identity',()=>{

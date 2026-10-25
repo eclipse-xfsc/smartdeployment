@@ -36,7 +36,6 @@ function config(input = {}) {
     useExternalMongo: input.useExternalMongo===true || input.useExternalMongo==='true',
     editorUsername: input.editorUsername || 'admin', uiAdminUsername: input.uiAdminUsername || 'admin', uiAdminEmail: input.uiAdminEmail || input.emailAddress || input.email || '',
     runtimeServices: object(input.runtimeServices, 'Runtime service overrides'),
-    pcm: {enabled:false}
   };
   if (c.procedureVersion !== 12) fail('RECONFIGURE', 'Create a new version 12 OCM-W-Stack node. Previous deployment configuration is not migrated.');
   if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(c.instanceName)) fail('CONFIG', 'Instance name must be 2–40 lowercase letters, digits or hyphens.');

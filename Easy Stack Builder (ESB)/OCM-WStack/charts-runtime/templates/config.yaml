@@ -11,8 +11,6 @@ kind: ConfigMap
 metadata:
   name: ocm-orce-seed
   namespace: {{ .Release.Namespace }}
-binaryData:
-  runtime.tgz: {{ .Files.Get "files/runtime.tgz" | b64enc | quote }}
 data:
   seed.sh: |
 {{ .Files.Get "files/seed.sh" | indent 4 }}

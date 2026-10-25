@@ -37,13 +37,6 @@ spec:
             cidr: 0.0.0.0/0
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16]
       ports: [{protocol: TCP, port: 443}]
-    {{- if (dig "pcm" "enabled" false .Values.runtimeConfig) }}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.runtimeConfig.pcm.namespace | quote }}
-      ports: [{protocol: TCP, port: 8080}]
-    {{- end }}
     {{- if not .Values.mongo.embedded }}
     - ports:
         {{- range .Values.mongo.externalPorts }}

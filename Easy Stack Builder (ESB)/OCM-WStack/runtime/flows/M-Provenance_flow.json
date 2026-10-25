@@ -1,0 +1,35 @@
+[
+  {
+    "id": "ocm-provenance",
+    "type": "tab",
+    "label": "Provenance",
+    "disabled": false
+  },
+  {
+    "id": "ocm-provenance-service",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-provenance",
+    "name": "Provenance service",
+    "module": "Provenance",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ocm-provenance-http-0",
+    "type": "http in",
+    "z": "ocm-provenance",
+    "name": "GET /credentials/:id/provenance",
+    "url": "/orce/ui-api/v1/credentials/:id/provenance",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 60,
+    "wires": [
+      [
+        "ocm-provenance-service"
+      ]
+    ]
+  }
+]

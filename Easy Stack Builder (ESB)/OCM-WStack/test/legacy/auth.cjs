@@ -1,8 +1,8 @@
 'use strict';
 const crypto=require('node:crypto');
-const {request}=require('./http.cjs');
-const {fail}=require('./errors.cjs');
-const {atomic}=require('./permissions.cjs');
+const {request}=require('../../runtime/lib/http.cjs');
+const {fail}=require('../../runtime/lib/errors.cjs');
+const {atomic}=require('../../runtime/lib/permissions.cjs');
 class Auth {
  constructor(config,fetcher=request){this.c=config;this.fetch=fetcher;this.keys=[];this.loaded=0;this.pending=null;this.lastAttempt=0;}
  async refresh(){

@@ -1,0 +1,106 @@
+[
+  {
+    "id": "ocm-base",
+    "type": "tab",
+    "label": "Base",
+    "disabled": false
+  },
+  {
+    "id": "ocm-base-service",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-base",
+    "name": "Base service",
+    "module": "Base",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ocm-base-http-0",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "GET /metrics",
+    "url": "/orce/ui-api/v1/metrics",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 60,
+    "wires": [
+      [
+        "ocm-base-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-base-http-1",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "GET /health/dependencies",
+    "url": "/orce/ui-api/v1/health/dependencies",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 110,
+    "wires": [
+      [
+        "ocm-base-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-base-http-2",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "GET /health/live",
+    "url": "/orce/ui-api/v1/health/live",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "ocm-base-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-base-http-3",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "GET /health/ready",
+    "url": "/orce/ui-api/v1/health/ready",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 210,
+    "wires": [
+      [
+        "ocm-base-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-uibuilder",
+    "type": "uibuilder",
+    "z": "ocm-base",
+    "name": "OCM W-Stack UI",
+    "url": "orce",
+    "fwdInMessages": false,
+    "allowScripts": false,
+    "allowStyles": false,
+    "copyIndex": false,
+    "templateFolder": "blank",
+    "sourceFolder": "dist",
+    "deployedVersion": "7.5.0",
+    "x": 220,
+    "y": 400,
+    "wires": [
+      [],
+      []
+    ]
+  }
+]
