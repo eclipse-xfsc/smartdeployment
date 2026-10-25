@@ -9,6 +9,7 @@ const {adapt, networkValues} = require('./adapt');
 const lock = require('../upstream-lock.json');
 const {prepare}=require('./chart-check');
 const {upgrade:helmUpgrade,transportFailure,delay,diagnose}=require('./api-recovery');
+const {bind:bindKubeconfig,identity:kubeIdentity}=require('./kube-client');
 const MARKER = 'esb-ocmwstack-v12';
 const LEASE = 'esb-ocmwstack-v12';
 const MANAGED_NS = ['observability','security','argocd','infrastructure','ocm-wstack'];
@@ -56,6 +57,8 @@ async function preflight(r,c,credentials) {
   await Promise.all(['bash','git','helm','kubectl','jq','curl','base64'].map(cmd => r.run('bash',['-c','command -v "$1" >/dev/null','esb-prerequisite',cmd])));
   const access=await r.run('kubectl',['auth','can-i','*','*','--all-namespaces']);
   if(access.stdout.trim()!=='yes')fail('RBAC','The supplied kubeconfig must have cluster-admin permissions.');
+  const argoAccess=await r.run('kubectl',['auth','can-i','list','applications.argoproj.io','-n','argocd'],{allowFailure:true});
+  if(argoAccess.stdout.trim()!=='yes')fail('RBAC','The identity authenticated by the uploaded kubeconfig cannot list Argo Applications in argocd. No installation was started. Check the kubeconfig-selection and kubeconfig-identity events.');
   const [nodes,classes,system,helm]=await Promise.all([
     r.json('kubectl',['get','nodes','-o','json']),r.json('kubectl',['get','storageclasses','-o','json']),
     r.json('kubectl',['get','namespace','kube-system','-o','json']),r.run('helm',['version','--short'])
@@ -121,7 +124,7 @@ async function validate(r,c) {
   return report;
 }
 async function operation(action,input,credentials,{emit=()=>{},signal:externalSignal,runnerFactory,checkoutSource=checkout}={}) {
-  if(!['deploy','preflight','diagnose-api','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, diagnose-api, validate, inspect, test-credentials or teardown.');
+  if(!['deploy','preflight','diagnose-api','diagnose-auth','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, diagnose-api, diagnose-auth, validate, inspect, test-credentials or teardown.');
   const controller=new AbortController();
   const relay=()=>controller.abort();
   if(externalSignal?.aborted)controller.abort();
@@ -136,7 +139,10 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const env={...process.env,KUBECONFIG:kubeconfig,GIT_TERMINAL_PROMPT:'0',HELM_QPS:'5',HELM_BURST_LIMIT:'10',HELM_CACHE_HOME:path.join(dir,'helm/cache'),HELM_CONFIG_HOME:path.join(dir,'helm/config'),HELM_DATA_HOME:path.join(dir,'helm/data')};
     const secrets=[credentials.kubeconfig,kubeText,credentials.dnsToken,...Object.values(object(credentials.dnsSecretData,'DNS Secret data'))];
     r=runnerFactory?runnerFactory({cwd:dir,env,emit,secrets,signal}):new Runner({cwd:dir,env,emit,secrets,signal});
+    const selected=await bindKubeconfig(r,dir,kubeconfig,kubeText);
+    if(action==='diagnose-auth')return {status:'authentication-checked',...selected,identity:await kubeIdentity(r)};
     if(action==='diagnose-api')return await diagnose(r);
+    await kubeIdentity(r);
     emit({type:'phase',phase:'preflight'});c=await preflight(r,c0,credentials);
     emit({type:'detected',provider:c.actualProvider,detectedProvider:c.detectedProvider,storageClass:c.actualStorageClass,dnsProvider:c.actualDns,upstreamCommit:lock.commit});
     if(action==='inspect'||action==='validate')return action==='validate'?await validate(r,c):await inspect(r,c);

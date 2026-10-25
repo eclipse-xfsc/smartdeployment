@@ -21,7 +21,7 @@ module.exports=function(RED) {
       active=operation(action,{...input,confirm:msg.confirm},node.credentials,{emit,signal:controller.signal})
         .then(result=>{
           if(!closed){
-            const ok=['ready','passed','charts-validated','api-reachable','tenant-removed'].includes(result.status);
+            const ok=['ready','passed','charts-validated','api-reachable','authentication-checked','tenant-removed'].includes(result.status);
             node.status({fill:ok?'green':'yellow',shape:ok?'dot':'ring',text:result.status||'inspection complete'});
             send([{_msgid:msg._msgid,topic:'ocm-wstack/result',payload:{action,...result}},null]);
           }

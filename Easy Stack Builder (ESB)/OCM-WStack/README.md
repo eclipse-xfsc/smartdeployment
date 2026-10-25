@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.6
+# OCM W-Stack ESB 12.0.7
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -16,7 +16,7 @@ No service image is rebuilt, patched or bundled. Both distribution archives cont
 
 Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. A failed partial bootstrap can resume when settings match and the affected Helm release is absent, failed or deployed. A pending Helm operation requires inspection; ESB never clears it automatically.
 
-Version 12.0.6 fixes duplicate Grafana datasource provisioning, checks the rendered datasource definitions before installation, and pulls the upstream Argo Redis tag from Docker Hub. Argo readiness now includes Redis, Dex and container readiness diagnostics. Earlier API read and Helm recovery remain enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
+Version 12.0.7 pins all ESB kubectl and Helm calls to the exact uploaded kubeconfig and its current context. It clears inherited Helm authentication overrides, rejects missing upload authentication, and reports the selected context and authenticated identity. Earlier Grafana, Redis and API recovery corrections remain enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
 
 ## Kubernetes API EOF recovery
 
@@ -59,10 +59,10 @@ node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.6.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.7.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.6.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.7.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.
@@ -194,3 +194,5 @@ npm pack --dry-run --ignore-scripts
 ```
 
 Tests execute the adapted official shell procedure against explicit kubectl/Helm test doubles; they verify ordering, failure propagation, exact-configuration resume, credential handling, editor behavior and removal behavior. Offline Helm tests render all 34 selected wrappers for installation and upgrade, plus provider and tenant scenarios, AppProject ownership cases, TelemetryConfig schema fields and OpenBao mount inspection. Wrapper-only tests explicitly exclude downloaded dependencies. The validation record separately reports the real Kyverno dependency render and unexecuted checks. Native HTTP tests include a real local HTTP server and failing Storage/acceptance responses. These checks do not substitute for a fresh-cluster deployment of the upstream images.
+
+Use `msg.action = "diagnose-auth"` on the configured node to report the uploaded context, user entry, authentication method, SHA-256 of the decoded upload, and the identity returned by Kubernetes. Credential contents are not returned. File references in the upload must be embedded; explicit exec/auth-provider plugins remain supported and need their configured provider tooling.

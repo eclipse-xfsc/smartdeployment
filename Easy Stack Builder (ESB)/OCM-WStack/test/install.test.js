@@ -127,8 +127,8 @@ test('real bootstrap helper preserves a pending release after EOF and stops late
 });
 test('diagnose-api uses the operation kubeconfig without chart downloads or mutation',async t=>{
   const h=await setup(t);const result=await operation('diagnose-api',example,{kubeconfig:'mock-cluster-config'},h.options);
-  assert.equal(result.status,'api-reachable');const calls=await h.readCalls();assert.equal(calls.length,5);
-  assert.ok(calls.every(c=>c.command==='kubectl'&&c.args.includes('--raw=/readyz')));
+  assert.equal(result.status,'api-reachable');const calls=await h.readCalls();assert.equal(calls.filter(c=>c.args.includes('--raw=/readyz')).length,5);
+  assert.ok(!calls.some(c=>c.command==='helm'&&['template','upgrade'].includes(c.args[0])));
   assert.deepEqual((await h.readState()).objects,{});
 });
 
@@ -155,4 +155,35 @@ test('duplicate Grafana defaults are rejected before any cluster mutation',async
  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_BAD_DATASOURCES='true';return r;};
  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.code==='CHART_PREFLIGHT'&&e.message.includes('More than one'));
  assert.deepEqual((await h.readState()).objects,{});
+});
+
+test('all bootstrap and helper API commands use the exact upload and context despite inherited Helm credentials',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.HELM_KUBETOKEN='ambient-token';r.env.HELM_KUBECONTEXT='ambient-context';return r;};
+ const upload='mock-cluster-config';await operation('deploy',example,{kubeconfig:upload},h.options);
+ const hash=require('node:crypto').createHash('sha256').update(upload).digest('hex');
+ const calls=(await h.readCalls()).filter(c=>['kubectl','helm'].includes(c.command));
+ assert.ok(calls.length>100);
+ assert.ok(calls.every(c=>c.explicitConfig&&c.kubeconfigSha256===hash&&!c.helmTokenOverride));
+ assert.ok(calls.filter(c=>!c.args.includes('view')).every(c=>c.explicitContext==='uploaded-context'));
+ assert.ok(h.events.some(e=>e.type==='kubeconfig-identity'&&e.username==='uploaded-admin'));
+ assert.ok(!JSON.stringify(h.events).includes('ambient-token'));
+});
+test('diagnose-auth identifies the uploaded context and actual user without writes',async t=>{
+ const h=await setup(t);const report=await operation('diagnose-auth',example,{kubeconfig:'mock-cluster-config'},h.options);
+ assert.equal(report.source,'editor-upload');assert.equal(report.context,'uploaded-context');assert.equal(report.identity.username,'uploaded-admin');
+ assert.deepEqual((await h.readState()).objects,{});
+});
+test('missing uploaded credentials cannot use ambient service account credentials',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_EMPTY_AUTH='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'KUBECONFIG_AUTH'});
+ assert.deepEqual((await h.readState()).objects,{});
+});
+test('Argo authorization denial is detected before cluster writes without creating RBAC',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_ARGO_FORBIDDEN='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'RBAC'});
+ assert.deepEqual((await h.readState()).objects,{});
+ assert.ok(!(await h.readCalls()).some(c=>c.args.includes('apply')||c.args.includes('create')));
 });

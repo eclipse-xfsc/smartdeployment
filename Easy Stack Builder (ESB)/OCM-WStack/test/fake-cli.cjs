@@ -4,9 +4,13 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);
+let explicitConfig='',explicitContext='';
+for(const flag of ['--kubeconfig','--context','--kube-context']) {
+ const at=args.indexOf(flag);if(at>=0){if(flag==='--kubeconfig')explicitConfig=args[at+1];else explicitContext=args[at+1];args.splice(at,2);}
+}
 const statePath=process.env.ESB_TEST_STATE,logPath=process.env.ESB_TEST_CALLS;
 const state=JSON.parse(fs.readFileSync(statePath,'utf8'));
-const record={command:cmd,args,cwd:process.cwd(),qps:process.env.HELM_QPS,burst:process.env.HELM_BURST_LIMIT};
+const record={command:cmd,args,cwd:process.cwd(),qps:process.env.HELM_QPS,burst:process.env.HELM_BURST_LIMIT,explicitConfig,explicitContext,helmTokenOverride:process.env.HELM_KUBETOKEN,kubeconfigSha256:explicitConfig?require('node:crypto').createHash('sha256').update(fs.readFileSync(explicitConfig)).digest('hex'):null};
 for(const [key,file] of [['network',process.env.ESB_NETWORK_VALUES],['dns',process.env.ESB_DNS_SECRET_FILE]])if(file&&fs.existsSync(file))record[key]=JSON.parse(fs.readFileSync(file,'utf8'));
 if(cmd==='kubectl'&&args.includes('apply')&&args.some(a=>a.endsWith('argo-install.yaml')))record.argoRedisImage=fs.readFileSync(args[args.indexOf('-f')+1],'utf8').match(/image: (.*redis:.*)/)?.[1];
 fs.appendFileSync(logPath,JSON.stringify(record)+'\n');
@@ -67,7 +71,11 @@ const n=a.indexOf('-n');if(n>=0){ns=a[n+1];a.splice(n,2);}
 const nn=a.indexOf('--namespace');if(nn>=0){ns=a[nn+1];a.splice(nn,2);}
 const [verb,kind,name]=a;
 if(verb==='version'){out({serverVersion:{gitVersion:'v1.34.2'}});process.exit(0);}
-if(verb==='auth'){out('yes');process.exit(0);}
+if(verb==='config'&&kind==='view'){
+ out({'current-context':'uploaded-context',contexts:[{name:'uploaded-context',context:{user:'uploaded-user',cluster:'uploaded-cluster'}}],users:[{name:'uploaded-user',user:process.env.ESB_TEST_EMPTY_AUTH==='true'?{}:{token:'REDACTED'}}],clusters:[{name:'uploaded-cluster',cluster:{server:'https://uploaded.example.test'}}]});process.exit(0);
+}
+if(verb==='auth'&&kind==='whoami'){out({status:{userInfo:{username:'uploaded-admin',groups:['system:masters']}}});process.exit(0);}
+if(verb==='auth'){if(process.env.ESB_TEST_ARGO_FORBIDDEN==='true'&&a.includes('applications.argoproj.io')){out('no');process.exit(1);}out('yes');process.exit(0);}
 if(verb==='rollout'&&a.includes('statefulset/openbao'))fail('error: rollout status is only available for RollingUpdate strategy type');
 if(verb==='wait'){
   if(ns!=='security'||!a.includes('pod/openbao-0')||!a.includes('--for=condition=Ready'))fail('Unexpected wait target');
