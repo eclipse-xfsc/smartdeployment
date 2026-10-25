@@ -28,6 +28,7 @@ function config(input = {}) {
     lbAnnotations: object(input.lbAnnotations, 'Load-balancer annotations'),
     timeoutSeconds: Number(input.timeoutSeconds || 1800),
     externalTrafficPolicy: input.externalTrafficPolicy || 'Cluster',
+    gatewayRouting: input.gatewayRouting || 'auto',
     lbLocation: (input.lbLocation || '').trim(), lbNetworkZone: (input.lbNetworkZone || '').trim(), lbType: (input.lbType || '').trim(), lbPrivate: input.lbPrivate===true || input.lbPrivate==='true',
     runtimeEnabled: input.runtimeEnabled!==false && input.runtimeEnabled!=='false',
     runtimeImage: input.runtimeImage || 'ecofacis/xfsc-orce:2.0.15',
@@ -48,6 +49,7 @@ function config(input = {}) {
   if (!['auto','hetzner','ionos','custom'].includes(c.dnsProvider)) fail('CONFIG', 'Select an upstream DNS profile or custom ExternalDNS values.');
   if (c.storageClass && !dnsName(c.storageClass)) fail('CONFIG', 'Invalid StorageClass name.');
   if (!Number.isInteger(c.timeoutSeconds) || c.timeoutSeconds < 60 || c.timeoutSeconds > 7200) fail('CONFIG', 'Stage timeout must be 60–7200 seconds.');
+  if(!['auto','internal','public'].includes(c.gatewayRouting))fail('CONFIG','Tenant routing must be auto, internal or public.');
   if(!['Cluster','Local'].includes(c.externalTrafficPolicy))fail('CONFIG','Traffic policy must be Cluster or Local.');
   if(c.provider==='ionos'&&c.externalTrafficPolicy!=='Cluster')fail('CONFIG','IONOS requires Cluster traffic policy for this deployment.');
   for(const value of [c.lbLocation,c.lbNetworkZone,c.lbType])if(value&&!/^[a-z0-9/-]{1,64}$/.test(value))fail('CONFIG','Invalid load-balancer location, zone or type.');
@@ -83,12 +85,13 @@ function resolve(c, nodes, classes, credentials) {
   if (c.externalDns && actualDns === 'custom') for (const [k,v] of Object.entries(secret)) if (!/^[A-Za-z0-9._-]+$/.test(k) || typeof v !== 'string') fail('DNS_CREDENTIALS', 'DNS Secret data must map valid Secret keys to strings.');
   if(actualProvider==='ionos'&&c.externalTrafficPolicy!=='Cluster')fail('CONFIG','IONOS requires Cluster traffic policy.');
   const resolved={...c, providerLocations:evidence.locations,providerZones:evidence.zones,providerEvidence:evidence.evidence, detectedProvider, actualProvider, actualDns, profile: ['hetzner','ionos'].includes(actualDns) ? actualDns : !c.externalDns && actualProvider === 'hetzner' ? 'hetzner' : 'generic', actualStorageClass: storageClass(classes, c.storageClass), dnsSecret: secret};
+  resolved.internalGatewayRouting=c.gatewayRouting==='internal'||c.gatewayRouting==='auto'&&actualProvider==='ionos';
   resolved.resolvedLbAnnotations=require('./providers').annotations(resolved);
   return resolved;
 }
 function fingerprint(c) {
   const clean = {...c}; delete clean.dnsSecret; delete clean.timeoutSeconds; delete clean.detectedProvider; delete clean.providerEvidence;delete clean.legacyFingerprint;delete clean.upstreamAnnotationKeys;delete clean.providerLocations;delete clean.providerZones;delete clean.resolvedLbAnnotations;
-  for(const key of ['runtimeEnabled','runtimeImage','orceStorageSize','mongoStorageSize','useExternalMongo','editorUsername','uiAdminUsername','uiAdminEmail','runtimeServices','pcm'])delete clean[key];
+  for(const key of ['gatewayRouting','internalGatewayRouting','gatewayClusterIP','runtimeEnabled','runtimeImage','orceStorageSize','mongoStorageSize','useExternalMongo','editorUsername','uiAdminUsername','uiAdminEmail','runtimeServices','pcm'])delete clean[key];
   return crypto.createHash('sha256').update(JSON.stringify(clean)).digest('hex');
 }
 function kubeconfigText(value) {

@@ -1,16 +1,16 @@
-# OCM W-Stack ESB 12.1.0
+# OCM W-Stack ESB 12.1.1
 
-12.1.0 updates the 12.0.9 official-bootstrap wrapper, persists the IONOS gateway fix and restores the OCM-CR runtime/UI from the recovered 11.1.0 source. It is a locally checked release candidate. A fresh-cluster deployment, real Helm rendering and browser/login acceptance have not been executed in this environment; see VALIDATION.md.
+12.1.1 corrects the cluster-to-public gateway failure observed after 12.1.0. Cert-manager and the ORCE UI map the tenant hostname to the discovered internal Envoy Service, preserving the public URL and TLS hostname. It carries forward the provider/gateway fixes and recovered OCM-CR runtime/UI. It is a locally checked release candidate. A fresh-cluster deployment, real Helm rendering and browser/login acceptance have not been executed in this environment; see VALIDATION.md.
 
-## Install and update the existing 12.0.9 deployment
+## Install and update the existing 12.0.9 / 12.1.0 deployment
 
-Install `orce-esb-ocmwstack-12.1.0.tgz` in ORCE's Node-RED user directory, then restart ORCE:
+Install `orce-esb-ocmwstack-12.1.1.tgz` in ORCE's Node-RED user directory, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.1.0.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.1.1.tgz
 ```
 
-Keep the existing version-12 node, uploaded administrator kubeconfig, instance, tenant, domain, StorageClass, ownership marker, Helm history and PVCs. Open the node and save the new fields. Provider can remain automatic; IONOS can also be selected explicitly. Leave traffic policy at Cluster. On the ORCE credentials tab, enter the initial editor administrator and UI administrator credentials. Passwords must contain at least 12 characters. These are separate accounts; UI login requires an initial password change.
+Keep the existing version-12 node, uploaded administrator kubeconfig, instance, tenant, domain, StorageClass, ownership marker, Helm history and PVCs. Open the node and save the new fields. Provider can remain automatic; IONOS can also be selected explicitly. Leave traffic policy at Cluster. Tenant routing defaults to internal on IONOS; select Internal explicitly on another provider when the same cluster-to-public failure is demonstrated. On the ORCE credentials tab, enter the initial editor administrator and UI administrator credentials. Passwords must contain at least 12 characters. These are separate accounts; UI login requires an initial password change.
 
 1. Run `msg.action = "preflight"`. This renders the entire selected plan, including the two new compatibility/runtime charts, before installation writes.
 2. Run `msg.action = "repair-network"` to update the network ApplicationSet, install the scoped persistent traffic policy and reconcile the existing proxy. It retains OCM, the tenant certificate and shared data. This action can run before the UI is installed; the final status may remain action-required until the UI is present.
@@ -20,6 +20,20 @@ Keep the existing version-12 node, uploaded administrator kubeconfig, instance, 
 For a fresh cluster, configure the credentials and run preflight, then deploy. Deploy performs the official bootstrap, gateway compatibility, tenant setup and UI installation automatically. Removing/redeploying the Node-RED node only cancels its local process and retains cluster resources.
 
 A narrowly checked migration accepts a matching 12.0.9 ownership marker from `739606691ecff72b3a40404a19fce44d9c22b0ee`. The current commit changes only the two reviewed Retrieval scripts. Other clusters, tenants and configurations are not adopted. This does not migrate an 11.x cluster installation; only its UI source is carried forward.
+
+## Recover the current pending certificate
+
+Run the included standalone recovery source from your laptop using the active kubectl context:
+
+```bash
+node scripts/https-recovery.cjs demo-tenant.leanea.com demotenant
+```
+
+It verifies the existing certificate hostname, discovers the proxy Service, preserves other host mappings, appends a managed cert-manager values block to the network ApplicationSet, and waits for Argo to roll out the mapping. The existing pending HTTP-01 request retries normally. It then waits for Certificate Ready, ListenerSet Programmed and Service port 443, and verifies public HTTPS/DID. The script uses Node.js 18.17+ and kubectl. It times out after five minutes with diagnostics if recovery has not completed. Install 12.1.1 afterward and run repair-network, install-ui and validate on the existing node.
+
+The recovery script edits the live Helm-owned ApplicationSet; 12.1.1 regenerates that managed block after every network Helm reconciliation. Running an older deployer or an older Helm rollback can remove it. Service replacement changes its ClusterIP; rerun repair-network and install-ui to discover the new address. This is an explicit installation lifecycle setting, rather than a background address watcher.
+
+The incident proved public challenge HTTP 200 and internal ClusterIP HTTP 200 while the pod's public-address request timed out. Its first resolver address was truncated, so the exact cloud loopback versus internal DNS cause was not established. The mapping avoids that failing path for the two managed callers. Native upstream service-to-public-host journeys remain a separate acceptance check; this correction does not establish credential lifecycle success.
 
 ## Upstream alignment
 

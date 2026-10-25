@@ -42,6 +42,8 @@ async function plan(r, source, argoSource, c, directory) {
   const jobs=BOOTSTRAP.map(([release,chart,namespace])=>({release,chart,namespace,root:source,files:[],values:{},parameters:[]}));
   for(const target of ['infrastructure','ocm-wstack'])jobs.push({release:`${target}-namespace`,chart:'INFRA/app-management/app-namespace',namespace:'security',root:source,
     files:[`INFRA/app-management/app-namespace-values/${target==='infrastructure'?'infra':'ocm-wstack'}-values.yaml`],values:{},parameters:[]});
+  // A reserved documentation IP exercises hostAliases rendering only. The real
+  // alias is discovered after Envoy's Service exists, and never uses this IP.
   const overrides={...networkOverrides(c),...ocm.overrides(c)};
   for(let i=0;i<SETS.length;i++) {
     const name=SETS[i], set=sets[name];
@@ -66,11 +68,11 @@ async function plan(r, source, argoSource, c, directory) {
         const profile=`${chart}/profiles/${c.profile}.yaml`;
         if(await exists(path.join(argoSource,profile)))files.push(profile);
       }
-      jobs.push({release,chart,namespace:set.namespace,root:argoSource,files,values:overrides[chart]||{},parameters,applicationSet:name});
+      jobs.push({release,chart,namespace:set.namespace,root:argoSource,files,values:chart==='INFRA/network/cert-manager'&&c.internalGatewayRouting?{'cert-manager':{hostAliases:[{ip:'192.0.2.1',hostnames:[c.tenantHost]}]}}:overrides[chart]||{},parameters,applicationSet:name});
     }
   }
   jobs.push({release:'esb-ocm-gateway',chart:'charts-gateway',namespace:'security',root:path.join(__dirname,'..'),files:[],parameters:[],values:{externalTrafficPolicy:c.externalTrafficPolicy}});
-  if(c.runtimeEnabled)jobs.push({release:'ocm-orce-ui',chart:'charts-runtime',namespace:'ocm-wstack',root:path.join(__dirname,'..'),files:[],parameters:[],values:{host:c.tenantHost,listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,storage:{class:c.actualStorageClass,orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize},mongo:{embedded:!c.useExternalMongo,externalPorts:[27017]},runtimeConfig:require('./runtime-install').runtimeConfig(c)}});
+  if(c.runtimeEnabled)jobs.push({release:'ocm-orce-ui',chart:'charts-runtime',namespace:'ocm-wstack',root:path.join(__dirname,'..'),files:[],parameters:[],values:{host:c.tenantHost,gatewayPorts:[80,443,10080,10443],hostAliases:c.internalGatewayRouting?[{ip:'192.0.2.1',hostnames:[c.tenantHost]}]:[],listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,storage:{class:c.actualStorageClass,orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize},mongo:{embedded:!c.useExternalMongo,externalPorts:[27017]},runtimeConfig:require('./runtime-install').runtimeConfig(c)}});
   jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:{tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}});
   return jobs;
 }

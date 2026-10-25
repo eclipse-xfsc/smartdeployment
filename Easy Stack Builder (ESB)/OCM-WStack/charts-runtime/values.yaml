@@ -18,3 +18,6 @@ identity:
   image: quay.io/keycloak/keycloak:26.8.0
   postgresImage: postgres:17.6
   storageSize: 3Gi
+
+hostAliases: []
+gatewayPorts: [80, 443]

@@ -90,7 +90,7 @@ async function ensureMarker(r,c) {
   if(marker) {
     if(marker.data?.instance!==c.instanceName || ![digest,c.legacyFingerprint].filter(Boolean).includes(marker.data?.fingerprint) || marker.data?.clusterUid!==c.clusterUid)fail('OWNERSHIP','This cluster has an ESB installation with different settings. Restore its original configuration; this release only supports fresh installs and exact-configuration resumes.');
     if(![lock.commit,...(lock.compatibleBootstrapCommits||[])].includes(marker.data?.upstreamCommit))fail('UPSTREAM_COMMIT','This installation uses a different bootstrap revision. A fresh cluster is required.');
-    if(marker.data.fingerprint!==digest||marker.data.upstreamCommit!==lock.commit)marker=await updateMarker(r,marker,{fingerprint:digest,upstreamCommit:lock.commit,migratedFrom:marker.data.upstreamCommit,packageVersion:'12.1.0'});
+    if(marker.data.fingerprint!==digest||marker.data.upstreamCommit!==lock.commit)marker=await updateMarker(r,marker,{fingerprint:digest,upstreamCommit:lock.commit,migratedFrom:marker.data.upstreamCommit,packageVersion:'12.1.1'});
     return marker;
   }
   const namespaces=await r.json('kubectl',['get','namespaces','-o','json']);
@@ -119,12 +119,16 @@ async function inspect(r,c) {
   const publicServices=(proxyServices?.items||[]).filter(s=>s.spec?.type==='LoadBalancer');
   const proxyConfig=proxy?.spec?.provider?.kubernetes?.envoyService;
   const foreignKeys=a=>c.actualProvider==='hetzner'?[]:Object.keys(a||{}).filter(k=>k.startsWith('load-balancer.hetzner.cloud/'));
-  const gatewayConfigurationReady=proxyConfig?.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(proxyConfig.annotations).length===0&&policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')&&publicServices.length>0&&publicServices.every(s=>s.spec.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(s.metadata.annotations).length===0&&[80,443].every(p=>s.spec.ports?.some(x=>x.port===p)));
+  const mapped=p=>p?.spec?.hostAliases?.some(a=>a.ip===publicServices[0]?.spec.clusterIP&&a.hostnames?.includes(c.tenantHost));
+  const certManagerMapped=pods.items.some(p=>p.metadata.namespace==='infrastructure'&&p.metadata.labels?.['app.kubernetes.io/component']==='controller'&&p.metadata.labels?.['app.kubernetes.io/name']==='cert-manager'&&mapped(p));
+  const runtimeMapped=!c.runtimeEnabled||pods.items.some(p=>p.metadata.namespace==='ocm-wstack'&&p.metadata.labels?.app==='ocm-orce'&&mapped(p));
+  const internalRoutingReady=!c.internalGatewayRouting||certManagerMapped&&runtimeMapped;
+  const gatewayConfigurationReady=internalRoutingReady&&proxyConfig?.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(proxyConfig.annotations).length===0&&policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')&&publicServices.length>0&&publicServices.every(s=>s.spec.externalTrafficPolicy===c.externalTrafficPolicy&&foreignKeys(s.metadata.annotations).length===0&&[80,443].every(p=>s.spec.ports?.some(x=>x.port===p)));
   const certReady=certificates.items.length>0&&certificates.items.every(x=>x.status?.conditions?.some(q=>q.type==='Ready'&&q.status==='True'));
   const managedPods=pods.items.filter(x=>MANAGED_NS.includes(x.metadata.namespace));
   const podsReady=managedPods.some(x=>x.metadata.namespace==='ocm-wstack')&&managedPods.every(x=>x.status?.phase==='Succeeded'||(x.status?.phase==='Running'&&x.status?.containerStatuses?.length&&x.status.containerStatuses.every(s=>s.ready)));
   return {upstreamCommit:lock.commit,argoRevision:'main',tenantId:c.tenantId,tenantUrl:c.tenantUrl,provider:c.actualProvider,providerLocations:c.providerLocations,externalTrafficPolicy:c.externalTrafficPolicy,storageClass:c.actualStorageClass,ui:c.runtimeEnabled?{enabled:true,url:c.tenantUrl+'/orce/',editorUrl:c.tenantUrl+'/orce/editor/'}:{enabled:false},
-    applications,gatewayAddresses:addresses,pendingVolumes,certificateReady:certReady,gatewayConfigurationReady:Boolean(gatewayConfigurationReady),gatewayConfiguration:{expectedTrafficPolicy:c.externalTrafficPolicy,proxyTrafficPolicy:proxyConfig?.externalTrafficPolicy,foreignAnnotationKeys:foreignKeys(proxyConfig?.annotations),admissionPolicyReady:Boolean(policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')),services:publicServices.map(s=>({name:s.metadata.name,externalTrafficPolicy:s.spec.externalTrafficPolicy,ports:s.spec.ports.map(p=>p.port),foreignAnnotationKeys:foreignKeys(s.metadata.annotations)}))},
+    applications,gatewayAddresses:addresses,pendingVolumes,certificateReady:certReady,gatewayConfigurationReady:Boolean(gatewayConfigurationReady),gatewayConfiguration:{tenantRouting:{mode:c.internalGatewayRouting?'internal':'public',hostname:c.tenantHost,clusterIP:publicServices[0]?.spec.clusterIP,certManagerMapped,runtimeMapped,ready:internalRoutingReady},expectedTrafficPolicy:c.externalTrafficPolicy,proxyTrafficPolicy:proxyConfig?.externalTrafficPolicy,foreignAnnotationKeys:foreignKeys(proxyConfig?.annotations),admissionPolicyReady:Boolean(policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')),services:publicServices.map(s=>({name:s.metadata.name,externalTrafficPolicy:s.spec.externalTrafficPolicy,ports:s.spec.ports.map(p=>p.port),foreignAnnotationKeys:foreignKeys(s.metadata.annotations)}))},
     clusterReady:names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
     pods:managedPods.map(x=>({name:x.metadata.name,namespace:x.metadata.namespace,phase:x.status?.phase,containers:(x.status?.containerStatuses||[]).map(s=>({name:s.name,image:s.image,imageID:s.imageID,ready:s.ready,restarts:s.restartCount}))})),
     dns:{automatic:c.externalDns,hostname:c.tenantHost,targets:addresses.map(x=>x.value),instructions:c.externalDns?'ExternalDNS manages the tenant record.':'Point this tenant hostname to the gateway addresses (A/AAAA for IPs, CNAME for an LB hostname). Public TCP 80 and 443 must reach Envoy for ACME HTTP-01 and HTTPS.'}};
@@ -201,14 +205,15 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js'),ESB_OCM_PREREQUISITES:path.join(__dirname,'../scripts/ocm-prerequisites.js'),ESB_GATEWAY_CONFIG:path.join(__dirname,'../scripts/gateway-config.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
-    const gatewayValues=await privateFile(dir,'gateway-values.json',JSON.stringify({externalTrafficPolicy:c.externalTrafficPolicy,timeoutSeconds:c.timeoutSeconds}));
+    const gatewayValues=await privateFile(dir,'gateway-values.json',JSON.stringify({externalTrafficPolicy:c.externalTrafficPolicy,timeoutSeconds:c.timeoutSeconds,tenantHost:c.tenantHost,internalGatewayRouting:c.internalGatewayRouting}));
     r.env={...r.env,ESB_GATEWAY_VALUES:gatewayValues};
-    const network=await privateFile(dir,'network-values.json',JSON.stringify(networkValues(c)));
+    const networkConfiguration=marker.data.bootstrapComplete==='true'?await gatewayConfig.internalValues(r,c,networkValues(c)):networkValues(c);
+    const network=await privateFile(dir,'network-values.json',JSON.stringify(networkConfiguration));
     const ocmValues=await privateFile(dir,'ocm-values.json',JSON.stringify(ocm.values(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));
     r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_NETWORK_VALUES:network,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile};
-    if(action==='install-ui'){if(marker.data.bootstrapComplete!=='true')fail('OWNERSHIP','Complete the native bootstrap before install-ui.');if(!c.runtimeEnabled)fail('CONFIG','Enable the ORCE runtime before install-ui.');const ui=await runtime.install(r,c,credentials,dir);return {...await validate(r,c),ui};}
+    if(action==='install-ui'){if(marker.data.bootstrapComplete!=='true')fail('OWNERSHIP','Complete the native bootstrap before install-ui.');if(!c.runtimeEnabled)fail('CONFIG','Enable the ORCE runtime before install-ui.');await gatewayConfig.internalRouting(r,c);await gatewayConfig.waitTenantTls(r,c);const ui=await runtime.install(r,c,credentials,dir);return {...await validate(r,c),ui};}
     let lastAddresses='',observing=false;
     dnsTimer=setInterval(async()=>{
       if(observing||signal.aborted)return;
@@ -226,7 +231,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
       await helmUpgrade(r,['upgrade','--install','network',path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,'XFSC/Applicationsets/values/04_network-values.yaml'),'-f',network,'--set-string',`storageClass=${c.actualStorageClass}`,'--set-string',`profile=${c.profile}`,'--set-string',`domain=${c.domain}`,'--set-string',`email=${c.email}`,...(!c.externalDns?['--set-string','excludes[0]=INFRA/network/bind9','--set-string','excludes[1]=INFRA/network/external-dns']:[]),'-n','infrastructure','--timeout',`${c.timeoutSeconds}s`],{namespace:'infrastructure',release:'network',cwd:source,timeout:(c.timeoutSeconds+30)*1000});
       await r.run('bash',['check-applicationset.sh','network','argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
       await gatewayConfig.reconcile(r,c);
-      if(action==='repair-network')return await validate(r,c);
+      if(action==='repair-network'){if(marker.data.bootstrapComplete==='true')await gatewayConfig.waitTenantTls(r,c);return await validate(r,c);}
     }
     if(action==='repair-ocm') {
       // Require healthy shared prerequisites, then reconcile only the OCM
@@ -250,6 +255,8 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const tenant=await privateFile(dir,'tenant-values.json',JSON.stringify({tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}));
     await helmUpgrade(r,['upgrade','--install',c.tenantRelease,path.join(source,'XFSC/tenant/chart'),'-f',path.join(source,'XFSC/tenant/values/tenant-ocm-wstack-values.yaml'),'-f',tenant,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{namespace:'ocm-wstack',release:c.tenantRelease,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
     held.check();marker=await updateMarker(r,marker,{state:'installed',updatedAt:new Date().toISOString()});
+    await gatewayConfig.internalRouting(r,c);
+    await gatewayConfig.waitTenantTls(r,c);
     const ui=await runtime.install(r,c,credentials,dir);
     emit({type:'phase',phase:'native-validation'});
     const report={...await validate(r,c),ui};

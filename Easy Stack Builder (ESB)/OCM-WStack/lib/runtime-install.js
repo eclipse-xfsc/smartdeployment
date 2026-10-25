@@ -58,6 +58,9 @@ async function discover(r,c){
 async function install(r,c,credentials,directory){
  if(!c.runtimeEnabled)return {enabled:false};
  await preflight(r,c,credentials);
+ const gateway=c.internalGatewayRouting?await require('./gateway').publicService(r):null;
+ const hostAliases=gateway?[{ip:gateway.spec.clusterIP,hostnames:[c.tenantHost]}]:[];
+ const gatewayPorts=gateway?await require('./gateway').proxyPorts(r,gateway):[80,443];
  const old=await retained(r),conf=runtimeConfig(c,await discover(r,c));
  let secrets;
  if(old){secrets=readRetained(old,c); }else{
@@ -70,7 +73,7 @@ async function install(r,c,credentials,directory){
  const imported=await r.json('kubectl',['-n',NS,'get','secret','ocm-ui-realm-import','--ignore-not-found','-o','json']);
  if(!imported){if(!credentials.uiAdminPassword||credentials.uiAdminPassword.length<12)fail('RUNTIME_CREDENTIALS','Initial UI password is required to resume realm bootstrap.');await r.run('kubectl',['create','-f','-'],{input:JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'ocm-ui-realm-import',namespace:NS},type:'Opaque',stringData:{[conf.realm+'-realm.json']:JSON.stringify(realmImport(c,conf,secrets,credentials))}})});}
  // Never rotate keys, recreate administrators, or overwrite operator roles on upgrade.
- const values={host:c.tenantHost,listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,secretChecksum:crypto.createHash('sha256').update(JSON.stringify(secrets)).digest('hex'),storage:{orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize,class:c.actualStorageClass},mongo:{embedded:!c.useExternalMongo,externalPorts:c.useExternalMongo?require('./mongo-uri').ports(secrets.mongoUri):[27017]},runtimeConfig:conf};
+ const values={host:c.tenantHost,hostAliases,gatewayPorts,listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,secretChecksum:crypto.createHash('sha256').update(JSON.stringify(secrets)).digest('hex'),storage:{orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize,class:c.actualStorageClass},mongo:{embedded:!c.useExternalMongo,externalPorts:c.useExternalMongo?require('./mongo-uri').ports(secrets.mongoUri):[27017]},runtimeConfig:conf};
  const file=path.join(directory,'runtime-values.json');await fs.writeFile(file,JSON.stringify(values),{mode:0o600});
  r.emit({type:'phase',phase:'orce-ui'});
  await upgrade(r,['upgrade','--install','ocm-orce-ui',path.join(__dirname,'../charts-runtime'),'-n',NS,'-f',file,'--wait','--timeout',`${c.timeoutSeconds}s`],{namespace:NS,release:'ocm-orce-ui',timeout:(c.timeoutSeconds+30)*1000});

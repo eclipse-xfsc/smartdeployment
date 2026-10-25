@@ -20,7 +20,12 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: infrastructure}
-      ports: [{protocol: TCP, port: 4222}, {protocol: TCP, port: 8080}]
+      ports:
+        - {protocol: TCP, port: 4222}
+        - {protocol: TCP, port: 8080}
+        {{- range (.Values.gatewayPorts | default (list 80 443)) }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: kube-system}

@@ -40,6 +40,10 @@ spec:
         checksum/config: {{ .Values.runtimeConfig | toJson | sha256sum }}
         checksum/secret: {{ .Values.secretChecksum | quote }}
     spec:
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: ocm-orce
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30

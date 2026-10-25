@@ -16,6 +16,7 @@ async function reconcile(r,c){
  for(const s of list.items||[]){if(s.spec.type!=='LoadBalancer')continue;
   if(s.spec.externalTrafficPolicy!==c.externalTrafficPolicy)await r.run('kubectl',['-n','infrastructure','patch','service',s.metadata.name,'--type=merge','-p',JSON.stringify({spec:{externalTrafficPolicy:c.externalTrafficPolicy}})]);
  }
+ await require('./gateway-routing').internalRouting(r,c);
  r.emit({type:'gateway-configured',externalTrafficPolicy:c.externalTrafficPolicy,proxy:'infrastructure/envoy',services:(list.items||[]).filter(s=>s.spec.type==='LoadBalancer').map(s=>s.metadata.name)});
 }
-module.exports={policy,reconcile};
+module.exports={policy,reconcile,...require('./gateway-routing')};
