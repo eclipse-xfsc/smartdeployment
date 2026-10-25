@@ -21,6 +21,19 @@ class Events extends EventEmitter {
    }
   }catch{this.connected=false;if(!this.stopping)this.timer=setTimeout(()=>this.start(),5000);}
  }
+ async checkStatus(c,ref,config){
+  if(!this.connected||!this.nc)fail(503,'NATIVE_STATUS_UNAVAILABLE');
+  const requestId=require('node:crypto').randomUUID();
+  const event={specversion:'1.0',id:requestId,source:'urn:xfsc:ocm-ui',type:'status.data.verify',datacontenttype:'application/json',data:{tenant_id:c.tenant,group_id:c.group,request_id:requestId,namespace:config.cryptoNamespace,group:config.cryptoGroup,type:ref.type,purpose:'revocation',index:ref.index,statusUrl:ref.url}};
+  let reply;try{reply=await this.nc.request('status.data',Buffer.from(JSON.stringify(event)),{timeout:5000});}catch{fail(503,'NATIVE_STATUS_UNAVAILABLE');}
+  if(reply.data.length>65536)fail(502,'UPSTREAM_PROTOCOL_ERROR');
+  let outer;try{outer=JSON.parse(Buffer.from(reply.data));}catch{fail(502,'UPSTREAM_PROTOCOL_ERROR');}
+  const r=outer.data;
+  if(outer.specversion!=='1.0'||outer.type!=='status.data'||r?.tenant_id!==c.tenant||r.request_id!==requestId)fail(502,'UPSTREAM_PROTOCOL_ERROR');
+  if(r.error)fail(502,'NATIVE_STATUS_REJECTED');
+  if(typeof r.revocated!=='boolean'||typeof r.suspended!=='boolean')fail(502,'UPSTREAM_PROTOCOL_ERROR');
+  return {revocated:r.revocated,suspended:r.suspended};
+ }
  async types(c){
   let items=this.c.credentialTypes.map(t=>({...t,demo:true})),source='configured';
   if(this.connected&&this.nc){

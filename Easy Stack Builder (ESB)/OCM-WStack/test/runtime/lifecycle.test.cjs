@@ -22,18 +22,19 @@ test('Storage parser rejects malformed groups and conflicting duplicate IDs',()=
 });
 test('list sorts, filters and paginates without reporting unverified credentials as active',async()=>{
  const a=new Adapters(config,{call:async()=>({credentials:{a:vc,b:{...vc,expirationDate:'2020-01-01T00:00:00Z'}}})});
- const all=await a.list(org,{pageSize:1,sort:'id',direction:'desc'});assert.equal(all.items[0].id,'b');assert.equal(all.counts.expired,1);assert.equal(all.counts.notChecked,1);
+ const all=await a.list(org,{pageSize:1,sort:'id',direction:'desc'});assert.equal(all.items[0].id,'b');assert.equal(all.counts.expired,0);assert.equal(all.counts.notChecked,2);
  const next=await a.list(org,{pageSize:1,sort:'id',direction:'desc',cursor:all.nextCursor});assert.equal(next.items[0].id,'a');
- const expired=await a.list(org,{status:'expired'});assert.equal(expired.total,1);assert.equal(expired.items[0].status.state,'expired');
+ const expired=await a.list(org,{status:'expired'});assert.equal(expired.total,0);
 });
 test('native import uses the coordinated operation ID and exact credential',async()=>{
  const a=new Adapters(config,{call:async(n,p,o)=>{assert.equal(p,'/v1/tenants/tenant_space/storage/EU/DE/org/credentials/op-1');assert.equal(o.method,'PUT');assert.deepEqual(o.body,vc);}});
  assert.equal((await a.importCredential(org,{credential:vc},'op-1')).credentialId,'op-1');
 });
-test('list checks managed revocation once per list and filters revoked credentials',async()=>{
+test('list displays native status decisions without a local list decoder',async()=>{
  let reads=0;const entry=i=>({...vc,issuer:config.issuerDids[0],credentialStatus:{type:'StatusList2021Entry',statusPurpose:'revocation',statusListCredential:config.publicOrigin+'/api/status/1',statusListIndex:String(i)}});
- const a=new Adapters(config,{call:async(n)=>{if(n==='storage')return {credentials:{a:entry(0),b:entry(1),c:vc}};reads++;return {tenantId:org.tenant,listId:1,list:require('node:zlib').gzipSync(Buffer.from([128])).toString('base64url')};}});
- const r=await a.list(org,{status:'revoked'});assert.equal(reads,1);assert.equal(r.total,1);assert.equal(r.items[0].id,'a');assert.equal(r.counts.active,1);assert.equal(r.counts.revoked,1);assert.equal(r.counts.notChecked,1);
+ const a=new Adapters(config,{call:async(n)=>{assert.equal(n,'storage');return {credentials:{a:entry(0),b:entry(1),c:vc}};}});
+ a.statusTransport={checkStatus:async(c,ref)=>{reads++;return {revocated:ref.index===0,suspended:false};}};
+ const r=await a.list(org,{status:'revoked'});assert.equal(reads,2);assert.equal(r.total,1);assert.equal(r.items[0].id,'a');assert.equal(r.counts.active,1);assert.equal(r.counts.revoked,1);assert.equal(r.counts.notChecked,1);
 });
 test('SD-JWT verification supplies the mandatory frame and returns verified disclosures',async()=>{
  const raw='e30.'+Buffer.from(JSON.stringify({iss:'did:web:issuer.example',vct:'Participant'})).toString('base64url')+'.sig~';
@@ -42,7 +43,7 @@ test('SD-JWT verification supplies the mandatory frame and returns verified disc
   assert.equal(n,'signer');assert.equal(o.headers['x-format'],'dc+sd-jwt');assert.deepEqual(o.body.disclosureFrame,[]);assert.equal(Buffer.from(o.body.credential,'base64').toString(),raw);
   return {valid:true,disclosedCredential:{name:'Alice'}};
  }});
- const result=await a.verify(org,'one');assert.equal(result.cryptographic.state,'valid');assert.deepEqual(result.disclosedClaims,{name:'Alice'});
+ const result=await a.verify(org,'one');assert.equal(result.cryptographic.state,'not_separately_reported');assert.equal(result.overall,'valid');assert.deepEqual(result.disclosedClaims,{name:'Alice'});
 });
 test('PCM scope derives from trusted userinfo and never from organizational account',async()=>{
  const i=new PcmIdentity(config,async(url,o)=>{assert.equal(url,config.pcm.userInfo);assert.equal(o.headers.authorization,'Bearer personal-token');return {sub:'alice'};});

@@ -40,7 +40,7 @@ export const locales = {
     "provenance": "Provenance",
     "declarations": "Declared by the credential; verification is shown separately.",
     "unknown": "Unknown",
-    "not_checked": "Not checked",
+    "not_checked": "Status not checked",
     "valid": "Valid",
     "invalid": "Invalid",
     "indeterminate": "Indeterminate",
@@ -282,7 +282,14 @@ export const locales = {
     "acceptedStored": "Accepted and saved to Storage. The exact credential was confirmed by reading it back.",
     "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval cannot accept this credential format. Its current verifier supports JWT and SD-JWT; DeveloperCredential is issued as a JSON credential. The official Retrieval service needs support for this format.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval accepted the credential, but Storage persistence could not be confirmed. Do not accept the offer again.",
-    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval accepted the offer without returning a usable credential. Storage persistence is unconfirmed; do not accept again."
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval accepted the offer without returning a usable credential. Storage persistence is unconfirmed; do not accept again.",
+    "notDeclared": "Not declared",
+    "not_separately_reported": "Not separately reported by the native service",
+    "nativeVerdict": "This is the native Signer verdict. It does not return separate cryptographic and status results.",
+    "nativeVerificationFailure": "The native service could not complete verification. This is not a valid or invalid verdict.",
+    "statusHelp": "Status not checked means the native Status service has not confirmed this credential’s lifecycle state. It does not mean active or revoked. The reason appears beside each unchecked record.",
+    "nativeRevokeConfirmed": "Revocation confirmed by the native Status service. The local copy is retained.",
+    "requestedBy": "Requested by"
   },
   "de": {
     "copyInvitation": "Einladungs-URL kopieren",
@@ -564,7 +571,14 @@ export const locales = {
     "acceptedStored": "Angenommen und in Storage gespeichert. Der genaue Nachweis wurde durch erneutes Lesen bestätigt.",
     "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval unterstützt dieses Nachweisformat nicht. Die Prüfung akzeptiert derzeit JWT und SD-JWT; DeveloperCredential wird als JSON-Nachweis ausgestellt. Der offizielle Retrieval-Dienst benötigt Unterstützung für dieses Format.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval hat den Nachweis angenommen, aber die Speicherung konnte nicht bestätigt werden. Nehmen Sie das Angebot nicht erneut an.",
-    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval hat das Angebot ohne verwendbaren Nachweis angenommen. Die Speicherung ist unbestätigt; nicht erneut annehmen."
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval hat das Angebot ohne verwendbaren Nachweis angenommen. Die Speicherung ist unbestätigt; nicht erneut annehmen.",
+    "notDeclared": "Nicht angegeben",
+    "not_separately_reported": "Vom nativen Dienst nicht separat gemeldet",
+    "nativeVerdict": "Dies ist das Ergebnis des nativen Signer-Dienstes. Kryptografie und Status werden nicht separat gemeldet.",
+    "nativeVerificationFailure": "Der native Dienst konnte die Prüfung nicht abschließen. Dies ist kein Gültigkeitsurteil.",
+    "statusHelp": "Status nicht geprüft bedeutet, dass der native Status-Dienst den Lebenszyklusstatus nicht bestätigt hat. Der Grund steht beim Eintrag.",
+    "nativeRevokeConfirmed": "Widerruf vom nativen Status-Dienst bestätigt. Die lokale Kopie bleibt erhalten.",
+    "requestedBy": "Angefordert von"
   },
   "fr": {
     "copyInvitation": "Copier le lien d’invitation",
@@ -846,6 +860,13 @@ export const locales = {
     "acceptedStored": "Accepté et enregistré dans Storage. Le justificatif exact a été confirmé par une nouvelle lecture.",
     "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval ne prend pas en charge ce format. Son vérificateur accepte actuellement JWT et SD-JWT ; DeveloperCredential est émis en JSON. Le service Retrieval officiel doit prendre en charge ce format.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval a accepté le justificatif, mais son stockage n’a pas été confirmé. N’acceptez pas à nouveau l’offre.",
-    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval a accepté l’offre sans renvoyer de justificatif utilisable. Le stockage reste non confirmé ; ne l’acceptez pas à nouveau."
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval a accepté l’offre sans renvoyer de justificatif utilisable. Le stockage reste non confirmé ; ne l’acceptez pas à nouveau.",
+    "notDeclared": "Non déclaré",
+    "not_separately_reported": "Non rapporté séparément par le service natif",
+    "nativeVerdict": "Résultat du service Signer natif. La cryptographie et le statut ne sont pas rapportés séparément.",
+    "nativeVerificationFailure": "Le service natif n’a pas pu terminer la vérification. Ce résultat ne détermine pas la validité.",
+    "statusHelp": "Statut non vérifié signifie que le service Status natif n’a pas confirmé l’état du cycle de vie. La raison apparaît à côté de chaque entrée.",
+    "nativeRevokeConfirmed": "Révocation confirmée par le service Status natif. La copie locale est conservée.",
+    "requestedBy": "Demandé par"
   }
 };

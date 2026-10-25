@@ -27,6 +27,10 @@ function graph(records,key){
    const entity='identity:'+value;nodes.set(entity,{id:entity,kind:'identity',label:value,url:didUrl(value)});
    edges.push({from:role==='issuer'?entity:credential,to:role==='issuer'?credential:entity,role,evidence:'credential-declaration',verified:false});
   }
+  if(!c.subject.id&&c.holder?.kind==='key-binding'){
+   const binding='holder-key:'+c.id;nodes.set(binding,{id:binding,kind:'identity',label:c.holder.label,url:null});
+   edges.push({from:credential,to:binding,role:'holder',evidence:'credential-key-binding-declaration',verified:false});
+  }
  }
  const raw=decode(records[key]).claims;
  return {root:'credential:'+key,nodes:[...nodes.values()],edges,source:'wallet-credential-declarations',verified:false,truncated:selected.size>=40,declaredEvidence:raw.evidence||null};

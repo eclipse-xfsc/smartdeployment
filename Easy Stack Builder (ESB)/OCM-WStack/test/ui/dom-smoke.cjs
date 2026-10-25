@@ -5,7 +5,7 @@ const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
 const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
 const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.manage','roles.read','roles.manage','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
-async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false}={}){
+async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false,nativeLifecycle=false,nativeFailure=false}={}){
  const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
  w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
@@ -27,10 +27,12 @@ async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false
   else if(p==='/preferences')data={locale:'en'};
   else if(p==='/credentials'&&failure)return {ok:false,status:502,json:async()=>({error:{code:'UPSTREAM_REJECTED',upstream:'storage',upstreamStatus:400,reason:'STORAGE_REGION_MISSING'},requestId:'req-1'})};
   else if(p==='/credentials')data={items:removed?[]:[summary],total:removed?0:1,counts:{total:removed?0:1,active:0,expired:0,revoked:0,notChecked:removed?0:1}};
-  else if(p==='/credentials/one/provenance')data={root:'one',nodes:[],edges:[],verified:false};
+  else if(p==='/credentials/one/provenance')data={root:'one',nodes:[],edges:[],verified:false,verifications:nativeLifecycle?[{timestamp:new Date().toISOString(),verifier:'user-id',verifierName:'Mani',service:'XFSC Signer',overall:'indeterminate'}]:[]};
+  else if(p==='/credentials/one/verify'&&nativeFailure)data={service:'XFSC Signer',overall:'indeterminate',code:'UPSTREAM_REJECTED',upstreamStatus:500,cryptographic:{state:'not_separately_reported'},status:{state:'not_separately_reported'},requestedBy:{username:'Mani'}};
+  else if(p==='/credentials/one/revoke')data={state:'succeeded',source:'XFSC Status',status:'revoked',confirmation:'native-acknowledgement'};
   else if(p==='/credentials/one/verify')data={overall:'valid',cryptographic:{state:'valid'},status:{state:'not_required'},disclosedClaims:{name:'Alice'}};
   else if(p==='/credentials/one'&&o.method==='DELETE'){removed=true;data={state:'succeeded',credentialId:'one'};}
-  else if(p==='/credentials/one')data={...summary,raw:{type:['VerifiableCredential']},claims:{name:'Alice'},capabilities:{revoke:false,delete:true,verify:true}};
+  else if(p==='/credentials/one')data={...summary,...(nativeLifecycle?{subject:{id:null},holder:{kind:'key-binding',label:'Holder key binding (EC, P-256, eckey)'}}:{}),raw:{type:['VerifiableCredential']},claims:{name:'Alice'},capabilities:{revoke:nativeLifecycle,delete:true,verify:true}};
   else if(p==='/credentials/import')data={state:'succeeded',credentialId:'new',lifecycle:{state:'checked',persistence:'confirmed',credentialId:'new',options:[{action:'verify',available:true},{action:'revoke',available:false,reason:'STATUS_NOT_MANAGED_HERE'}]}};
   else if(p==='/offers')data={items:accepted?[]:[{requestId:'offer-1',issuer:'https://issuer.example',credentialConfigurationIds:['Participant'],state:'pending'}]};
   else if(p==='/offers/import')data={state:'succeeded',upstreamRequestId:'offer-1'};
@@ -106,4 +108,14 @@ test('credential import renders lifecycle checks without offering unsupported re
 
 test('issuance plain-text 500 shows HTTP evidence and keeps the same idempotency key on retry',async t=>{
  const b=await boot(t,{issuanceFailure:true});await b.click('Issue credential');await b.click('Review and issue');const alert=b.w.document.querySelector('[role="alert"]').textContent;assert.match(alert,/HTTP 500/);assert.match(alert,/parser-request-1/);assert.doesNotMatch(alert,/Unexpected token|SyntaxError/);await b.click('Review and issue');const requests=b.calls.filter(x=>x.url.endsWith('/issuance'));assert.equal(requests.length,2);assert.equal(requests[0].o.headers['X-Idempotency-Key'],requests[1].o.headers['X-Idempotency-Key']);
+});
+
+test('native lifecycle UI: holder binding and verifier actor/service remain distinct',async t=>{
+ const b=await boot(t,{nativeLifecycle:true});await b.click('View');assert.match(b.text(),/Holder key binding.*P-256.*eckey/);assert.match(b.text(),/Mani \/ XFSC Signer/);assert.ok([...b.w.document.querySelectorAll('.dialog button')].some(x=>x.textContent==='Revoke'));
+});
+test('native lifecycle UI: revoke acknowledgement retains copy and delete stays a separate action',async t=>{
+ const b=await boot(t,{nativeLifecycle:true});await b.click('View');await b.click('Revoke');assert.match(b.w.document.querySelector('[role="dialog"]').textContent,/Revocation confirmed by the native Status service/);assert.match(b.text(),/local copy is retained/);assert.equal(b.calls.filter(x=>x.url.endsWith('/revoke')).length,1);assert.equal(b.calls.filter(x=>x.o.method==='DELETE').length,0);assert.equal(b.calls.filter(x=>x.url.endsWith('/verify')).length,0);assert.ok(b.w.document.querySelector('[role="dialog"]'));await b.click('Delete local copy');assert.equal(b.calls.filter(x=>x.o.method==='DELETE').length,1);
+});
+test('native lifecycle UI: native verification errors show evidence rather than unexplained Unknown',async t=>{
+ const b=await boot(t,{nativeLifecycle:true,nativeFailure:true});assert.match(b.text(),/does not mean active or revoked/);await b.click('View');await b.click('Verify');const dialog=b.w.document.querySelector('[role="dialog"]').textContent;assert.match(dialog,/UPSTREAM_REJECTED.*HTTP 500/);assert.match(dialog,/Not separately reported by the native service/);assert.match(dialog,/Requested by.*Mani/);assert.doesNotMatch(dialog,/Verified successfully/);
 });
