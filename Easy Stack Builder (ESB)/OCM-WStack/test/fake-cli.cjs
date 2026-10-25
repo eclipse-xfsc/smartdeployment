@@ -6,7 +6,7 @@ const path=require('node:path');
 const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);
 const statePath=process.env.ESB_TEST_STATE,logPath=process.env.ESB_TEST_CALLS;
 const state=JSON.parse(fs.readFileSync(statePath,'utf8'));
-const record={command:cmd,args,cwd:process.cwd()};
+const record={command:cmd,args,cwd:process.cwd(),qps:process.env.HELM_QPS,burst:process.env.HELM_BURST_LIMIT};
 for(const [key,file] of [['network',process.env.ESB_NETWORK_VALUES],['dns',process.env.ESB_DNS_SECRET_FILE]])if(file&&fs.existsSync(file))record[key]=JSON.parse(fs.readFileSync(file,'utf8'));
 fs.appendFileSync(logPath,JSON.stringify(record)+'\n');
 const out=x=>process.stdout.write(typeof x==='string'?x+'\n':JSON.stringify(x)+'\n');
@@ -23,6 +23,12 @@ if(cmd==='curl') {
   process.exit(0);
 }
 if(cmd==='helm'){
+  state.releases ||= {};state.attempts ||= {};
+  if(args[0]==='status') {
+    const key=args[args.indexOf('-n')+1]+'/'+args[1];
+    if(!state.releases[key])fail('Error: release: not found');
+    out({info:{status:state.releases[key]}});process.exit(0);
+  }
   if(args[0]==='version')out('v3.17.3+mock');
   if(args[0]==='template') {
     if(args[1]==='esb-yaml-reader') {
@@ -34,7 +40,15 @@ if(cmd==='helm'){
     const release=args[args.indexOf('-n')+2];
     // Tenant command places the release immediately after --install.
     const name=args[2]==='--timeout'?release:args[2];
+    const key=args[args.indexOf('-n')+1]+'/'+name;
+    state.attempts[key]=(state.attempts[key]||0)+1;
+    state.releases[key]='failed';save();
     if(name===process.env.ESB_TEST_FAIL_RELEASE)fail('Simulated upstream Helm failure');
+    if(name===process.env.ESB_TEST_EOF_RELEASE&&state.attempts[key]===1) {
+      if(process.env.ESB_TEST_PENDING==='true'){state.releases[key]='pending-install';save();}
+      fail('Error: Post "https://api.example.test/apis/rbac.authorization.k8s.io/v1/clusterrolebindings?fieldManager=helm": EOF');
+    }
+    state.releases[key]='deployed';
     if(['storage','network','core','ocm-wstack'].includes(name)&&!state.appsets.includes(name))state.appsets.push(name);
     if(name==='infrastructure-namespace')state.namespaces.push('infrastructure');
     if(name==='ocm-wstack-namespace')state.namespaces.push('ocm-wstack');
@@ -55,6 +69,7 @@ if(verb==='wait'){
   out('pod/openbao-0 condition met');process.exit(0);
 }
 if(verb==='cluster-info'||verb==='rollout'){out('ready');process.exit(0);}
+if(verb==='get'&&kind==='--raw=/readyz'){out('ok');process.exit(0);}
 if(verb==='get'){
   if(kind==='nodes')out({items:[{spec:{providerID:'aws:///eu/test'},status:{conditions:[{type:'Ready',status:'True'}]}}]});
   else if(kind==='storageclasses')out({items:[{metadata:{name:'fast',annotations:{'storageclass.kubernetes.io/is-default-class':'true'}}}]});

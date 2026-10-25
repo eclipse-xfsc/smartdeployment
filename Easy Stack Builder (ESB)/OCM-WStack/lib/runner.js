@@ -13,14 +13,14 @@ class Runner {
   }
   async run(command, args = [], options = {}) {
     if (this.signal?.aborted) throw Object.assign(new Error('Operation cancelled; installed cluster resources are retained.'),{code:'CANCELLED'});
-    const {timeout = 180000, input, live = false, allowFailure = false, cwd = this.cwd} = options;
+    const {timeout = 180000, input, live = false, allowFailure = false, cwd = this.cwd, processGroup = process.platform !== 'win32'} = options;
     return new Promise((resolve,reject) => {
-      const child = spawn(command,args,{cwd, env:this.env, stdio:['pipe','pipe','pipe'], detached:process.platform !== 'win32'});
+      const child = spawn(command,args,{cwd, env:this.env, stdio:['pipe','pipe','pipe'], detached:processGroup});
       let out = '', err = '', pending = '', pendingError = '', stopped = '', killTimer;
-      const kill = () => { try { if (process.platform !== 'win32') process.kill(-child.pid,'SIGTERM'); else child.kill(); } catch {} };
+      const kill = () => { try { if (processGroup) process.kill(-child.pid,'SIGTERM'); else child.kill(); } catch {} };
       const stop = (reason) => {
         stopped = reason; kill();
-        killTimer = setTimeout(() => { try { if (process.platform !== 'win32') process.kill(-child.pid,'SIGKILL'); else child.kill('SIGKILL'); } catch {} },3000);
+        killTimer = setTimeout(() => { try { if (processGroup) process.kill(-child.pid,'SIGKILL'); else child.kill('SIGKILL'); } catch {} },3000);
         killTimer.unref();
       };
       const abort = () => stop('CANCELLED');
@@ -45,6 +45,8 @@ class Runner {
         finish(); if(live && pending)log(pending);if(live&&pendingError)log(pendingError);
         if (stopped || (code !== 0 && !allowFailure)) {
           const e = new Error(`${command} ${stopped === 'TIMEOUT' ? 'timed out' : stopped === 'CANCELLED' ? 'cancelled' : `exited ${code}`}. ${this.redact(err || out).slice(-3500)}`);
+          // Preserve redacted diagnostics for classification; the public message stays bounded.
+          e.commandOutput = this.redact(err || out);
           e.code = stopped || 'COMMAND_FAILED'; reject(e);
         } else resolve({code,stdout:out,stderr:err});
       });

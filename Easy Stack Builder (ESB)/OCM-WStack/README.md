@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.3
+# OCM W-Stack ESB 12.0.4
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -12,11 +12,34 @@ The wrapper fetches that checkout at deployment time and executes `bash ocm-wsta
 
 No service image is rebuilt, patched or bundled. Both distribution archives contain source text only. The upstream scripts and charts download their normal dependencies when you deploy.
 
-## Updating from 12.0.0–12.0.2
+## Updating from 12.0.0–12.0.3
 
-Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. The previous Kyverno failure leaves a resumable partial bootstrap; no reset is required when settings match.
+Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. A failed partial bootstrap can resume when settings match and the affected Helm release is absent, failed or deployed. A pending Helm operation requires inspection; ESB never clears it automatically.
 
-Version 12.0.3 fixes the missing optional Kyverno wrapper monitoring default, the invalid TelemetryConfig CRD field, Tempo's null receiver values, and two resume defects in AppProject ownership and namespace OpenBao mount inspection. It retains the earlier Lease timestamp and OpenBao Ready-condition corrections.
+Version 12.0.4 adds bounded recovery for Kubernetes API transport failures during Helm installation. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
+
+## Kubernetes API EOF recovery
+
+An API `Post ...: EOF` means the connection ended before Helm received a complete response. It does not establish whether the server accepted that write, or why the connection ended. Successful chart rendering cannot rule out this runtime failure.
+
+All bootstrap and tenant `helm upgrade --install` commands now use at most three attempts, with 5-second and 15-second backoffs after recognized API transport failures. Before each attempt, ESB checks API readiness, reads the release state and verifies its deployment lease. It retains the same chart arguments and procedure order. Pending/uninstalling releases, lost ownership, template errors, authorization failures and ordinary Helm timeouts are not automatically retried. A successful command must also have a `deployed` Helm status before advancing.
+
+ESB sets Helm client QPS to 5 and burst to 10 to limit client request bursts. This is a mitigation, not evidence that throttling caused the reported EOF. Lease heartbeat recovery re-reads server state after an ambiguous renewal response, with bounded retries; it aborts on lost ownership or sustained failure. No forced upgrades, release-history deletion, automatic rollback or cluster cleanup are added.
+
+If connectivity still fails, set `msg.action = "diagnose-api"` on the existing configured node. It makes five read-only API readiness probes from the ORCE process using the uploaded kubeconfig, without chart downloads or installation. Connect Debug to output 1 and retain the returned checks. CLI equivalent:
+
+```bash
+node scripts/cli.js diagnose-api --config deployment.json --kubeconfig cluster.yaml
+```
+
+`api-reachable` confirms those five reads only; it does not prove sustained write connectivity. `api-unreliable` includes failed probes and timing. For a `HELM_PENDING` result, inspect the affected release before proceeding (the following commands only read state):
+
+```bash
+helm status kyverno -n security
+helm history kyverno -n security
+```
+
+Keep the current node settings, ESB marker and Helm history when retrying. The deployer does not modify `ingress-nginx` or `xfsc-orce-meow`.
 
 ## Chart validation before installation
 
@@ -36,10 +59,10 @@ node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.3.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.4.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.3.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.4.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.
@@ -64,6 +87,7 @@ You can import `examples/node-red-flow.json` for prewired Deploy, Validate and T
 
 | Action | Behavior |
 | --- | --- |
+| `diagnose-api` | Make five read-only Kubernetes API readiness probes from ORCE using the uploaded kubeconfig. |
 | `preflight` | Download dependencies and render every selected chart without writing cluster resources. |
 | `deploy` | Install the official stack and tenant, or resume the same installation configuration. |
 | `inspect` | Read Argo, images/digests, pods, PVC and gateway/certificate state. |
@@ -151,7 +175,7 @@ Keep `native-result.json`, `validation-result.json` and the evidence directory t
 - Supply the missing optional Kyverno wrapper monitor default while keeping its native admission-controller ServiceMonitor enabled. Correct Tempo receiver maps, explicit monitoring booleans, and the misplaced CRD `spec.metrics` field.
 - Preserve this release's AppProject during Helm upgrades; continue leaving projects owned by other releases out of its manifests. Parse OpenBao mount types through the documented CLI table on resume.
 - Require the complete planned ApplicationSet count before its healthy/synced check can pass.
-- Add fail-fast shell behavior and phase progress. Use idempotent namespace creation and `helm upgrade --install` for this instance's interrupted runs, with bounded timeouts and prerequisite controller rollout waits.
+- Add fail-fast shell behavior and phase progress. Use idempotent namespace creation and `helm upgrade --install` through the bounded API recovery helper for this instance's interrupted runs, with bounded timeouts and prerequisite controller rollout waits.
 - Use the preflight-selected StorageClass instead of assuming one unambiguous default.
 - Read DNS Secret data from a private manifest rather than command-line token arguments. Suppress the Argo initial-password read/print while preserving its existence check.
 - Allow a network-only ApplicationSet template patch for provider annotations/custom ExternalDNS values and A/AAAA/CNAME support. Preserve official service charts, routes, exclusions and Argo tracking/sync policy.

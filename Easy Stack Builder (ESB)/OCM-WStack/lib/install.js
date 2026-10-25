@@ -8,6 +8,7 @@ const {config, resolve, fingerprint, fail, object, kubeconfigText} = require('./
 const {adapt, networkValues} = require('./adapt');
 const lock = require('../upstream-lock.json');
 const {prepare}=require('./chart-check');
+const {upgrade:helmUpgrade,transportFailure,delay,diagnose}=require('./api-recovery');
 const MARKER = 'esb-ocmwstack-v12';
 const LEASE = 'esb-ocmwstack-v12';
 const MANAGED_NS = ['observability','security','argocd','infrastructure','ocm-wstack'];
@@ -32,8 +33,21 @@ async function lease(r,id,onLost=()=>{}) {
   const timer=setInterval(()=>{
     pending=pending.then(async()=>{
       if(lost)return;
-      doc.spec.renewTime=leaseTime();
-      doc=await r.json('kubectl',['-n','kube-system','replace','-f','-','-o','json'],{input:JSON.stringify(doc),timeout:30000});
+      for(let attempt=0;attempt<3;attempt++) {
+        try {
+          if(attempt) {
+            await delay(attempt*2000,r.signal);
+            const current=await optional(r,'lease',LEASE,'kube-system');
+            if(current?.spec?.holderIdentity!==id)fail('LEASE_LOST','The lease no longer belongs to this operation.');
+            doc=current;
+          }
+          const expires=Date.parse(doc.spec.renewTime||doc.spec.acquireTime)+(doc.spec.leaseDurationSeconds||180)*1000;
+          if(!Number.isFinite(expires)||expires<=Date.now()+15000)fail('LEASE_LOST','The lease cannot be renewed safely before expiry.');
+          doc.spec.renewTime=leaseTime();
+          doc=await r.json('kubectl',['-n','kube-system','replace','-f','-','-o','json','--request-timeout=10s'],{input:JSON.stringify(doc),timeout:12000});
+          break;
+        } catch(e) {if(attempt===2||!transportFailure(e))throw e;}
+      }
     }).catch(e=>{lost=e;onLost();});
   },45000);timer.unref();
   return {check(){if(lost)fail('LEASE_LOST','Lost the cluster lease; stop and inspect before resuming.');}, async release(){clearInterval(timer);await pending;if(!lost){doc.spec.holderIdentity='';doc.spec.renewTime=leaseTime();await r.run('kubectl',['-n','kube-system','replace','-f','-'],{input:JSON.stringify(doc),allowFailure:true,timeout:30000});}}};
@@ -107,7 +121,7 @@ async function validate(r,c) {
   return report;
 }
 async function operation(action,input,credentials,{emit=()=>{},signal:externalSignal,runnerFactory,checkoutSource=checkout}={}) {
-  if(!['deploy','preflight','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, validate, inspect, test-credentials or teardown.');
+  if(!['deploy','preflight','diagnose-api','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, diagnose-api, validate, inspect, test-credentials or teardown.');
   const controller=new AbortController();
   const relay=()=>controller.abort();
   if(externalSignal?.aborted)controller.abort();
@@ -119,9 +133,10 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
   let held,marker,c,r,dnsTimer,observerClosed=false;
   try {
     const kubeconfig=await privateFile(dir,'kubeconfig',kubeText);
-    const env={...process.env,KUBECONFIG:kubeconfig,GIT_TERMINAL_PROMPT:'0',HELM_CACHE_HOME:path.join(dir,'helm/cache'),HELM_CONFIG_HOME:path.join(dir,'helm/config'),HELM_DATA_HOME:path.join(dir,'helm/data')};
+    const env={...process.env,KUBECONFIG:kubeconfig,GIT_TERMINAL_PROMPT:'0',HELM_QPS:'5',HELM_BURST_LIMIT:'10',HELM_CACHE_HOME:path.join(dir,'helm/cache'),HELM_CONFIG_HOME:path.join(dir,'helm/config'),HELM_DATA_HOME:path.join(dir,'helm/data')};
     const secrets=[credentials.kubeconfig,kubeText,credentials.dnsToken,...Object.values(object(credentials.dnsSecretData,'DNS Secret data'))];
     r=runnerFactory?runnerFactory({cwd:dir,env,emit,secrets,signal}):new Runner({cwd:dir,env,emit,secrets,signal});
+    if(action==='diagnose-api')return await diagnose(r);
     emit({type:'phase',phase:'preflight'});c=await preflight(r,c0,credentials);
     emit({type:'detected',provider:c.actualProvider,detectedProvider:c.detectedProvider,storageClass:c.actualStorageClass,dnsProvider:c.actualDns,upstreamCommit:lock.commit});
     if(action==='inspect'||action==='validate')return action==='validate'?await validate(r,c):await inspect(r,c);
@@ -150,7 +165,9 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const source=await checkoutSource(r,dir);
     const chartReport=await prepare(r,source,c,dir);
     if(action==='preflight')return chartReport;
-    held=await lease(r,crypto.randomUUID(),()=>controller.abort());
+    const holder=crypto.randomUUID();
+    held=await lease(r,holder,()=>controller.abort());
+    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
     const network=await privateFile(dir,'network-values.json',JSON.stringify(networkValues(c)));
@@ -177,13 +194,15 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     }
     emit({type:'phase',phase:'tenant'});
     const tenant=await privateFile(dir,'tenant-values.json',JSON.stringify({tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}));
-    await r.run('helm',['upgrade','--install',c.tenantRelease,'XFSC/tenant/chart','-f','XFSC/tenant/values/tenant-ocm-wstack-values.yaml','-f',tenant,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
+    await helmUpgrade(r,['upgrade','--install',c.tenantRelease,path.join(source,'XFSC/tenant/chart'),'-f',path.join(source,'XFSC/tenant/values/tenant-ocm-wstack-values.yaml'),'-f',tenant,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{namespace:'ocm-wstack',release:c.tenantRelease,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
     held.check();marker=await updateMarker(r,marker,{state:'installed',updatedAt:new Date().toISOString()});
     emit({type:'phase',phase:'native-validation'});
     const report=await validate(r,c);
     marker=await updateMarker(r,marker,{state:report.status,updatedAt:new Date().toISOString()});
     return report;
   } catch(e) {
+    const recoveryCode=/\[(API_TRANSPORT|HELM_PENDING|HELM_STATE_UNAVAILABLE|LEASE_LOST)\]/.exec(e.commandOutput||'');
+    if(recoveryCode)e.code=recoveryCode[1];
     if(marker&&r&&!signal?.aborted)try{await updateMarker(r,marker,{state:'failed',lastErrorCode:e.code||'ERROR',updatedAt:new Date().toISOString()});}catch{}
     throw e;
   } finally {

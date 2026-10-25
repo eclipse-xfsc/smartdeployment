@@ -104,3 +104,27 @@ test('preflight checks the complete selection without modifying the cluster',asy
   assert.ok(!calls.some(x=>x.command==='helm'&&x.args[0]==='upgrade'));
   assert.deepEqual((await h.readState()).objects,{});
 });
+
+test('real bootstrap helper recovers one Kyverno POST EOF without replaying earlier releases',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_EOF_RELEASE='kyverno';return r;};
+  assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
+  const calls=await h.readCalls(),upgrades=calls.filter(c=>c.command==='helm'&&c.args[0]==='upgrade');
+  const state=await h.readState();assert.equal(state.attempts['security/kyverno'],2);assert.equal(state.attempts['observability/observability'],1);assert.equal(state.attempts['security/openbao'],1);
+  assert.ok(upgrades.every(c=>c.qps==='5'&&c.burst==='10'));
+  assert.ok(!calls.some(c=>c.args.includes('delete')||c.args.includes('rollback')||c.args.includes('--force')||c.args.includes('--atomic')));
+  assert.ok(h.events.some(e=>e.type==='log'&&e.message.includes('"type":"retry"')));
+});
+test('real bootstrap helper preserves a pending release after EOF and stops later stages',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_EOF_RELEASE='kyverno';r.env.ESB_TEST_PENDING='true';return r;};
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'HELM_PENDING'});
+  const state=await h.readState();assert.equal(state.attempts['security/kyverno'],1);assert.equal(state.releases['security/kyverno'],'pending-install');assert.equal(state.attempts['infrastructure/storage'],undefined);
+  assert.equal(state.objects['kube-system/configmap/esb-ocmwstack-v12'].data.lastErrorCode,'HELM_PENDING');
+});
+test('diagnose-api uses the operation kubeconfig without chart downloads or mutation',async t=>{
+  const h=await setup(t);const result=await operation('diagnose-api',example,{kubeconfig:'mock-cluster-config'},h.options);
+  assert.equal(result.status,'api-reachable');const calls=await h.readCalls();assert.equal(calls.length,5);
+  assert.ok(calls.every(c=>c.command==='kubectl'&&c.args.includes('--raw=/readyz')));
+  assert.deepEqual((await h.readState()).objects,{});
+});

@@ -83,6 +83,7 @@ async function adapt(dir) {
       if (!nameMatch) fail('UPSTREAM_CONTRACT','Unrecognized official Helm install.');
       let command = line;
       if (nameMatch[2] === 'network') command += ' -f "$ESB_NETWORK_VALUES"';
+      command = command.replace(/^helm /, `node "\${ESB_HELM_UPGRADE:?ESB Helm runner is required}" ${nameMatch[1]} ${nameMatch[2]} `);
       return `echo "[ESB_PHASE] ${nameMatch[2]}"\n${command}${waits[nameMatch[2]] ? '\n'+waits[nameMatch[2]] : ''}`;
     }).join('\n');
     if (name === 'basic-cluster-init.sh') {

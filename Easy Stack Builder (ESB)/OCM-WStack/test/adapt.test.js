@@ -14,7 +14,7 @@ test('reviewed official source adapts without changing charts, service values, r
   const basic=await fs.readFile(path.join(dir,'basic-cluster-init.sh'),'utf8');
   const ocm=await fs.readFile(path.join(dir,'ocm-wstack-init.sh'),'utf8');
   assert.equal((ocm.match(/\.\/basic-cluster-init.sh/g)||[]).length,1);
-  assert.match(basic,/set -Eeuo pipefail/);assert.match(basic,/helm upgrade --install/);assert.match(basic,/kubectl apply -f "\$ESB_DNS_SECRET_FILE"/);
+  assert.match(basic,/set -Eeuo pipefail/);assert.match(basic,/ESB_HELM_UPGRADE[^\n]+upgrade --install/);assert.match(basic,/kubectl apply -f "\$ESB_DNS_SECRET_FILE"/);
   assert.doesNotMatch(basic,/--from-literal=token/);assert.match(basic,/-f "\$ESB_NETWORK_VALUES"/);
   const argo=await fs.readFile(path.join(dir,'argocd-bootstrap.sh'),'utf8');assert.doesNotMatch(argo,/password=\$|Admin Password:|base64 -d/);
   for(const script of ['basic-cluster-init.sh','ocm-wstack-init.sh','argocd-bootstrap.sh','check-applicationset.sh'])execFileSync('bash',['-n',path.join(dir,script)]);

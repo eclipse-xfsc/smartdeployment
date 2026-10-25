@@ -7,7 +7,7 @@ const {operation}=require('../lib/install');
 
 async function main() {
   const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},kubeconfig:{type:'string'},'dns-token-file':{type:'string'},'dns-secret-file':{type:'string'},confirm:{type:'string'},help:{type:'boolean',short:'h'}}});
-  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|preflight|deploy|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
+  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|preflight|diagnose-api|deploy|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
   const action=positionals[0];
   if(positionals.length!==1)throw new Error('Provide exactly one action.');
   if(action==='check') {
@@ -24,6 +24,6 @@ async function main() {
   for(const sig of ['SIGINT','SIGTERM'])process.once(sig,()=>controller.abort());
   const result=await operation(action,{...input,confirm:values.confirm},credentials,{signal:controller.signal,emit:event=>process.stderr.write(JSON.stringify({timestamp:new Date().toISOString(),...event})+'\n')});
   console.log(JSON.stringify(result,null,2));
-  if(result.status==='failed'||result.status==='action-required')process.exitCode=2;
+  if(result.status==='failed'||result.status==='action-required'||result.status==='api-unreliable')process.exitCode=2;
 }
 main().catch(e=>{console.error(JSON.stringify({status:'failed',code:e.code||'ERROR',message:e.message}));process.exitCode=1;});
