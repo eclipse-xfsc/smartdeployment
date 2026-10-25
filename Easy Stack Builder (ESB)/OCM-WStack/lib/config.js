@@ -85,7 +85,9 @@ function resolve(c, nodes, classes, credentials) {
   if (c.externalDns && actualDns === 'custom') for (const [k,v] of Object.entries(secret)) if (!/^[A-Za-z0-9._-]+$/.test(k) || typeof v !== 'string') fail('DNS_CREDENTIALS', 'DNS Secret data must map valid Secret keys to strings.');
   if(actualProvider==='ionos'&&c.externalTrafficPolicy!=='Cluster')fail('CONFIG','IONOS requires Cluster traffic policy.');
   const resolved={...c, providerLocations:evidence.locations,providerZones:evidence.zones,providerEvidence:evidence.evidence, detectedProvider, actualProvider, actualDns, profile: ['hetzner','ionos'].includes(actualDns) ? actualDns : !c.externalDns && actualProvider === 'hetzner' ? 'hetzner' : 'generic', actualStorageClass: storageClass(classes, c.storageClass), dnsSecret: secret};
-  resolved.internalGatewayRouting=c.gatewayRouting==='internal'||c.gatewayRouting==='auto'&&actualProvider==='ionos';
+  // Cluster-to-public connectivity is independent of provider classification.
+  // Use the managed internal route unless public routing was explicitly selected.
+  resolved.internalGatewayRouting=c.gatewayRouting!=='public';
   resolved.resolvedLbAnnotations=require('./providers').annotations(resolved);
   return resolved;
 }

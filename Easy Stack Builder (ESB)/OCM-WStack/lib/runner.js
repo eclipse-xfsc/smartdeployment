@@ -29,6 +29,13 @@ class Runner {
       const finish = () => {clearTimeout(timer); clearTimeout(killTimer); this.signal?.removeEventListener('abort',abort);};
       const log = line => {
         const phase = /^\[ESB_PHASE\] ([a-z0-9-]+)$/.exec(line);
+        // Preserve structured gateway progress from the bootstrap helper.
+        if(line.startsWith('[ESB_API] ')) {
+          try {
+            const event=JSON.parse(this.redact(line.slice(10)));
+            if(['phase','routing-progress','routing-drift','gateway-configured'].includes(event.type)){this.emit(event);return;}
+          } catch {}
+        }
         this.emit(phase ? {type:'phase',phase:phase[1]} : {type:'log',message:this.redact(line).slice(0,2000)});
       };
       child.stdout.on('data',data => {

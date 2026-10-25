@@ -1,43 +1,32 @@
-# OCM W-Stack ESB 12.1.1
+# OCM W-Stack ESB 12.1.2
 
-12.1.1 corrects the cluster-to-public gateway failure observed after 12.1.0. Cert-manager and the ORCE UI map the tenant hostname to the discovered internal Envoy Service, preserving the public URL and TLS hostname. It carries forward the provider/gateway fixes and recovered OCM-CR runtime/UI. It is a locally checked release candidate. A fresh-cluster deployment, real Helm rendering and browser/login acceptance have not been executed in this environment; see VALIDATION.md.
+12.1.2 corrects the provider-dependent skip in 12.1.1's automatic tenant routing. Automatic mode always maps the tenant hostname to the dynamically discovered internal Envoy Service for cert-manager and the managed ORCE UI. Before entering tenant-tls, the deployer requires a complete controller rollout and ready controller pods with that mapping. It preserves the public hostname, TLS verification, existing pending issuance, provider annotations and OCM-CR UI/runtime.
 
-## Install and update the existing 12.0.9 / 12.1.0 deployment
+## Upgrade and resume the current deployment
 
-Install `orce-esb-ocmwstack-12.1.1.tgz` in ORCE's Node-RED user directory, then restart ORCE:
-
-```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.1.1.tgz
-```
-
-Keep the existing version-12 node, uploaded administrator kubeconfig, instance, tenant, domain, StorageClass, ownership marker, Helm history and PVCs. Open the node and save the new fields. Provider can remain automatic; IONOS can also be selected explicitly. Leave traffic policy at Cluster. Tenant routing defaults to internal on IONOS; select Internal explicitly on another provider when the same cluster-to-public failure is demonstrated. On the ORCE credentials tab, enter the initial editor administrator and UI administrator credentials. Passwords must contain at least 12 characters. These are separate accounts; UI login requires an initial password change.
-
-1. Run `msg.action = "preflight"`. This renders the entire selected plan, including the two new compatibility/runtime charts, before installation writes.
-2. Run `msg.action = "repair-network"` to update the network ApplicationSet, install the scoped persistent traffic policy and reconcile the existing proxy. It retains OCM, the tenant certificate and shared data. This action can run before the UI is installed; the final status may remain action-required until the UI is present.
-3. Run `msg.action = "install-ui"` to add the recovered runtime, MongoDB and persistent identity components to the matching existing installation.
-4. Run `msg.action = "validate"` after DNS/TLS and the UI are ready. For `demo-tenant.leanea.com`, the application URL is `https://demo-tenant.leanea.com/orce/` and the editor is `https://demo-tenant.leanea.com/orce/editor/`.
-
-For a fresh cluster, configure the credentials and run preflight, then deploy. Deploy performs the official bootstrap, gateway compatibility, tenant setup and UI installation automatically. Removing/redeploying the Node-RED node only cancels its local process and retains cluster resources.
-
-A narrowly checked migration accepts a matching 12.0.9 ownership marker from `739606691ecff72b3a40404a19fce44d9c22b0ee`. The current commit changes only the two reviewed Retrieval scripts. Other clusters, tenants and configurations are not adopted. This does not migrate an 11.x cluster installation; only its UI source is carried forward.
-
-## Recover the current pending certificate
-
-Run the included standalone recovery source from your laptop using the active kubectl context:
+Install the TGZ in the existing ORCE instance's Node-RED user directory, then restart ORCE so the previous operation stops and the updated code loads:
 
 ```bash
-node scripts/https-recovery.cjs demo-tenant.leanea.com demotenant
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.1.2.tgz
 ```
 
-It verifies the existing certificate hostname, discovers the proxy Service, preserves other host mappings, appends a managed cert-manager values block to the network ApplicationSet, and waits for Argo to roll out the mapping. The existing pending HTTP-01 request retries normally. It then waits for Certificate Ready, ListenerSet Programmed and Service port 443, and verifies public HTTPS/DID. The script uses Node.js 18.17+ and kubectl. It times out after five minutes with diagnostics if recovery has not completed. Install 12.1.1 afterward and run repair-network, install-ui and validate on the existing node.
+Keep the existing node, uploaded kubeconfig, instance, provider, tenant, domain, StorageClass and credentials. Leave Tenant routing at Automatic and traffic policy at Cluster. A missing routing field also defaults to Automatic. Changing the provider or other native ownership settings is unnecessary. Keep the existing encrypted editor/UI administrator credentials; initial credentials seed new components only.
 
-The recovery script edits the live Helm-owned ApplicationSet; 12.1.1 regenerates that managed block after every network Helm reconciliation. Running an older deployer or an older Helm rollback can remove it. Service replacement changes its ClusterIP; rerun repair-network and install-ui to discover the new address. This is an explicit installation lifecycle setting, rather than a background address watcher.
+Run the existing node with `msg.action = "deploy"`. This resumes its matching version-12 installation, persists the internal route in the network Helm/ApplicationSet configuration, waits for running controller pods, completes the existing certificate request, and installs or reconciles the retained UI. A separate recovery script or a cluster reset is not required. Removing/redeploying the node cancels local processes and retains cluster resources.
 
-The incident proved public challenge HTTP 200 and internal ClusterIP HTTP 200 while the pod's public-address request timed out. Its first resolver address was truncated, so the exact cloud loopback versus internal DNS cause was not established. The mapping avoids that failing path for the two managed callers. Native upstream service-to-public-host journeys remain a separate acceptance check; this correction does not establish credential lifecycle success.
+The second output reports routing-progress and tls-progress at state changes and approximately every 12 seconds during an unchanged wait. It includes elapsed time, controller mapping/readiness, current Service ClusterIP, public gateway addresses, certificate/listener/HTTPS-port status and the ACME reason. The node status also updates. A changed Service address or lost controller mapping is reconciled during the TLS wait. The configured timeout still bounds each phase; the error includes the current blocker.
+
+Public DNS must point to the current public gateway and TCP 80/443 must reach it. The internal mapping serves the controller/UI callers; it does not modify public DNS or prove public connectivity. The final deploy validation checks public HTTPS/native metadata and UI readiness/auth endpoints and reports action-required if they fail. It never reports ready based only on successful Helm operations.
+
+For a fresh cluster, configure the separate initial editor/UI credentials (at least 12-character passwords), run preflight, then deploy. Deploy performs bootstrap, tenant setup and UI installation automatically. For an existing matching installation, preflight, repair-network, install-ui and validate remain available for narrower operations, but are not required as a manual recovery sequence.
+
+The earlier standalone HTTPS recovery source remains an optional diagnostic aid. Its checks now use the same rollout/pod verification and TLS progress as the deployer. The normal deployment path owns and persists the correction. Service addresses are refreshed during deploy, repair-network or install-ui and during an active TLS wait; this package does not run a background address watcher after deployment completes.
+
+The supplied incident demonstrates a public challenge HTTP 200 and an internal ClusterIP HTTP 200 while the cluster-to-public path timed out. The exact hairpin versus internal DNS cause is unproven. The later output shows no cert-manager hostAliases and a still-pending self-check; the source's provider gate permitted that skip. The user's actual routing/provider setting on that later run was not supplied.
 
 ## Upstream alignment
 
-The source of truth remains [eclipse-xfsc/deployment/main](https://github.com/eclipse-xfsc/deployment/tree/main). Reviewed commit: [8485621574abdee08b8ca24c2f0f60136ba0dad7](https://github.com/eclipse-xfsc/deployment/tree/8485621574abdee08b8ca24c2f0f60136ba0dad7), inspected on 1 October 2026. It adds `OCM W-Stack/Tools/scripts/retrieval-test.sh` and `retrieval-acceptance.sh` to the previous baseline. Bootstrap files are checked byte-for-byte against the lock before adaptation.
+The source of truth remains [eclipse-xfsc/deployment/main](https://github.com/eclipse-xfsc/deployment/tree/main). Reviewed commit: [8485621574abdee08b8ca24c2f0f60136ba0dad7](https://github.com/eclipse-xfsc/deployment/tree/8485621574abdee08b8ca24c2f0f60136ba0dad7), rechecked on 2 October 2026. It adds `OCM W-Stack/Tools/scripts/retrieval-test.sh` and `retrieval-acceptance.sh` to the previous baseline. Bootstrap files are checked byte-for-byte against the lock before adaptation.
 
 The official bootstrap order, tenant Helm chart, native OCM routes and service implementations are retained. Argo continues tracking main with autosync, prune and selfHeal. The wrapper checks the currently resolved main revision and all selected chart dependencies at deployment time, and stops if main moves during preflight. Future upstream changes still require acceptance; tracking a moving branch cannot provide a permanently frozen release guarantee.
 

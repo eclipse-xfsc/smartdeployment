@@ -37,7 +37,8 @@ test('routing is durable in the ApplicationSet and waits for the generated contr
  let writes=0;
  const deployment={metadata:{name:'cert-manager',generation:2},spec:{replicas:1,template:{spec:{hostAliases:[{ip:'100.64.9.12',hostnames:[host]}]}}},status:{replicas:1,observedGeneration:2,updatedReplicas:1,availableReplicas:1}};
  const appset={metadata:{resourceVersion:'123'},spec:{template:{spec:{source:{repoURL:repository}}},templatePatch:'{{ if eq .path.path "INFRA/network/envoy" }}existing{{ end }}\n'}};
- const r={emit(){},json:async(cmd,args)=>args.includes('services')?{items:[service]}:args.includes('deployments')?{items:[deployment]}:appset,run:async(cmd,args)=>{writes++;const p=JSON.parse(args.at(-1));assert.equal(p[0].value,'123');assert.equal(p[1].path,'/spec/templatePatch');appset.spec.templatePatch=p[1].value;}};
+ const pod={metadata:{name:'cert-manager-current'},spec:deployment.spec.template.spec,status:{phase:'Running',conditions:[{type:'Ready',status:'True'}]}};
+ const r={emit(){},json:async(cmd,args)=>args.includes('services')?{items:[service]}:args.includes('deployments')?{items:[deployment]}:args.includes('pods')?{items:[pod]}:appset,run:async(cmd,args)=>{writes++;const p=JSON.parse(args.at(-1));assert.equal(p[0].value,'123');assert.equal(p[1].path,'/spec/templatePatch');appset.spec.templatePatch=p[1].value;}};
  await internalRouting(r,{tenantHost:host,internalGatewayRouting:true,timeoutSeconds:1});assert.equal(writes,1);
  await internalRouting(r,{tenantHost:host,internalGatewayRouting:true,timeoutSeconds:1});assert.equal(writes,1);
 });
@@ -64,10 +65,10 @@ test('IONOS automatically uses internal routing without changing the installatio
  assert.equal(c.internalGatewayRouting,true);
  assert.equal(fingerprint(c),fingerprint({...c,gatewayRouting:'public',internalGatewayRouting:false,gatewayClusterIP:'100.64.1.2'}));
  const other=resolve(config({procedureVersion:12,domain:'example.com',email:'m@example.com',provider:'generic'}),{items:[]},classes,{});
- assert.equal(other.internalGatewayRouting,false);
+ assert.equal(other.internalGatewayRouting,true);
 });
 
-test('12.1.0 native installation fingerprint remains compatible with 12.1.1',()=>{
+test('12.1.0 native installation fingerprint remains compatible with 12.1.2',()=>{
  const classes={items:[{metadata:{name:'ionos',annotations:{'storageclass.kubernetes.io/is-default-class':'true'}},provisioner:'ionos'}]};
  const input={procedureVersion:12,domain:'example.com',email:'m@example.com'};
  // Golden native fingerprint measured with the distributed 12.1.0 code.

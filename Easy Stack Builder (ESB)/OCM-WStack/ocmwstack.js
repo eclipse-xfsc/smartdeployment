@@ -15,6 +15,8 @@ module.exports=function(RED) {
       const emit=event=>{
         if(closed)return;
         if(event.type==='phase')node.status({fill:'blue',shape:'dot',text:event.phase});
+        if(event.type==='tls-progress')node.status({fill:'blue',shape:'dot',text:`TLS ${event.elapsedSeconds}s: ${event.message}`.slice(0,100)});
+        if(event.type==='routing-progress')node.status({fill:'blue',shape:'dot',text:`Routing ${event.elapsedSeconds}s: ${event.message}`.slice(0,100)});
         send([null,{_msgid:msg._msgid,topic:'ocm-wstack/progress',payload:{timestamp:new Date().toISOString(),action,...event}}]);
       };
       // Configuration and credentials come only from the configured node, never message overrides.

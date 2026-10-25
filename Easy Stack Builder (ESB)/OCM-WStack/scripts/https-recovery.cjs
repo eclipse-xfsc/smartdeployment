@@ -6,6 +6,9 @@ function fail(code,message){throw Object.assign(new Error(message),{code});}
 const BEGIN='{{/* ESB internal tenant routing begin */}}';
 const END='{{/* ESB internal tenant routing end */}}';
 const SELECTOR='gateway.envoyproxy.io/owning-gateway-name=envoy-gateway,gateway.envoyproxy.io/owning-gateway-namespace=infrastructure';
+const CONTROLLER_SELECTOR='app.kubernetes.io/name=cert-manager,app.kubernetes.io/component=controller';
+const defaults={now:Date.now,sleep:pause,pollMs:3000,progressMs:10000};
+const mapped=(pod,host,ip)=>pod?.spec?.hostAliases?.some(a=>a.ip===ip&&a.hostnames?.includes(host))===true;
 
 async function publicService(r){
  const list=await r.json('kubectl',['-n','infrastructure','get','services','-l',SELECTOR,'-o','json']);
@@ -42,7 +45,7 @@ function routingTemplate(previous,aliases){
  return base.trimEnd()+'\n'+BEGIN+'\n{{ if eq .path.path "INFRA/network/cert-manager" }}\nspec:\n  source:\n    helm:\n      valuesObject: null\n      values: {{ '+JSON.stringify(JSON.stringify(JSON.stringify(values)))+' }}\n{{ end }}\n'+END+'\n';
 }
 async function controller(r){
- const list=await r.json('kubectl',['-n','infrastructure','get','deployments','-l','app.kubernetes.io/name=cert-manager,app.kubernetes.io/component=controller','-o','json']);
+ const list=await r.json('kubectl',['-n','infrastructure','get','deployments','-l',CONTROLLER_SELECTOR,'-o','json']);
  if(list?.items?.length!==1||!(list.items[0].spec.replicas??1))fail('GATEWAY_ROUTING','Expected exactly one active cert-manager controller Deployment in infrastructure.');
  return list.items[0];
 }
@@ -52,8 +55,23 @@ async function internalValues(r,c,values){
  const aliases=aliasesFor(deployment.spec.template.spec.hostAliases,c.tenantHost,service.spec.clusterIP);
  return {...values,esbTemplatePatch:routingTemplate(values.esbTemplatePatch,aliases)};
 }
-async function internalRouting(r,c){
+async function routingState(r,c,ip){
+ const [deployment,list]=await Promise.all([
+  controller(r),
+  r.json('kubectl',['-n','infrastructure','get','pods','-l',CONTROLLER_SELECTOR,'-o','json'])
+ ]);
+ const desired=deployment.spec.replicas??1;
+ const templateMapped=mapped(deployment.spec.template,c.tenantHost,ip);
+ const rolledOut=templateMapped&&deployment.status?.observedGeneration>=deployment.metadata.generation&&deployment.status?.replicas===desired&&deployment.status?.updatedReplicas===desired&&deployment.status?.availableReplicas===desired;
+ const pods=(list?.items||[]).filter(p=>!p.metadata.deletionTimestamp);
+ const podStates=pods.map(p=>({name:p.metadata.name,mapped:mapped(p,c.tenantHost,ip),ready:p.status?.phase==='Running'&&p.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')===true}));
+ const ready=rolledOut&&podStates.length===desired&&podStates.every(p=>p.mapped&&p.ready);
+ const message=!templateMapped?'Waiting for Argo to apply the controller host mapping':!rolledOut?'Waiting for cert-manager rollout':!ready?'Waiting for ready controller pods with the current host mapping':'Controller pods use the internal tenant route';
+ return {ready,templateMapped,rolledOut,pods:podStates,message};
+}
+async function internalRouting(r,c,options){
  if(!c.internalGatewayRouting)return {enabled:false};
+ const timing={...defaults,...options};
  const service=await publicService(r),deployment=await controller(r);
  const ip=service.spec.clusterIP,aliases=aliasesFor(deployment.spec.template.spec.hostAliases,c.tenantHost,ip);
  const appset=await r.json('kubectl',['-n','argocd','get','applicationset','network','-o','json']);
@@ -64,34 +82,55 @@ async function internalRouting(r,c){
   {op:'add',path:'/spec/templatePatch',value:patch}
  ])]);
  r.emit({type:'phase',phase:'internal-tenant-routing',hostname:c.tenantHost,service:'infrastructure/'+service.metadata.name,clusterIP:ip});
- const deadline=Date.now()+c.timeoutSeconds*1000;
+ const started=timing.now(),deadline=started+c.timeoutSeconds*1000;
+ let lastProgress=-Infinity,lastState;
  while(true){
-  const current=await controller(r);
-  if(current.spec.template.spec.hostAliases?.some(a=>a.ip===ip&&a.hostnames?.includes(c.tenantHost))&&current.status?.observedGeneration>=current.metadata.generation&&current.status?.replicas===(current.spec.replicas??1)&&current.status?.updatedReplicas===(current.spec.replicas??1)&&current.status?.availableReplicas===(current.spec.replicas??1))break;
-  if(Date.now()>=deadline)fail('GATEWAY_ROUTING_TIMEOUT','Argo has not rolled out the cert-manager tenant host mapping. Inspect the cert-manager Application and Deployment.');
-  await pause(3000,undefined,{signal:r.signal});
+  const state=await routingState(r,c,ip),key=JSON.stringify(state);
+  if(key!==lastState||timing.now()-lastProgress>=timing.progressMs){
+   r.emit({type:'routing-progress',phase:'internal-tenant-routing',hostname:c.tenantHost,clusterIP:ip,service:service.metadata.name,elapsedSeconds:Math.floor((timing.now()-started)/1000),...state});
+   lastState=key;lastProgress=timing.now();
+  }
+  if(state.ready)break;
+  if(timing.now()>=deadline)fail('GATEWAY_ROUTING_TIMEOUT',state.message+'. The TLS wait has not started. Inspect the cert-manager Application, Deployment and controller pods.');
+  await timing.sleep(Math.min(timing.pollMs,deadline-timing.now()),undefined,{signal:r.signal});
  }
  return {enabled:true,hostname:c.tenantHost,clusterIP:ip,service:service.metadata.name};
 }
-async function waitTenantTls(r,c){
- const name=c.tenantRelease+'-xfsc-tenant-gateway',deadline=Date.now()+c.timeoutSeconds*1000;
- r.emit({type:'phase',phase:'tenant-tls'});
+async function waitTenantTls(r,c,options){
+ const timing={...defaults,...options};
+ // Every caller must establish the route here; no earlier phase may silently skip it.
+ await internalRouting(r,c,timing);
+ const name=c.tenantRelease+'-xfsc-tenant-gateway',started=timing.now(),deadline=started+c.timeoutSeconds*1000;
+ let lastProgress=-Infinity,lastState;
+ r.emit({type:'phase',phase:'tenant-tls',hostname:c.tenantHost,routingMode:c.internalGatewayRouting?'internal':'public'});
  while(true){
-  const [certificate,listener,service]=await Promise.all([
+  const [certificate,listener,service,challenges]=await Promise.all([
    r.json('kubectl',['-n','ocm-wstack','get','certificate',name,'--ignore-not-found','-o','json']),
    r.json('kubectl',['-n','ocm-wstack','get','listenerset',name,'--ignore-not-found','-o','json']),
-   publicService(r)
+   publicService(r),
+   r.json('kubectl',['-n','ocm-wstack','get','challenges.acme.cert-manager.io','-o','json'])
   ]);
+  if(c.internalGatewayRouting&&!(await routingState(r,c,service.spec.clusterIP)).ready){
+   r.emit({type:'routing-drift',hostname:c.tenantHost,clusterIP:service.spec.clusterIP,message:'The controller mapping or gateway Service changed; reconciling before continuing TLS.'});
+   if(timing.now()>=deadline)fail('GATEWAY_ROUTING_TIMEOUT','The controller mapping or gateway Service kept changing during the TLS wait. Resume deploy to reconcile the current route.');
+   await internalRouting(r,{...c,timeoutSeconds:Math.max(0,(deadline-timing.now())/1000)},timing);
+   continue;
+  }
   const ready=o=>o?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True'&&(x.observedGeneration===undefined||x.observedGeneration===o.metadata.generation));
   const programmed=listener?.status?.conditions?.some(x=>x.type==='Programmed'&&x.status==='True'&&x.observedGeneration===listener.metadata.generation);
-  if(ready(certificate)&&programmed&&service.spec.ports.some(p=>p.port===443))return;
-  if(Date.now()>=deadline){
-   const challenges=await r.json('kubectl',['-n','ocm-wstack','get','challenges.acme.cert-manager.io','-o','json']);
-   const matching=(challenges?.items||[]).filter(x=>x.spec?.dnsName===c.tenantHost);
-   const reasons=matching.map(x=>x.status?.reason).filter(Boolean).join('; ');
-   fail('TENANT_TLS_NOT_READY','Tenant HTTPS is not ready: Certificate Ready='+Boolean(ready(certificate))+', ListenerSet Programmed='+Boolean(programmed)+', Service port 443='+service.spec.ports.some(p=>p.port===443)+'. '+reasons+' UI installation was not started.');
+  const certificateReady=Boolean(ready(certificate)),listenerProgrammed=Boolean(programmed),httpsPortReady=service.spec.ports.some(p=>p.port===443);
+  const matching=(challenges?.items||[]).filter(x=>x.spec?.dnsName===c.tenantHost&&!x.metadata?.deletionTimestamp).map(x=>({name:x.metadata?.name,state:x.status?.state||'pending',reason:x.status?.reason||''}));
+  const reasons=matching.map(x=>x.reason).filter(Boolean).join('; ');
+  const message=certificateReady&&listenerProgrammed&&httpsPortReady?'Tenant HTTPS is ready':!certificateReady?(reasons||certificate?.status?.conditions?.find(x=>x.type==='Ready')?.message||'Waiting for tenant certificate'):!listenerProgrammed?'Waiting for the tenant ListenerSet to be programmed':'Waiting for Envoy Service port 443';
+  const state={certificateReady,listenerProgrammed,httpsPortReady,challenges:matching,gatewayService:service.metadata.name,clusterIP:service.spec.clusterIP,gatewayAddresses:(service.status?.loadBalancer?.ingress||[]).map(x=>x.ip||x.hostname),message};
+  const key=JSON.stringify(state);
+  if(key!==lastState||timing.now()-lastProgress>=timing.progressMs){
+   r.emit({type:'tls-progress',phase:'tenant-tls',hostname:c.tenantHost,routingMode:c.internalGatewayRouting?'internal':'public',elapsedSeconds:Math.floor((timing.now()-started)/1000),...state});
+   lastState=key;lastProgress=timing.now();
   }
-  await pause(3000,undefined,{signal:r.signal});
+  if(certificateReady&&listenerProgrammed&&httpsPortReady)return;
+  if(timing.now()>=deadline)fail('TENANT_TLS_NOT_READY','Tenant HTTPS is not ready: Certificate Ready='+certificateReady+', ListenerSet Programmed='+listenerProgrammed+', Service port 443='+httpsPortReady+'. '+message+' Current public gateway address: '+(state.gatewayAddresses.join(', ')||'pending')+'. Check public DNS A/AAAA records and port 80 against this gateway. UI installation was not started.');
+  await timing.sleep(Math.min(timing.pollMs,deadline-timing.now()),undefined,{signal:r.signal});
  }
 }
 const {spawnSync}=require('node:child_process');
@@ -121,6 +160,6 @@ async function main(){
  const did=await response.json();
  if(did.id!=='did:web:'+host)fail('HTTPS_CHECK','DID endpoint did not return the expected tenant DID.');
  console.log('Certificate ready, HTTPS listener programmed, port 443 present; public HTTPS DID verified with HTTP 200.');
- console.log('Install deployer 12.1.1, keep the existing node/kubeconfig, then repair-network and install-ui to persist the UI mapping in its Helm chart.');
+ console.log('Install deployer 12.1.2, keep the existing node/kubeconfig, then repair-network and install-ui to persist the UI mapping in its Helm chart.');
 }
 main().catch(e=>{console.error((e.code||'ERROR')+': '+e.message);process.exitCode=1;});

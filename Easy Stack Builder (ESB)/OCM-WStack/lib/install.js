@@ -90,7 +90,7 @@ async function ensureMarker(r,c) {
   if(marker) {
     if(marker.data?.instance!==c.instanceName || ![digest,c.legacyFingerprint].filter(Boolean).includes(marker.data?.fingerprint) || marker.data?.clusterUid!==c.clusterUid)fail('OWNERSHIP','This cluster has an ESB installation with different settings. Restore its original configuration; this release only supports fresh installs and exact-configuration resumes.');
     if(![lock.commit,...(lock.compatibleBootstrapCommits||[])].includes(marker.data?.upstreamCommit))fail('UPSTREAM_COMMIT','This installation uses a different bootstrap revision. A fresh cluster is required.');
-    if(marker.data.fingerprint!==digest||marker.data.upstreamCommit!==lock.commit)marker=await updateMarker(r,marker,{fingerprint:digest,upstreamCommit:lock.commit,migratedFrom:marker.data.upstreamCommit,packageVersion:'12.1.1'});
+    if(marker.data.fingerprint!==digest||marker.data.upstreamCommit!==lock.commit)marker=await updateMarker(r,marker,{fingerprint:digest,upstreamCommit:lock.commit,migratedFrom:marker.data.upstreamCommit,packageVersion:'12.1.2'});
     return marker;
   }
   const namespaces=await r.json('kubectl',['get','namespaces','-o','json']);
@@ -205,7 +205,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js'),ESB_OCM_PREREQUISITES:path.join(__dirname,'../scripts/ocm-prerequisites.js'),ESB_GATEWAY_CONFIG:path.join(__dirname,'../scripts/gateway-config.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
-    const gatewayValues=await privateFile(dir,'gateway-values.json',JSON.stringify({externalTrafficPolicy:c.externalTrafficPolicy,timeoutSeconds:c.timeoutSeconds,tenantHost:c.tenantHost,internalGatewayRouting:c.internalGatewayRouting}));
+    const gatewayValues=await privateFile(dir,'gateway-values.json',JSON.stringify({externalTrafficPolicy:c.externalTrafficPolicy,timeoutSeconds:c.timeoutSeconds,tenantHost:c.tenantHost,gatewayRouting:c.gatewayRouting,internalGatewayRouting:c.internalGatewayRouting}));
     r.env={...r.env,ESB_GATEWAY_VALUES:gatewayValues};
     const networkConfiguration=marker.data.bootstrapComplete==='true'?await gatewayConfig.internalValues(r,c,networkValues(c)):networkValues(c);
     const network=await privateFile(dir,'network-values.json',JSON.stringify(networkConfiguration));
