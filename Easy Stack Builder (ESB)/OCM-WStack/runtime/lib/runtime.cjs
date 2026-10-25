@@ -49,7 +49,7 @@ class Runtime {
    case 'saveConnections':return this.integrations.save(body);
    case 'me':return {subject:c.subject,username:c.username,tenant:c.tenant,account:c.account,group:c.group,permissions:c.permissions,expiresAt:c.expiresAt};
    case 'metrics':return {requests:Object.fromEntries(this.counts),natsConnected:this.events.connected,mongoReady:this.ready};
-   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'12.3.4',pcmConfigured:Boolean(this.c.pcm?.enabled),native:this.nativeState};
+   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'12.3.5',pcmConfigured:Boolean(this.c.pcm?.enabled),native:this.nativeState};
    case 'preferences':return await this.db.collection('ui_preferences').findOne(scope,{projection:{_id:0}})||{locale:'en',pageSize:25};
    case 'setPreferences':object(body,['locale','pageSize']);if(body.locale&&!['en','de','fr'].includes(body.locale))fail(400,'VALIDATION_ERROR');if(body.pageSize!==undefined&&![10,25,50,100].includes(body.pageSize))fail(400,'VALIDATION_ERROR');await this.db.collection('ui_preferences').updateOne(scope,{$set:{...body,updatedAt:new Date()}},{upsert:true});return body;
    case 'audit':return {items:await this.db.collection('audit_events').find({tenant:c.tenant},{projection:{_id:0}}).sort({timestamp:-1}).limit(100).toArray()};
@@ -66,7 +66,7 @@ class Runtime {
    case 'chain':return a.chain(c,body);
    case 'offers':return a.offers(c);
    case 'import':object(body,['offer','source']);return a.importOffer(c,body.offer);
-   case 'accept':return {...await a.accept(c,key,true,body),lifecycle:require('./lifecycle.cjs').awaiting('asynchronous_retrieval')};
+   case 'accept':{const result=await a.accept(c,key,true,body);return {...result,lifecycle:result.storageConfirmation==='confirmed'&&result.credentialId&&c.permissions.includes('credentials.read')?await require('./lifecycle.cjs').inspect(a,c,result.credentialId):require('./lifecycle.cjs').awaiting(result.storageConfirmation==='confirmed'?'lifecycle_readback':'asynchronous_retrieval')};}
    case 'reject':return a.accept(c,key,false,body);
    case 'types':return c.pcm?this.pcm.types(c):this.registry.list(c);
    case 'createType':return this.registry.change(c,null,body);

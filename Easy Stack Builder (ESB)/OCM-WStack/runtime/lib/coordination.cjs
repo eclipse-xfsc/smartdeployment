@@ -40,6 +40,9 @@ class Coordination {
    // Only explicitly selected metadata goes to Mongo. Never arbitrary upstream results.
    const safe={state:result.state||'succeeded'};
    for(const k of ['resourceId','credentialId','upstreamRequestId','overall','code'])if(typeof result[k]==='string')safe[k]=result[k].slice(0,512);
+   if(typeof result.accepted==='boolean')safe.accepted=result.accepted;
+   if(['confirmed','unconfirmed'].includes(result.storageConfirmation))safe.storageConfirmation=result.storageConfirmation;
+   if(Array.isArray(result.credentialIds)&&result.credentialIds.length<=32&&result.credentialIds.every(k=>typeof k==='string'&&k.length<=512))safe.credentialIds=result.credentialIds;
    await jobs.updateOne(query,{$set:{state:safe.state,result:safe,...(result.offer?{encryptedOffer:this.seal(result.offer)}:{}),...(result.invitation?{encryptedResult:this.seal({invitation:result.invitation})}:{}),updatedAt:new Date()}});
    await this.audit(c,operation,safe.state,job.requestId);
    return {...result,requestId:job.requestId};

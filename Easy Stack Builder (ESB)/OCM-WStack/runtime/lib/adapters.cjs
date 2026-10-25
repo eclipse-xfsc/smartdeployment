@@ -122,9 +122,9 @@ class Adapters {
  }
  async accept(c,key,accept,body){
   object(body,['txCode']);if(body.txCode!==undefined)string(body.txCode,1,128);
-  await this.call(c,'retrieval',this.offerPath(c,'clear')+'/'+id(key),'DELETE',{accept,holderKey:this.c.holderKey,holderNamespace:this.c.cryptoNamespace,holderGroup:this.c.cryptoGroup,...(body.txCode?{tx_code:body.txCode}:{})});
-  // A clearance response is not proof that asynchronous storage has completed.
-  return {state:'succeeded',upstreamRequestId:key,accepted:accept,storageConfirmation:'refresh-required'};
+  const response=await this.call(c,'retrieval',this.offerPath(c,'clear')+'/'+id(key),'DELETE',{accept,holderKey:this.c.holderKey,holderNamespace:this.c.cryptoNamespace,holderGroup:this.c.cryptoGroup,...(body.txCode?{tx_code:body.txCode}:{})});
+  if(!accept)return {state:'succeeded',upstreamRequestId:key,accepted:false};
+  return require('./accepted-storage.cjs').persist(this,c,key,response);
  }
  async relationship(c,key){
   const r=await this.call(c,'didcomm','/admin/connections/'+id(key));const m=r?.mediatee||r?.Mediatee||r;

@@ -16,7 +16,9 @@ function request(url,{method='GET',headers={},body,timeout=5000,maxBytes=2097152
      err.upstreamStatus=res.statusCode;
      // Only known, non-sensitive reasons. Never return arbitrary upstream bodies.
      const reasons={'Region Id Missing.':'STORAGE_REGION_MISSING','Country Id Missing.':'STORAGE_COUNTRY_MISSING','Tenant Id Missing.':'STORAGE_TENANT_MISSING','Account Id Missing.':'STORAGE_ACCOUNT_MISSING','Bad content type':'STORAGE_CONTENT_TYPE_INVALID','Body error':'STORAGE_QUERY_INVALID','Error during record get.':'STORAGE_READ_FAILED','Token Invalid.':'STORAGE_TOKEN_INVALID','tenant not found':'ISSUER_TENANT_NOT_REGISTERED'};
-     try{const b=JSON.parse(Buffer.concat(chunks).toString());err.reason=reasons[b.message||b.error];}catch{}
+     try{const b=JSON.parse(Buffer.concat(chunks).toString());const message=b.message||b.error;err.reason=reasons[message];
+      if(res.statusCode===400&&typeof message==='string'&&/credential\[\d+\]: wallet verification currently requires a compact JWT or SD-JWT credential$/.test(message)){err.reason=err.code='RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED';err.status=422;}
+     }catch{}
      return reject(err);
     }
     const raw=Buffer.concat(chunks).toString();if(!raw)return resolve(null);if(responseType==='text')return resolve(raw);

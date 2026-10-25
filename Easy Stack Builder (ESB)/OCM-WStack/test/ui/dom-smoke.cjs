@@ -5,7 +5,7 @@ const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
 const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
 const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.manage','roles.read','roles.manage','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
-async function boot(t,{failure=false,issuanceFailure=false}={}){
+async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false}={}){
  const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
  w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
@@ -34,7 +34,7 @@ async function boot(t,{failure=false,issuanceFailure=false}={}){
   else if(p==='/credentials/import')data={state:'succeeded',credentialId:'new',lifecycle:{state:'checked',persistence:'confirmed',credentialId:'new',options:[{action:'verify',available:true},{action:'revoke',available:false,reason:'STATUS_NOT_MANAGED_HERE'}]}};
   else if(p==='/offers')data={items:accepted?[]:[{requestId:'offer-1',issuer:'https://issuer.example',credentialConfigurationIds:['Participant'],state:'pending'}]};
   else if(p==='/offers/import')data={state:'succeeded',upstreamRequestId:'offer-1'};
-  else if(p.endsWith('/accept')){accepted=true;data={state:'succeeded',accepted:true,upstreamRequestId:'offer-1'};}
+  else if(p.endsWith('/accept')){if(acceptanceFailure)return {ok:false,status:422,json:async()=>({error:{code:'RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED',upstream:'retrieval',upstreamStatus:400,reason:'RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED'},requestId:'acceptance-1'})};accepted=true;data={state:'succeeded',accepted:true,upstreamRequestId:'offer-1',...(acceptedStorage?{credentialId:'stored-1',storageConfirmation:'confirmed',lifecycle:{state:'checked',persistence:'confirmed',options:[]}}:{})};}
   else if(p==='/keys')data={items:[{id:'key-1',did:'did:jwk:alice'}]};
   return {ok:true,status:200,json:async()=>({data})};
  };
@@ -50,6 +50,15 @@ test('real Vue DOM: details, verification, unsupported revocation and deletion',
 test('real Vue DOM: offer import is distinct from asynchronous acceptance',async t=>{
  const b=await boot(t);await b.click('Receive credential');const a=b.w.document.querySelector('textarea');a.value='openid-credential-offer://?credential_offer=test';a.dispatchEvent(new b.w.Event('input',{bubbles:true}));
  await b.click('Import offer');assert.match(b.text(),/offer-1/);assert.doesNotMatch(b.text(),/Retrieval accepted the request/);await b.click('Accept');assert.match(b.text(),/does not confirm persistence/);
+});
+test('real Vue DOM: confirmed acceptance reports exact Storage read-back rather than pending persistence',async t=>{
+ const b=await boot(t,{acceptedStorage:true});await b.click('Receive credential');await b.click('Accept');
+ assert.match(b.text(),/Accepted and saved to Storage/);assert.match(b.text(),/exact credential was confirmed/);assert.doesNotMatch(b.text(),/does not confirm persistence/);
+});
+test('real Vue DOM: DeveloperCredential failure explains native format support and preserves request evidence',async t=>{
+ const b=await boot(t,{acceptanceFailure:true});await b.click('Receive credential');await b.click('Accept');
+ const alert=b.w.document.querySelector('[role="alert"]').textContent;
+ assert.match(alert,/DeveloperCredential/);assert.match(alert,/verifier supports JWT and SD-JWT/);assert.match(alert,/retrieval.*HTTP 400/);assert.match(alert,/acceptance-1/);assert.doesNotMatch(alert,/UPSTREAM_REJECTED/);
 });
 test('real Vue DOM: PCM requires a distinct login and forwards only its own bearer header',async t=>{
  const b=await boot(t);await b.click('Personal OCM context');assert.equal(b.calls.filter(x=>x.url.includes('/pcm/')).length,0);await b.click('Connect PCM Cloud');assert.ok(b.calls.some(x=>x.url.includes('/pcm/credentials')&&x.o.headers['X-PCM-Authorization']==='Bearer pcm-token'));assert.match(b.text(),/alice/);await b.click('Disconnect');assert.doesNotMatch(b.text(),/Participant/);

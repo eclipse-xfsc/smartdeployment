@@ -278,7 +278,11 @@ export const locales = {
     "INVALID_JSON_BODY": "The request body must be a valid JSON object.",
     "JSON_CONTENT_TYPE_REQUIRED": "This request requires JSON.",
     "REQUEST_BODY_UNAVAILABLE": "The request body was consumed before reaching the OCM context API.",
-    "REQUEST_TOO_LARGE": "The request exceeds the 1 MiB limit."
+    "REQUEST_TOO_LARGE": "The request exceeds the 1 MiB limit.",
+    "acceptedStored": "Accepted and saved to Storage. The exact credential was confirmed by reading it back.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval cannot accept this credential format. Its current verifier supports JWT and SD-JWT; DeveloperCredential is issued as a JSON credential. The official Retrieval service needs support for this format.",
+    "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval accepted the credential, but Storage persistence could not be confirmed. Do not accept the offer again.",
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval accepted the offer without returning a usable credential. Storage persistence is unconfirmed; do not accept again."
   },
   "de": {
     "copyInvitation": "Einladungs-URL kopieren",
@@ -556,7 +560,11 @@ export const locales = {
     "temporaryPasswordHelp": "Neue Benutzer müssen ihr temporäres Passwort bei der ersten Anmeldung ändern. Es wird keine E-Mail versendet.",
     "API_HTTP_ERROR": "Der Server hat einen HTTP-Fehler statt einer gültigen API-Antwort zurückgegeben.",
     "API_INVALID_RESPONSE": "Die API-Antwort des Servers ist ungültig.",
-    "INVALID_JSON_BODY": "Die Anfrage muss ein gültiges JSON-Objekt enthalten."
+    "INVALID_JSON_BODY": "Die Anfrage muss ein gültiges JSON-Objekt enthalten.",
+    "acceptedStored": "Angenommen und in Storage gespeichert. Der genaue Nachweis wurde durch erneutes Lesen bestätigt.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval unterstützt dieses Nachweisformat nicht. Die Prüfung akzeptiert derzeit JWT und SD-JWT; DeveloperCredential wird als JSON-Nachweis ausgestellt. Der offizielle Retrieval-Dienst benötigt Unterstützung für dieses Format.",
+    "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval hat den Nachweis angenommen, aber die Speicherung konnte nicht bestätigt werden. Nehmen Sie das Angebot nicht erneut an.",
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval hat das Angebot ohne verwendbaren Nachweis angenommen. Die Speicherung ist unbestätigt; nicht erneut annehmen."
   },
   "fr": {
     "copyInvitation": "Copier le lien d’invitation",
@@ -834,6 +842,10 @@ export const locales = {
     "temporaryPasswordHelp": "Les nouveaux utilisateurs doivent changer leur mot de passe à la première connexion. Aucun e-mail n’est envoyé.",
     "API_HTTP_ERROR": "Le serveur a renvoyé une erreur HTTP au lieu d’une réponse API valide.",
     "API_INVALID_RESPONSE": "La réponse API du serveur est invalide.",
-    "INVALID_JSON_BODY": "La requête doit contenir un objet JSON valide."
+    "INVALID_JSON_BODY": "La requête doit contenir un objet JSON valide.",
+    "acceptedStored": "Accepté et enregistré dans Storage. Le justificatif exact a été confirmé par une nouvelle lecture.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval ne prend pas en charge ce format. Son vérificateur accepte actuellement JWT et SD-JWT ; DeveloperCredential est émis en JSON. Le service Retrieval officiel doit prendre en charge ce format.",
+    "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval a accepté le justificatif, mais son stockage n’a pas été confirmé. N’acceptez pas à nouveau l’offre.",
+    "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval a accepté l’offre sans renvoyer de justificatif utilisable. Le stockage reste non confirmé ; ne l’acceptez pas à nouveau."
   }
 };

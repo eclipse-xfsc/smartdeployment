@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.4
+# OCM W-Stack ESB 12.3.5
 
-This package implements the approved uploaded-certificate deployment and OCM-CR OCM W-Stack UI, retaining the 11.1.0 design. Version 12.3.4 repairs the Cassandra probe restart loop and Verification's malformed registry reference, and aligns credential-list requests with Storage 1.3.0. Argo CD continuously follows deployment main. The local checks pass; full live credential lifecycle acceptance remains required.
+This package retains the approved uploaded-certificate deployment and 11.1.0 OCM context design. Version 12.3.5 corrects the acceptance-to-Storage handoff: credentials returned after native Retrieval validation are saved through the full native geographic Storage API and checked by exact read-back. DeveloperCredential is rejected by the current official Retrieval verifier; the OCM context now reports that specific limitation. Argo CD continues following deployment main; native service images are unchanged.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.4.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.5.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.4.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.5.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.4, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. Cassandra probe protection is installed before fresh Storage bootstrap and reconciles the existing StatefulSet on upgrades. Verification gets a valid anonymous registry reference; malformed existing entries are removed automatically without deleting valid registry references. Storage lists every format with the documented empty POST payload and explicit application/json. Automatic diagnostics now exercise the installed OCM context adapter for any failed Storage dependency. No additional configuration or cleanup is required. Previous resolver, Retrieval migration, TLS, DNS and OCM context changes are retained. See docs/REPAIR-12.3.4.md and VALIDATION.md.
+Install 12.3.5, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. The deployed OCM context now preserves the native acceptance response and saves each returned credential through Storage’s existing PUT API before confirming exact read-back. Existing records are reused when their payload matches. No new configuration fields, service fork, database rewrite or cleanup is required. Previous startup, TLS, DNS and UI repairs are retained. See docs/REPAIR-12.3.5.md and VALIDATION.md. This changes future acceptances; previously accepted credentials hidden or missing from Storage are not automatically recovered. Do not accept those offers again.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
