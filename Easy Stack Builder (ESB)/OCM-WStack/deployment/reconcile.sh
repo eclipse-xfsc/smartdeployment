@@ -22,7 +22,7 @@ guard_error() {
 guard_filter() {
     local expression=$1
     shift
-    jq -L "$GUARD_ROOT" "include \"values\"; include \"contracts\"; $expression" "$@"
+    jq -L "$GUARD_ROOT" "include \"filters\"; $expression" "$@"
 }
 
 api_path() {

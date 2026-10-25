@@ -17,7 +17,7 @@ test('three upstream server failures open the circuit',async t=>{
 });
 test('missing issuer tenant is registered once, waits for metadata, and recovers after restart',async()=>{
  let tenant=null,writes=0;
- const b=new IssuerBootstrap({tenant:'tenant_space',publicOrigin:'https://cloud-wallet.example'},{call:async(name,p,opt)=>{assert.equal(p,'/internal/tenants/tenant_space');if(opt?.method==='PUT'){writes++;tenant=opt.body;return tenant;}if(!tenant)throw Object.assign(Error(),{upstreamStatus:404});return tenant;}});
+ const b=new IssuerBootstrap({tenant:'tenant_space',publicOrigin:'https://cloud-ocm.example'},{call:async(name,p,opt)=>{assert.equal(p,'/internal/tenants/tenant_space');if(opt?.method==='PUT'){writes++;tenant=opt.body;return tenant;}if(!tenant)throw Object.assign(Error(),{upstreamStatus:404});return tenant;}});
  await assert.rejects(b.ensure(),{code:'ISSUER_INITIALIZING'});assert.equal(writes,1);
  await assert.rejects(b.ensure(),{code:'ISSUER_INITIALIZING'});assert.equal(writes,1);
  b.readyAfter=0;await b.ensure();assert.equal(b.state,'registered');tenant=null;await assert.rejects(b.ensure(),{code:'ISSUER_INITIALIZING'});assert.equal(writes,2);

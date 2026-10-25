@@ -3,9 +3,9 @@ import { h } from 'vue';
 export default {
   props:{controller:{type:Object,required:true}},
   setup(props){
-    const {s,t,walletControls,input,select,act,load,table,pill,detail,button}=props.controller;
+    const {s,t,input,select,act,load,table,pill,detail,button}=props.controller;
     return ()=>{
-return [walletControls(),
+return [
   s.counts&&s.loaded?h('div',{class:'stats'},[['total',s.counts.total],['active',s.counts.active],['expired',s.counts.expired],['revoked',s.counts.revoked],['not_checked',s.counts.notChecked]].map(([k,n])=>h('div',{class:'stat-card'},[h('span',t(k)),h('strong',String(n))]))):null,
   h('form',{class:'filter-bar',onSubmit:e=>{e.preventDefault();s.cursor=null;act(()=>load());}},[
    input('search',s.query,v=>s.query=v),select('sort',s.sort,[['issuedAt','issued'],['expiresAt','expires'],['id','credentialId']],v=>s.sort=v),

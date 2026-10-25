@@ -7,12 +7,19 @@ const { spawnSync, spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
 const ROOT = path.resolve(__dirname, '../..');
 
-function jq(module, expression, input, variables = {}) {
+function jq(expression, input, variables = {}) {
   const args = ['-L', path.join(ROOT, 'deployment')];
   for (const [key, value] of Object.entries(variables)) args.push('--argjson', key, JSON.stringify(value));
-  args.push(`include "${module}"; ${expression}`);
+  args.push(`include "filters"; ${expression}`);
   const result = spawnSync('jq', args, { input: JSON.stringify(input), encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr);
+  if (result.error || result.status !== 0) {
+    const details = [
+      `jq filters: exit=${result.status}, signal=${result.signal || 'none'}`,
+      result.error && `${result.error.code}: ${result.error.message}`,
+      result.stderr && result.stderr.trim(),
+    ].filter(Boolean).join('\n');
+    throw new Error(details, { cause: result.error });
+  }
   assert.ok(result.stdout.trim(), 'The transformation must return a value');
   return JSON.parse(result.stdout);
 }

@@ -30,13 +30,13 @@ test('tenant routing preserves native routes and exposes only the DIDComm messag
     { name: 'didcomm', path: '/', backend: { name: 'didcomm-connector', port: 9090 } },
   ] };
   const c = fixture.config;
-  const values = jq('values', 'tenant_values($defaults)', c, { defaults });
+  const values = jq('tenant_values($defaults)', c, { defaults });
   assert.deepEqual(values.routes[0], defaults.routes[0]);
   assert.equal(values.routes[1].enabled, false);
   assert.deepEqual(values.routes[2], { name: 'didcomm-message', method: 'POST', path: '/api/didcomm/message/receive', pathType: 'Exact', targetPath: '/message/receive', backend: { name: 'didcomm-connector', port: 9090 } });
   assert.equal(values.openbao.transit.mountPath, 'ocm-wstack/' + c.tenantId);
   assert.equal(values.certificate.enabled, false);
-  assert.equal(jq('values', 'tenant_values($defaults)', { ...c, runtimeServices: { didcomm: 'http://external.example' } }, { defaults }).routes.length, 2);
+  assert.equal(jq('tenant_values($defaults)', { ...c, runtimeServices: { didcomm: 'http://external.example' } }, { defaults }).routes.length, 2);
 });
 
 test('chart planning rejects unexpected generators before chart rendering or installation', t => {

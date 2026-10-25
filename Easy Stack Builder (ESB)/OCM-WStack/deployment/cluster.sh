@@ -640,7 +640,7 @@ validate_chart_manifests() {
         *) return 0 ;;
     esac
     rendered_documents "$directory" "$WORKDIR/manifests.json"
-    jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "contracts"; validate_chart($chart)' \
+    jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
         "$WORKDIR/manifests.json" >/dev/null || { fail CHART_CONTRACT "Rendered contract changed for $chart."; return 1; }
     if [[ $release == observability ]]; then
         jq '[.[] | select((.kind=="ConfigMap" or .kind=="Secret") and .metadata.labels.grafana_datasource=="1") |
@@ -648,7 +648,7 @@ validate_chart_manifests() {
                         (.stringData // {} | to_entries[])) | select(.key|test("\\.ya?ml$")) |
             {key:($doc.metadata.name+"/"+.key),value:.value}] | from_entries' "$WORKDIR/manifests.json" >"$WORKDIR/datasource-yaml.json"
         read_yaml "$WORKDIR/datasource-yaml.json" "$WORKDIR/datasources.json"
-        jq -L "$DEPLOYMENT" -e 'include "contracts"; validate_datasources' "$WORKDIR/datasources.json" >/dev/null ||
+        jq -L "$DEPLOYMENT" -e 'include "filters"; validate_datasources' "$WORKDIR/datasources.json" >/dev/null ||
             fail GRAFANA_DATASOURCES 'Grafana datasource names, UIDs or defaults are inconsistent.'
     fi
 }

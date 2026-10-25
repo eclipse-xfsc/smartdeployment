@@ -31,10 +31,10 @@ test('future validity and revoked/suspended precedence remain distinct from cryp
 });
 
 test('expired credential regression: list counts expired 1 and active 0 with native false/false flags', async () => {
-  const config = { publicOrigin: 'https://wallet.example', issuerDids: ['did:web:wallet.example'] };
+  const config = { publicOrigin: 'https://ocm.example', issuerDids: ['did:web:ocm.example'] };
   const raw = { ...vc, issuer: config.issuerDids[0], expirationDate: '2000-01-01T00:00:00Z',
     credentialStatus: { type: 'StatusList2021Entry', statusPurpose: 'revocation',
-      statusListCredential: 'https://wallet.example/api/status/1', statusListIndex: '0' } };
+      statusListCredential: 'https://ocm.example/api/status/1', statusListIndex: '0' } };
   const adapter = new Adapters(config, { call: async () => ({ credentials: { expired: raw } }) });
   adapter.statusTransport = { checkStatus: async () => ({ revocated: false, suspended: false }) };
   const result = await adapter.list(scope, { status: 'expired' });

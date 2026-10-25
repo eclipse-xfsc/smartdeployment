@@ -8,7 +8,7 @@ test('native verification HTTP contract preserves bytes, scoped Storage and unsc
  const server=http.createServer(async(req,res)=>{
   seen.push(req.url);res.setHeader('content-type','application/json');
   if(req.url.startsWith('/v1/tenants/')){
-   assert.equal(req.method,'POST');assert.equal(req.headers['x-tenantid'],'tenant');assert.equal(req.headers['x-groupid'],'wallet');
+   assert.equal(req.method,'POST');assert.equal(req.headers['x-tenantid'],'tenant');assert.equal(req.headers['x-groupid'],'ocm');
    return res.end(JSON.stringify({credentials:records}));
   }
   assert.equal(req.url,'/v1/credential/verify');assert.equal(req.method,'POST');assert.equal(req.headers.authorization,'Bearer token');
@@ -21,7 +21,7 @@ test('native verification HTTP contract preserves bytes, scoped Storage and unsc
   res.end(JSON.stringify(malformed?{valid:'true'}:{valid}));
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
- const origin='http://127.0.0.1:'+server.address().port,c={tenant:'tenant',group:'wallet',account:'wallet',token:'token'};
+ const origin='http://127.0.0.1:'+server.address().port,c={tenant:'tenant',group:'ocm',account:'ocm',token:'token'};
  const a=new Adapters({storageRegion:'EU',storageCountry:'DE',cryptoNamespace:'ocm-wstack',cryptoGroup:'scope',publicOrigin:'https://example.com'},new Client({storage:origin,signer:origin}));
  for(key of ['ldp','jwt'])for(valid of [true,false]){
   const r=await a.verify(c,key);assert.equal(r.nativeValid,valid);assert.equal(r.overall,valid?'valid':'invalid');

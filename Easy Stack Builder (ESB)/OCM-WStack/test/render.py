@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
         defaults=yaml.safe_load((envoy/'values.yaml').read_text())
         c['upstreamAnnotationKeys']=list(defaults['envoyProxy']['service']['annotations'])
         c.update(lbNetworkZone='', lbType='', lbPrivate=False, providerLocations=[], providerZones=[], actualDns='disabled')
-        program='include \"values\"; .resolvedLbAnnotations=provider_annotations | network_values($lock[0])'
+        program='include \"filters\"; .resolvedLbAnnotations=provider_annotations | network_values($lock[0])'
         settings=json.loads(subprocess.check_output(
             ['jq','-L',str(root/'deployment'),'--slurpfile','lock',str(root/'upstream-lock.json'),program],
             input=json.dumps(c),text=True))

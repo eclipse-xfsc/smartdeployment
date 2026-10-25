@@ -7,7 +7,7 @@ const { LocalAuth, COOKIE_NAME, SESSION_SECONDS, digest, password } = require('.
 const { LocalRoles } = require('../../runtime/lib/local-roles.cjs');
 const { Runtime, routes } = require('../../runtime/lib/runtime.cjs');
 const { memoryDb } = require('../helpers/memory-db.cjs');
-const config = { publicOrigin: 'https://wallet.example', tenant: 'tenant', account: 'org', group: 'org',
+const config = { publicOrigin: 'https://ocm.example', tenant: 'tenant', account: 'org', group: 'org',
   uiAdminUsername: 'admin', uiAdminEmail: '', offerKey: 'ab'.repeat(32), nativeToken: 'separate-native-jwt' };
 let bootstrapHash;
 const initialPassword = 'initial-password-123';

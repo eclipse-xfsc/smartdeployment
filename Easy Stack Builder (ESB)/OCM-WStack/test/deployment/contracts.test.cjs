@@ -4,20 +4,21 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { jq, workspace, bash } = require('./helpers.cjs');
+const { ROOT, jq, workspace, bash } = require('./helpers.cjs');
+const { spawnSync } = require('node:child_process');
 const fixture = require('./fixtures/reconciler.json');
 const copy = () => structuredClone(fixture);
 
 function redis(f) {
-  return jq('contracts', 'redis_contract($claims;$provider;$secrets;$admin;$external)', f.deployments[0], {
+  return jq('redis_contract($claims;$provider;$secrets;$admin;$external)', f.deployments[0], {
     claims: f.claims, provider: f.provider, secrets: f.secrets, admin: f.admin, external: f.externalSecrets,
   });
 }
 function listeners(f) {
-  return jq('contracts', 'service_listeners($pods;$replicasets;$connections)', f.deployments[0], f);
+  return jq('service_listeners($pods;$replicasets;$connections)', f.deployments[0], f);
 }
 function verification(f) {
-  return jq('contracts', 'verification_nats_ready($pods;$replicasets)', f.deployments[2], f);
+  return jq('verification_nats_ready($pods;$replicasets)', f.deployments[2], f);
 }
 
 test('pending Redis claims retain the ESO account and exact ACL scope', () => {
@@ -62,7 +63,7 @@ test('verification checks exact injected values on the deployment and current po
 test('credential checksums track referenced bytes, init containers and volumes', t => {
   const f = copy();
   const digest = () => {
-    const references = jq('contracts', 'credential_references($secrets)', f.deployments[0], { secrets: f.secrets });
+    const references = jq('credential_references($secrets)', f.deployments[0], { secrets: f.secrets });
     return crypto.createHash('sha256').update(JSON.stringify(references)).digest('hex');
   };
   const first = digest();
@@ -90,7 +91,7 @@ function apiFixture() {
   };
 }
 function routes(f) {
-  return jq('contracts', 'api_backends($slices;$endpoints) as $backends | api_egress($backends)', f.service, f);
+  return jq('api_backends($slices;$endpoints) as $backends | api_egress($backends)', f.service, f);
 }
 test('API egress selects exact Service and ready backend IP/port pairs', () => {
   const f = apiFixture();
@@ -99,14 +100,70 @@ test('API egress selects exact Service and ready backend IP/port pairs', () => {
   assert.deepEqual(routes(f).map(x => [x.ports[0].port, x.to.map(p => p.ipBlock.cidr)]), [[443, ['100.64.0.1/32']], [15370, ['213.165.72.144/32']]]);
 });
 test('API egress rejects invalid IPs, families, ports and absent backends', () => {
-  for (const mutate of [
-    f => { f.service.spec.clusterIP = '999.1.1.1'; },
-    f => { f.service.spec.ports[0].port = 0; },
-    f => { f.service.metadata.namespace = 'foreign'; },
-    f => { f.slices.items[0].ports[0].port = 70000; },
-    f => { f.slices.items[0].endpoints[0].addresses = ['2001:db8::1']; },
-    f => { f.slices.items = []; f.endpoints = null; },
-  ]) { const f = apiFixture(); mutate(f); assert.throws(() => routes(f)); }
+  for (const [mutate, code] of [
+    [f => { f.service.spec.clusterIP = '999.1.1.1'; }, 'GUARD_API_SERVICE'],
+    [f => { f.service.spec.ports[0].port = 0; }, 'GUARD_API_SERVICE'],
+    [f => { f.service.metadata.namespace = 'foreign'; }, 'GUARD_API_SERVICE'],
+    [f => { f.slices.items[0].ports[0].port = 70000; }, 'GUARD_API_ENDPOINTS'],
+    [f => { f.slices.items[0].endpoints[0].addresses = ['2001:db8::1']; }, 'GUARD_API_ENDPOINTS'],
+    [f => { f.slices.items = []; f.endpoints = null; }, 'GUARD_API_ENDPOINTS_PENDING'],
+  ]) {
+    const f = apiFixture(); mutate(f);
+    assert.throws(() => routes(f), error => {
+      assert.match(error.message, /exit=5, signal=none/);
+      assert.match(error.message, new RegExp(code + '$'));
+      return true;
+    });
+  }
+});
+
+test('dual-stack API egress retains exact address and port pairs', () => {
+  const f = apiFixture();
+  f.service.spec.clusterIPs.push('fd00::1');
+  f.slices.items.push({ ...structuredClone(f.slices.items[0]), addressType: 'IPv6',
+    ports: [{ name: 'https', port: 6443 }],
+    endpoints: [{ addresses: ['2001:db8::10'], conditions: { ready: true } },
+      { addresses: ['2001:db8::20'], conditions: { ready: true, terminating: true } }] });
+  assert.deepEqual(routes(f).map(x => [x.ports[0].port, x.to.map(p => p.ipBlock.cidr)]), [
+    [443, ['100.64.0.1/32', 'fd00::1/128']],
+    [6443, ['2001:db8::10/128']],
+    [16443, ['192.0.2.10/32']],
+  ]);
+});
+
+test('installed reconciler receives the executable filters and discovered API egress', t => {
+  const f = apiFixture();
+  const dir = workspace(t, { 'config.json': { runtimeImage: 'example.invalid/ocm:12.4.0' },
+    'service.json': f.service, 'slices.json': f.slices });
+  const result = bash(dir, `
+    kube_json() {
+      case "$*" in
+        *endpointslices*) cp "$WORKDIR/slices.json" "$1" ;;
+        *service*) cp "$WORKDIR/service.json" "$1" ;;
+        *) return 1 ;;
+      esac
+    }
+    get_optional() { printf 'null\\n' >"$1"; }
+    apply_json() { cp "$1" "$WORKDIR/installed.json"; }
+    install_reconciler
+  `);
+  assert.equal(result.status, 0, result.stderr);
+  const { items } = JSON.parse(fs.readFileSync(path.join(dir, 'installed.json')));
+  const data = items.find(item => item.kind === 'ConfigMap').data;
+  assert.deepEqual(Object.keys(data).sort(), ['filters.jq', 'reconcile.sh']);
+  const mounted = path.join(dir, 'mounted');
+  fs.mkdirSync(mounted);
+  for (const [name, content] of Object.entries(data)) {
+    assert.equal(content, fs.readFileSync(path.join(ROOT, 'deployment', name), 'utf8'));
+    fs.writeFileSync(path.join(mounted, name), content);
+  }
+  const checksum = crypto.createHash('sha256').update(data['reconcile.sh']).update(data['filters.jq']).digest('hex');
+  assert.equal(items.find(item => item.kind === 'Deployment').spec.template.metadata.annotations['esb.xfsc.io/source'], checksum);
+  const egress = items.find(item => item.kind === 'NetworkPolicy').spec.egress;
+  for (const rule of routes(f)) assert.ok(egress.some(item => JSON.stringify(item) === JSON.stringify(rule)));
+  const run = spawnSync('bash', ['-c', 'source "$1/reconcile.sh"; guard_filter \'ip_family\' <<<\'"2001:db8::1"\'', 'bash', mounted], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(run.stdout), 6);
 });
 
 test('runtime preflight retains existing secrets and refuses a different tenant', t => {

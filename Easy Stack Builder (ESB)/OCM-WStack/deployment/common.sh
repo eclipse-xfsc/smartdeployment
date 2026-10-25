@@ -47,7 +47,7 @@ update_config() {
 json_program() {
     local expression=$1
     shift
-    jq -L "$DEPLOYMENT" "include \"values\"; $expression" "$@"
+    jq -L "$DEPLOYMENT" "include \"filters\"; $expression" "$@"
 }
 
 safe_error() {

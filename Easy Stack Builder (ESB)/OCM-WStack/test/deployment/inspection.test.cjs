@@ -24,7 +24,7 @@ function healthy() {
 }
 
 function inspect(input) {
-  return jq('inspection', 'inspect_report(.c;.lock;.apps;.pods;.pvcs;.jobs;.gateway;.cert;.proxy;.policy;.services;.operational)', input);
+  return jq('inspect_report(.c;.lock;.apps;.pods;.pvcs;.jobs;.gateway;.cert;.proxy;.policy;.services;.operational)', input);
 }
 
 test('cluster readiness follows the ORCE and MongoDB deployment', () => {

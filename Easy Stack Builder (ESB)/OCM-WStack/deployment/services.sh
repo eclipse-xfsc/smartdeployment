@@ -128,25 +128,24 @@ discover_api_egress() {
     kube_json "$WORKDIR/api-service.json" -n default get service kubernetes -o json
     kube_json "$WORKDIR/api-slices.json" -n default get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kubernetes -o json
     printf 'null\n' >"$WORKDIR/api-endpoints.json"
-    jq -L "$DEPLOYMENT" --slurpfile slices "$WORKDIR/api-slices.json" 'include "contracts"; api_backends($slices[0];null)' \
+    jq -L "$DEPLOYMENT" --slurpfile slices "$WORKDIR/api-slices.json" 'include "filters"; api_backends($slices[0];null)' \
         "$WORKDIR/api-service.json" >"$WORKDIR/api-backends.json"
     if jq -e 'length==0' "$WORKDIR/api-backends.json" >/dev/null; then
         kube_json "$WORKDIR/api-endpoints.json" -n default get endpoints kubernetes -o json
         jq -L "$DEPLOYMENT" --slurpfile slices "$WORKDIR/api-slices.json" --slurpfile endpoints "$WORKDIR/api-endpoints.json" \
-            'include "contracts"; api_backends($slices[0];$endpoints[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-backends.json"
+            'include "filters"; api_backends($slices[0];$endpoints[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-backends.json"
     fi
     jq -L "$DEPLOYMENT" --slurpfile backends "$WORKDIR/api-backends.json" \
-        'include "contracts"; api_egress($backends[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-egress.json"
+        'include "filters"; api_egress($backends[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-egress.json"
 }
 
 install_reconciler() {
     discover_api_egress
     local checksum
-    checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$DEPLOYMENT/values.jq" "$DEPLOYMENT/contracts.jq" | sha256sum | cut -d ' ' -f 1)
+    checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$DEPLOYMENT/filters.jq" | sha256sum | cut -d ' ' -f 1)
     jq --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \
-        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile values "$DEPLOYMENT/values.jq" \
-        --rawfile contracts "$DEPLOYMENT/contracts.jq" --slurpfile egress "$WORKDIR/api-egress.json" '
-        .items |= map(if .kind=="ConfigMap" then .data={"reconcile.sh":$script,"values.jq":$values,"contracts.jq":$contracts}
+        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile filters "$DEPLOYMENT/filters.jq" --slurpfile egress "$WORKDIR/api-egress.json" '
+        .items |= map(if .kind=="ConfigMap" then .data={"reconcile.sh":$script,"filters.jq":$filters}
         elif .kind=="Deployment" then .spec.template.spec.containers[0].image=$image |
             .spec.template.metadata.annotations["esb.xfsc.io/source"]=$checksum
         elif .kind=="NetworkPolicy" then .spec.egress=(.spec.egress[0:1]+$egress[0]+.spec.egress[1:]) else . end)' \
@@ -176,7 +175,7 @@ guard_status() {
     kube_json "$WORKDIR/guard-replicasets.json" -n ocm-wstack get replicasets -o json
     jq -L "$DEPLOYMENT" --slurpfile deployments "$WORKDIR/guard-deployments.json" \
         --slurpfile pods "$WORKDIR/guard-pods.json" --slurpfile replicasets "$WORKDIR/guard-replicasets.json" --argjson now "$(date +%s)" '
-        include "contracts"; validate_guard_status($deployments[0].items;$pods[0].items;$replicasets[0].items;$now)' \
+        include "filters"; validate_guard_status($deployments[0].items;$pods[0].items;$replicasets[0].items;$now)' \
         "$WORKDIR/guard-response.json" >"$WORKDIR/guard-status.json"
 }
 
@@ -192,7 +191,7 @@ save_recovery_evidence() {
 
 retrieval_recovery_contract() {
     jq -L "$DEPLOYMENT" --slurpfile pods "$WORKDIR/retrieval-pods.json" \
-        'include "contracts"; retrieval_recovery_contract($pods[0])' "$WORKDIR/retrieval-deployment.json"
+        'include "filters"; retrieval_recovery_contract($pods[0])' "$WORKDIR/retrieval-deployment.json"
 }
 
 repair_retrieval() {
@@ -260,7 +259,7 @@ native_startup() {
             sleep 1
             continue
         fi
-        jq -L "$DEPLOYMENT" --args 'include "values"; [.items[]|select(.metadata.name as $name | $ARGS.positional|index($name)!=null)|
+        jq -L "$DEPLOYMENT" --args 'include "filters"; [.items[]|select(.metadata.name as $name | $ARGS.positional|index($name)!=null)|
             {name:.metadata.name,ready:ready_workload,available:(.status.availableReplicas // 0)}]' \
             "${targets[@]}" <"$WORKDIR/startup-deployments.json" >"$WORKDIR/startup-status.json"
         if jq -e --argjson count "${#targets[@]}" 'length==$count and all(.[];.ready)' "$WORKDIR/startup-status.json" >/dev/null; then

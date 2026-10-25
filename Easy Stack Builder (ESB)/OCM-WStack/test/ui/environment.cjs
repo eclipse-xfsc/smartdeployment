@@ -9,6 +9,6 @@ async function environment(url){
  Object.defineProperty(dom.window.HTMLSelectElement.prototype,'value',{configurable:true,get(){return [...this.options].find(x=>x.selected)?.value||this.options[0]?.value||'';},set(v){for(const o of this.options)o.selected=o.value===String(v);}});
  const errors=[];
  const w={document:dom.document,location:new URL(url),Element:dom.window.Element,SVGElement:dom.window.SVGElement,HTMLElement:dom.window.HTMLElement,Event:dom.window.Event,AbortController,URL,URLSearchParams,TextEncoder,Blob,crypto:require('node:crypto').webcrypto,queueMicrotask,setTimeout,clearTimeout,setInterval,clearInterval,navigator:{},console:{...console,error:e=>errors.push(String(e))}};
- w.window=w;w.close=()=>{};w.eval=source=>vm.runInContext(source,context,{filename:'wallet-ui.js'});const context=vm.createContext(w);return {window:w,errors};
+ w.window=w;w.close=()=>{};w.eval=source=>vm.runInContext(source,context,{filename:'ocm-ui.js'});const context=vm.createContext(w);return {window:w,errors};
 }
 module.exports={environment};

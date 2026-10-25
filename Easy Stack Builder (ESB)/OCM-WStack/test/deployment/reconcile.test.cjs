@@ -98,7 +98,7 @@ test('missing Well-Known listeners require reachable NATS before a bounded resta
 });
 test('stale reports, changed pods, or incomplete listener claims cannot satisfy inspection', t => {
   const result = run(t); assert.equal(result.status, 0, result.stderr);
-  const verify = (report, f) => jq('contracts', 'validate_guard_status($deployments;$pods;$replicasets;$now)', report,
+  const verify = (report, f) => jq('validate_guard_status($deployments;$pods;$replicasets;$now)', report,
     { ...f, now: Math.floor(Date.now() / 1000) });
   assert.equal(verify(result.report, fixture).ready, true);
   for (const mutate of [

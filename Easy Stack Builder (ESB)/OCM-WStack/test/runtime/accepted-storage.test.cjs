@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),http=requir
 const {Adapters}=require('../../runtime/lib/adapters.cjs');
 const {Client}=require('../../runtime/lib/http.cjs');
 const {storageId}=require('../../runtime/lib/accepted-storage.cjs');
-const config={publicOrigin:'https://wallet.example',storageRegion:'EU',storageCountry:'DE',holderKey:'eckey',cryptoNamespace:'ocm-wstack',cryptoGroup:'test-tenant'};
+const config={publicOrigin:'https://ocm.example',storageRegion:'EU',storageCountry:'DE',holderKey:'eckey',cryptoNamespace:'ocm-wstack',cryptoGroup:'test-tenant'};
 const context={tenant:'test-tenant',account:'ocm-wstack',group:'ocm-wstack',token:'user-token'};
 const storagePath='/v1/tenants/test-tenant/storage/EU/DE/ocm-wstack/credentials';
 const jwt='eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJpc3N1ZXIifQ.signature~disclosure~';

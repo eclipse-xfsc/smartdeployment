@@ -13,22 +13,30 @@ function walk(directory) {
   }
 }
 walk(root);
+function commandPassed(result, label) {
+  if (!result.error && result.status === 0) return true;
+  console.error(`${label}: exit=${result.status}, signal=${result.signal || 'none'}`);
+  if (result.error) console.error(`${result.error.code}: ${result.error.message}`);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exitCode = 1;
+  return false;
+}
 let checked = 0;
 for (const file of files) {
   if (/\.(js|cjs|mjs)$/.test(file)) {
     const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
-    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    commandPassed(result, path.relative(root, file));
     checked++;
   }
   if (file.endsWith('.sh')) {
     const result = spawnSync('bash', ['-n', file], { encoding: 'utf8' });
-    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    commandPassed(result, path.relative(root, file));
     checked++;
   }
   if (file.endsWith('.jq')) {
     const name = path.basename(file, '.jq');
     const result = spawnSync('jq', ['-n', '-L', path.dirname(file), `include "${name}"; null`], { encoding: 'utf8' });
-    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    commandPassed(result, path.relative(root, file));
     checked++;
   }
   if (file === path.join(root, 'ocmwstack.html')) {
@@ -37,7 +45,7 @@ for (const file of files) {
     if (!script) { console.error('Missing editor script'); process.exitCode = 1; }
     else {
       const result = spawnSync(process.execPath, ['--check'], { input: script, encoding: 'utf8' });
-      if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+      commandPassed(result, path.relative(root, file));
       checked++;
     }
   }
@@ -49,7 +57,7 @@ for (const file of files) {
     const script = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1];
     if (!script) { console.error('Missing SFC script: ' + file); process.exitCode = 1; continue; }
     const result = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: script, encoding: 'utf8' });
-    if (result.status !== 0) { process.stderr.write(result.stderr); process.exitCode = 1; }
+    commandPassed(result, path.relative(root, file));
     checked++;
   }
 }
@@ -67,6 +75,6 @@ if (routes.some(route => route.path.startsWith('/pcm') || !route.module || !rout
   console.error('Route scope or permission invariant failed.'); process.exitCode = 1;
 }
 const flow = spawnSync(process.execPath, [path.join(__dirname, 'build-flows.js'), '--check'], { encoding: 'utf8' });
-if (flow.status !== 0) { process.stderr.write(flow.stderr); process.exitCode = 1; }
+const flowsPassed = commandPassed(flow, 'Generated flows');
 console.log(JSON.stringify({ scriptSyntaxChecks: checked, localeKeysPerLanguage: Object.keys(catalogs.en).length,
-  generatedFlowCheck: flow.status === 0, passed: !process.exitCode }));
+  generatedFlowCheck: flowsPassed, passed: !process.exitCode }));

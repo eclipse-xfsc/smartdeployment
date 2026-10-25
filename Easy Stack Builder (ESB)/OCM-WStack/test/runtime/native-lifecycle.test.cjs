@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
 const {Adapters}=require('../../runtime/lib/adapters.cjs'),{Events}=require('../../runtime/lib/events.cjs'),{summarize,statusRef}=require('../../runtime/lib/credentials.cjs'),{graph}=require('../../runtime/lib/provenance.cjs'),{request}=require('../../runtime/lib/http.cjs'),{Runtime}=require('../../runtime/lib/runtime.cjs');
-const config={tenant:'tenant',account:'wallet',group:'wallet',cryptoNamespace:'ocm-wstack',cryptoGroup:'tenant',publicOrigin:'https://wallet.example',issuerDids:['did:web:wallet.example']},context={...config,subject:'user-1',username:'Mani',token:'user-token'};
+const config={tenant:'tenant',account:'ocm',group:'ocm',cryptoNamespace:'ocm-wstack',cryptoGroup:'tenant',publicOrigin:'https://ocm.example',issuerDids:['did:web:ocm.example']},context={...config,subject:'user-1',username:'Mani',token:'user-token'};
 const payload={iss:config.issuerDids[0],vct:'SDJWT',cnf:{jwk:{kty:'EC',crv:'P-256',kid:'eckey',x:'public-x',y:'public-y'}},exp:4102444800,status:{status_list:{idx:1,uri:config.publicOrigin+'/api/status/2'}}};
 const token=(p=payload)=>'e30.'+Buffer.from(JSON.stringify(p)).toString('base64url')+'.signature~';
 const native=(reply,records={one:token()})=>new Adapters(config,{call:async(n,p,o)=>n==='storage'?{credentials:records}:reply(n,p,o)});
@@ -16,7 +16,7 @@ test('current SD-JWT status reference routes to native list/index and cannot esc
 test('Revoke sends one native mutation and trusts only the exact native acknowledgement',async t=>{
  let calls=0;const server=http.createServer((req,res)=>{calls++;assert.equal(req.method,'POST');assert.equal(req.url,'/status/tenant/2/revoke/1');assert.equal(req.headers['x-tenantid'],'tenant');assert.equal(req.headers.authorization,'Bearer user-token');res.setHeader('content-type','application/json');res.end(JSON.stringify({tenantId:'tenant',listId:2,index:1,status:'revoked'}));});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
  const a=native((n,p,o)=>{assert.equal(n,'status');return request('http://127.0.0.1:'+server.address().port+p,o);});
- a.statusTransport={checkStatus:()=>assert.fail('revocation must not rely on wallet status checks')};
+ a.statusTransport={checkStatus:()=>assert.fail('revocation must not rely on ocm status checks')};
  const r=await a.revoke(context,'one');assert.equal(calls,1);assert.equal(r.state,'succeeded');assert.equal(r.confirmation,'native-acknowledgement');assert.equal(r.verification,undefined);
 });
 test('wrong-scope and malformed revoke acknowledgements remain outcome unknown',async()=>{

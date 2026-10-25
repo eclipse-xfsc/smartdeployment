@@ -233,7 +233,7 @@ inspect_stack() {
         --slurpfile gateway "$WORKDIR/inspect-gateway.json" --slurpfile certificate "$WORKDIR/inspect-cert.json" \
         --slurpfile proxy "$WORKDIR/inspect-proxy.json" --slurpfile policy "$WORKDIR/inspect-policy.json" \
         --slurpfile services "$WORKDIR/inspect-services.json" --slurpfile operational "$WORKDIR/operational.json" \
-        'include "inspection"; inspect_report($c[0];$lock[0];$apps[0];$pods[0];$pvcs[0];$jobs[0];$gateway[0];$certificate[0];$proxy[0];$policy[0];$services[0];$operational[0])' >"$WORKDIR/inspect-report.json"
+        'include "filters"; inspect_report($c[0];$lock[0];$apps[0];$pods[0];$pvcs[0];$jobs[0];$gateway[0];$certificate[0];$proxy[0];$policy[0];$services[0];$operational[0])' >"$WORKDIR/inspect-report.json"
     local ready=false
     if (
         set -e

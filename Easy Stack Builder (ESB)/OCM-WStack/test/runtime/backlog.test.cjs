@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {Registry}=require('../../runtime/lib/registry.cjs'),{Runtime,routes}=require('../../runtime/lib/runtime.cjs');
 const {Roles}=require('../legacy/roles.cjs'),{Coordination}=require('../../runtime/lib/coordination.cjs');
 const lifecycle=require('../../runtime/lib/lifecycle.cjs');
-const scope={tenant:'org',account:'wallet',group:'wallet',subject:'user-1',username:'Mani',permissions:['credentials.read','credentials.verify']};
+const scope={tenant:'org',account:'ocm',group:'ocm',subject:'user-1',username:'Mani',permissions:['credentials.read','credentials.verify']};
 function registry(){
  const rows=[],matches=(r,q)=>Object.entries(q).every(([k,v])=>r[k]===v);
  const collection={createIndex:async()=>{},find:q=>({limit:()=>({toArray:async()=>rows.filter(r=>matches(r,q))})}),findOne:async q=>rows.find(r=>matches(r,q)),insertOne:async r=>{if(rows.some(x=>matches(x,{tenant:r.tenant,account:r.account,group:r.group,id:r.id})))throw {code:11000};rows.push(structuredClone(r));},updateOne:async(q,p)=>{const r=rows.find(r=>matches(r,q));if(!r)return {matchedCount:0};Object.assign(r,structuredClone(p.$set));return {matchedCount:1};}};
@@ -41,7 +41,7 @@ test('audit records authenticated actor identity alongside stable subject',async
 test('role permission payload reaches its handler while scope injection is rejected',async()=>{
  const run=async(path,body)=>{
   let dispatched=false,code=200,payload;
-  const r={c:{publicOrigin:'https://wallet.example'},auth:{fromRequest:async()=>scope,require(){},csrf(){}},limit(){},ready:true,coordination:{run:async(c,a,k,b,fn)=>fn('op'),audit:async()=>{}},events:{emit(){}},counts:new Map(),execute:async()=>{dispatched=true;return {state:'succeeded'};}};
+  const r={c:{publicOrigin:'https://ocm.example'},auth:{fromRequest:async()=>scope,require(){},csrf(){}},limit(){},ready:true,coordination:{run:async(c,a,k,b,fn)=>fn('op'),audit:async()=>{}},events:{emit(){}},counts:new Map(),execute:async()=>{dispatched=true;return {state:'succeeded'};}};
   const res={setHeader(){},status(n){code=n;return this;},json(x){payload=x;return this;}};
   await Runtime.prototype.handle.call(r,{method:'POST',url:path,headers:{},body},res);return {code,payload,dispatched};
  };
@@ -51,7 +51,7 @@ test('role permission payload reaches its handler while scope injection is rejec
  for(const action of ['createType','updateType','deleteType'])assert.equal(routes.find(x=>x.action===action).permission,'credentials.issue');
 });
 test('user management protects service accounts and last role manager; new users require a password change',async()=>{
- const r=new Roles({realm:'wallet'},null);r.lock=fn=>fn();let write;
+ const r=new Roles({realm:'ocm'},null);r.lock=fn=>fn();let write;
  r.call=async(path,method,body)=>{if(method==='POST'){write=body;return;}return {username:'alice',email:'old@example.test',enabled:true};};
  await r.user(null,{username:'alice',enabled:true,temporaryPassword:'long-test-password'});assert.deepEqual(write.requiredActions,['UPDATE_PASSWORD']);assert.equal(write.credentials[0].temporary,true);
  r.protect=async()=>{throw {code:'LAST_ROLE_MANAGER'};};await assert.rejects(r.user('id',{username:'alice',enabled:false}),{code:'LAST_ROLE_MANAGER'});
