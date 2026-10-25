@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.6
+# OCM W-Stack ESB 12.3.7
 
-This package retains the approved uploaded-certificate deployment and 11.1.0 OCM context design. Version 12.3.6 repairs native lifecycle API integration and holder/verifier display, removes local status/validity decisions, and keeps native OCM services responsible for lifecycle. It preserves the 12.3.5 acceptance-to-Storage handoff. Native verification failures are now explicit; reviewed upstream SD-JWT/Status contracts remain a live acceptance limitation. Argo CD continues following deployment main; native service images are unchanged.
+This package retains the approved uploaded-certificate deployment and 11.1.0 OCM context design. Version 12.3.7 repairs native lifecycle API integration and holder/verifier display, removes local status/validity decisions, and keeps native OCM services responsible for lifecycle. It preserves the 12.3.5 acceptance-to-Storage handoff. Native verification failures are now explicit; reviewed upstream SD-JWT/Status contracts remain a live acceptance limitation. Argo CD continues following deployment main; native service images are unchanged.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.6.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.7.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.6.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.7.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.6, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. Open an existing SD-JWT and retest holder display, native Verify and an explicit Revoke on a disposable credential. No re-acceptance, new configuration fields or cleanup are needed. See docs/REPAIR-12.3.6.md for native limitations and the focused test sequence. All earlier deployment and acceptance repairs remain included.
+Install 12.3.7, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. Open an existing SD-JWT and retest holder display, native Verify and an explicit Revoke on a disposable credential. No re-acceptance, new configuration fields or cleanup are needed. See docs/REPAIR-12.3.7.md for native limitations and the focused test sequence. All earlier deployment and acceptance repairs remain included.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
@@ -112,3 +112,9 @@ Add `--dns-token-file /private/dns-token.txt` when using automatic DNS. A custom
 `preflight` validates without deploying. `inspect` and `validate` are read-only. `diagnose-api` and `diagnose-auth` verify the uploaded API path/identity. `test-credentials --confirm "CREATE TEST CREDENTIAL"` creates and accepts a test offering and checks native Storage read-back; it retains that test data. `scripts/collect-evidence.sh` exports status/digests without Secret contents. No tests run against your cluster merely by installing the package.
 
 Explicit `teardown` requires `REMOVE TENANT <release>` and removes tenant routing only. Node deletion cancels local processes and retains cluster data. Core services, PVCs, key material, users and roles are not deleted by the normal deployment or dashboard toggles.
+
+## Kubernetes access checks in 12.3.7
+
+The uploaded kubeconfig determines the identity for the deployer and every helper. The account name “cluster-admin” alone does not prove its permissions. Preflight submits exact SelfSubjectAccessReview requests for cluster-wide access in all API groups and for Argo resources in argocd, without requiring those CRDs to be installed. Argo bootstrap and ApplicationSet readiness also recheck that the identity is unchanged and the permissions remain allowed.
+
+ESB does not add a role binding to its own identity. If the API denies the uploaded identity, upload a kubeconfig with actual cluster-admin permissions. A failed preflight makes no installation changes. Resume a matching partial installation with Deploy; existing Helm releases and data are retained.

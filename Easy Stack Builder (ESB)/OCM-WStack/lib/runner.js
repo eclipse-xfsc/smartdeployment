@@ -1,5 +1,6 @@
 'use strict';
 const {spawn} = require('node:child_process');
+const {boundCommand}=require('./kube-client');
 
 class Runner {
   constructor({cwd, env, emit = () => {}, secrets = [], signal} = {}) {
@@ -15,7 +16,10 @@ class Runner {
     if (this.signal?.aborted) throw Object.assign(new Error('Operation cancelled; installed cluster resources are retained.'),{code:'CANCELLED'});
     const {timeout = 180000, input, live = false, allowFailure = false, cwd = this.cwd, processGroup = process.platform !== 'win32'} = options;
     return new Promise((resolve,reject) => {
-      const child = spawn(command,args,{cwd, env:this.env, stdio:['pipe','pipe','pipe'], detached:processGroup});
+      // Helpers inherit the binding and invoke the real CLI directly. PATH
+      // changes in a nested shell must never select an ambient service account.
+      const bound=boundCommand(command,args,this.env);
+      const child = spawn(bound.command,bound.args,{cwd, env:this.env, stdio:['pipe','pipe','pipe'], detached:processGroup});
       let out = '', err = '', pending = '', pendingError = '', stopped = '', killTimer;
       const kill = () => { try { if (processGroup) process.kill(-child.pid,'SIGTERM'); else child.kill(); } catch {} };
       const stop = (reason) => {
@@ -33,7 +37,7 @@ class Runner {
         if(line.startsWith('[ESB_API] ')) {
           try {
             const event=JSON.parse(this.redact(line.slice(10)));
-            if(['phase','routing-progress','routing-drift','gateway-configured','ocm-startup','migration-recovery','cassandra-probes','verification-pull-secret'].includes(event.type)){this.emit(event);return;}
+            if(['phase','routing-progress','routing-drift','gateway-configured','ocm-startup','migration-recovery','cassandra-probes','verification-pull-secret','kubeconfig-identity','kube-access'].includes(event.type)){this.emit(event);return;}
           } catch {}
         }
         this.emit(phase ? {type:'phase',phase:phase[1]} : {type:'log',message:this.redact(line).slice(0,2000)});

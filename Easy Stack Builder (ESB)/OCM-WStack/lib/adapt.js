@@ -129,6 +129,7 @@ async function adapt(dir) {
     }).join('\n');
     if(name==='ocm-wstack-init.sh')text=once(text,'./check-applicationset.sh ocm-wstack argocd','node "${ESB_OCM_STARTUP:?ESB OCM startup runner is required}"\n./check-applicationset.sh ocm-wstack argocd',name);
     if (name === 'basic-cluster-init.sh') {
+      text=once(text,'./argocd-bootstrap.sh','./argocd-bootstrap.sh\nnode "${ESB_KUBE_ACCESS:?ESB uploaded kubeconfig access checker is required}"',name);
       text=once(text,'./check-applicationset.sh network argocd','./check-applicationset.sh network argocd\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" policy\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" reconcile',name);
       text = once(text, 'DNSTOKEN=""', 'DNSTOKEN="${ESB_DNS_SECRET_FILE:+provided-through-file}"', name);
       for (const ns of ['observability','security']) text = once(text, `kubectl create namespace ${ns}\n`, `kubectl create namespace ${ns} --dry-run=client -o yaml | kubectl apply -f -\n`, name);
@@ -166,6 +167,7 @@ async function adapt(dir) {
   await fs.writeFile(path.join(dir,registration),text);
   const appWait='check-applicationset.sh';
   let waitText=await fs.readFile(path.join(dir,appWait),'utf8');
+  waitText=once(waitText,'START_TIME="$(date +%s)"','node "${ESB_KUBE_ACCESS:?ESB uploaded kubeconfig access checker is required}"\n\nSTART_TIME="$(date +%s)"',appWait);
   const query = '    kubectl get applications.argoproj.io \\\n      --namespace "$ARGOCD_NAMESPACE" \\\n      --output json';
   waitText=once(waitText, query, '    ESB_READ_TIMEOUT_SECONDS="$(( TIMEOUT_SECONDS - $(date +%s) + START_TIME > 0 ? TIMEOUT_SECONDS - $(date +%s) + START_TIME : 1 ))" node "${ESB_KUBE_READ:?ESB API reader is required}" \\\n      "/apis/argoproj.io/v1alpha1/namespaces/$ARGOCD_NAMESPACE/applications"', appWait);
   waitText=once(waitText, '  count="$(jq \'length\' <<< "$appset_applications")"', '  count="$(jq \'length\' <<< "$appset_applications")"\n  expected="$(jq -er --arg name "$APPSET_NAME" \'.[$name]\' <<< "${ESB_APPSET_COUNTS:?ESB chart plan is required}")"', appWait);

@@ -61,10 +61,7 @@ async function lease(r,id,onLost=()=>{}) {
 }
 async function preflight(r,c,credentials) {
   await Promise.all(['bash','git','helm','kubectl','jq','curl','base64'].map(cmd => r.run('bash',['-c','command -v "$1" >/dev/null','esb-prerequisite',cmd])));
-  const access=await r.run('kubectl',['auth','can-i','*','*','--all-namespaces']);
-  if(access.stdout.trim()!=='yes')fail('RBAC','The supplied kubeconfig must have cluster-admin permissions.');
-  const argoAccess=await r.run('kubectl',['auth','can-i','list','applications.argoproj.io','-n','argocd'],{allowFailure:true});
-  if(argoAccess.stdout.trim()!=='yes')fail('RBAC','The identity authenticated by the uploaded kubeconfig cannot list Argo Applications in argocd. No installation was started. Check the kubeconfig-selection and kubeconfig-identity events.');
+  await require('./kube-access').preflight(r);
   const [nodes,classes,system,helm]=await Promise.all([
     r.json('kubectl',['get','nodes','-o','json']),r.json('kubectl',['get','storageclasses','-o','json']),
     r.json('kubectl',['get','namespace','kube-system','-o','json']),r.run('helm',['version','--short'])
@@ -192,7 +189,8 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const selected=await bindKubeconfig(r,dir,kubeconfig,kubeText);
     if(action==='diagnose-auth')return {status:'authentication-checked',...selected,identity:await kubeIdentity(r)};
     if(action==='diagnose-api')return await diagnose(r);
-    await kubeIdentity(r);
+    const authenticated=await kubeIdentity(r);
+    r.env={...r.env,ESB_KUBE_USERNAME:authenticated.username};
     emit({type:'phase',phase:'preflight'});c=await preflight(r,c0,credentials);
     const priorMarker=await optional(r,'configmap',MARKER,'kube-system');c.dnsOwnerId=priorMarker?(priorMarker.data?.dnsOwnerId||'xfsc'):'esb-'+c.clusterUid;
     emit({type:'detected',provider:c.actualProvider,detectedProvider:c.detectedProvider,storageClass:c.actualStorageClass,dnsProvider:c.actualDns,locations:c.providerLocations,zones:c.providerZones,providerEvidence:c.providerEvidence,externalTrafficPolicy:c.externalTrafficPolicy,upstreamCommit:lock.commit});
@@ -235,7 +233,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     }
     const holder=crypto.randomUUID();
     held=await lease(r,holder,()=>controller.abort());
-    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js'),ESB_OCM_PREREQUISITES:path.join(__dirname,'../scripts/ocm-prerequisites.js'),ESB_GATEWAY_CONFIG:path.join(__dirname,'../scripts/gateway-config.js')};
+    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_KUBE_ACCESS:path.join(__dirname,'../scripts/kube-access.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js'),ESB_OCM_PREREQUISITES:path.join(__dirname,'../scripts/ocm-prerequisites.js'),ESB_GATEWAY_CONFIG:path.join(__dirname,'../scripts/gateway-config.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{dnsOwnerId:c.dnsOwnerId,validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
     const gatewayValues=await privateFile(dir,'gateway-values.json',JSON.stringify({externalTrafficPolicy:c.externalTrafficPolicy,timeoutSeconds:c.timeoutSeconds,tenantHost:c.tenantHost,tlsMode:c.tlsMode,gatewayRouting:c.gatewayRouting,internalGatewayRouting:c.internalGatewayRouting}));
