@@ -1,0 +1,69 @@
+'use strict';
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const os=require('node:os');
+const {operation,lease}=require('../lib/install');
+const {Runner}=require('../lib/runner');
+const {adapt}=require('../lib/adapt');
+const example=require('../examples/deployment.json');
+async function setup(t,{failRelease='',namespaces=['kube-system']}={}) {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'esb-integration-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const state=path.join(dir,'state.json'),calls=path.join(dir,'calls.jsonl');
+  await fs.writeFile(state,JSON.stringify({namespaces,objects:{},appsets:[]}));await fs.writeFile(calls,'');
+  for(const name of ['kubectl','helm']){await fs.copyFile(path.join(__dirname,'fake-cli.cjs'),path.join(dir,name));await fs.chmod(path.join(dir,name),0o700);}
+  const events=[];
+  const options={emit:e=>events.push(e),runnerFactory:args=>new Runner({...args,env:{...args.env,PATH:`${dir}:${process.env.PATH}`,ESB_TEST_STATE:state,ESB_TEST_CALLS:calls,ESB_TEST_FAIL_RELEASE:failRelease}}),checkoutSource:async(r,workspace)=>{const source=path.join(workspace,'deployment');await fs.cp(path.join(__dirname,'fixtures/upstream'),source,{recursive:true});await adapt(source);return source;}};
+  const originalFetch=global.fetch;
+  global.fetch=async url=>new Response(JSON.stringify(url.endsWith('/openid-credential-issuer')?{credential_issuer:'https://demo-tenant.example.com',credential_endpoint:'https://demo-tenant.example.com/api/credential',credential_configurations_supported:{SDJWTCredential:{}}}:url.endsWith('/did.json')?{id:'did:web:demo-tenant.example.com',verificationMethod:[{id:'key'}]}:{keys:[{kid:'key'}]}),{status:200,headers:{'content-type':'application/json'}});
+  t.after(()=>{global.fetch=originalFetch;});
+  return {dir,events,options,readCalls:async()=> (await fs.readFile(calls,'utf8')).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x)),readState:async()=>JSON.parse(await fs.readFile(state,'utf8'))};
+}
+test('executes real official entrypoint once, in order, and installs upstream tenant after healthy appsets',async t=>{
+  const h=await setup(t);const report=await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
+  assert.equal(report.status,'ready');assert.equal(report.credentialLifecycle,'not-tested');
+  const calls=await h.readCalls();const upgrades=calls.filter(x=>x.command==='helm'&&x.args[0]==='upgrade');
+  const names=upgrades.map(x=>x.args[2]==='--timeout'?x.args[x.args.indexOf('-n')+2]:x.args[2]);
+  assert.deepEqual(names,['observability','openbao','eso','kyverno','infrastructure-namespace','kubernetes-operator','storage','network','core','ocm-wstack-namespace','ocm-wstack','demotenant']);
+  assert.ok(upgrades.every(x=>x.cwd.endsWith('/deployment')));
+  const network=upgrades[names.indexOf('network')];assert.ok(network.args.includes('excludes[1]=INFRA/network/external-dns'));assert.match(network.network.esbTemplatePatch,/valuesObject/);
+  assert.equal(calls.filter(x=>x.args.some(a=>a.includes('install.yaml'))).length,1);
+  assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.bootstrapComplete,'true');
+  const before=upgrades.length;
+  await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
+  const after=(await h.readCalls()).filter(x=>x.command==='helm'&&x.args[0]==='upgrade');assert.equal(after.length,before+1);assert.equal(after.at(-1).args[2],'demotenant');
+});
+test('upstream Helm failure stops before network/OCM/tenant, retains progress and permits a matching resume',async t=>{
+  const h=await setup(t,{failRelease:'storage'});
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'COMMAND_FAILED'});
+  const calls=await h.readCalls();assert.ok(!calls.some(x=>x.command==='helm'&&x.args.includes('network')));assert.ok(!calls.some(x=>x.args.includes('demotenant')));
+  const marker=(await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'];assert.equal(marker.data.state,'failed');assert.notEqual(marker.data.bootstrapComplete,'true');
+  const factory=h.options.runnerFactory;h.options.runnerFactory=opts=>{const r=factory(opts);delete r.env.ESB_TEST_FAIL_RELEASE;return r;};
+  assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
+});
+test('existing unrelated namespaces are refused without any Helm deployment',async t=>{
+  const h=await setup(t,{namespaces:['kube-system','argocd']});
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'NOT_FRESH'});
+  assert.ok(!(await h.readCalls()).some(x=>x.command==='helm'&&x.args[0]==='upgrade'));
+});
+test('DNS credentials are passed through a private manifest, not script arguments or events',async t=>{
+  const h=await setup(t);await operation('deploy',{...example,externalDns:true,dnsProvider:'ionos'},{kubeconfig:'mock-cluster-config',dnsToken:'very-private-dns-token'},h.options);
+  const calls=await h.readCalls();assert.ok(!calls.some(x=>x.args.some(a=>a.includes('very-private-dns-token'))));assert.ok(!JSON.stringify(h.events).includes('very-private-dns-token'));
+  const secretApply=calls.find(x=>x.command==='kubectl'&&x.args[0]==='apply'&&x.args.some(a=>a.endsWith('/dns-secret.json')));assert.equal(secretApply.dns.stringData.token,'very-private-dns-token');
+  await assert.rejects(fs.stat(secretApply.args.at(-1)),{code:'ENOENT'});
+});
+test('teardown needs an explicit matching confirmation and retains stack and namespaces',async t=>{
+  const h=await setup(t);await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
+  await assert.rejects(operation('teardown',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'CONFIRM'});
+  const result=await operation('teardown',{...example,confirm:'REMOVE TENANT demotenant'},{kubeconfig:'mock-cluster-config'},h.options);assert.equal(result.status,'tenant-removed');
+  const calls=await h.readCalls();assert.equal(calls.filter(x=>x.command==='helm'&&x.args[0]==='uninstall').length,1);assert.ok(!calls.some(x=>x.command==='kubectl'&&x.args.includes('delete')));
+});
+test('a live cluster lease prevents a second owner from running installation',async t=>{
+  const h=await setup(t);
+  const r=h.options.runnerFactory({env:process.env,emit:()=>{}});
+  const first=await lease(r,'owner-one');
+  await assert.rejects(lease(r,'owner-two'),{code:'BUSY'});
+  await first.release();
+  const next=await lease(r,'owner-two');await next.release();
+});

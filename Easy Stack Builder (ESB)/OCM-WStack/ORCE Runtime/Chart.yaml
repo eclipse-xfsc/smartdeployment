@@ -1,6 +1,0 @@
-apiVersion: v2
-name: ocm-orce-runtime
-description: Same-namespace OCM ORCE runtime and UI
-type: application
-version: 11.1.0
-appVersion: "11.1.0"

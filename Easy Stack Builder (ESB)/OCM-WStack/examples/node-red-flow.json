@@ -1,0 +1,146 @@
+[
+  {
+    "id": "ocm-v12-flow",
+    "type": "tab",
+    "label": "OCM W-Stack official bootstrap",
+    "disabled": false,
+    "info": "Fresh version-12 deployment. Configure the OCM node and upload kubeconfig before triggering deploy."
+  },
+  {
+    "id": "ocm-v12-inject-0",
+    "type": "inject",
+    "z": "ocm-v12-flow",
+    "name": "Deploy",
+    "props": [
+      {
+        "p": "action",
+        "v": "deploy",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "x": 140,
+    "y": 100,
+    "wires": [
+      [
+        "ocm-v12-node"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-v12-inject-1",
+    "type": "inject",
+    "z": "ocm-v12-flow",
+    "name": "Validate",
+    "props": [
+      {
+        "p": "action",
+        "v": "validate",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "x": 140,
+    "y": 170,
+    "wires": [
+      [
+        "ocm-v12-node"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-v12-inject-2",
+    "type": "inject",
+    "z": "ocm-v12-flow",
+    "name": "Test credential",
+    "props": [
+      {
+        "p": "action",
+        "v": "test-credentials",
+        "vt": "str"
+      },
+      {
+        "p": "confirm",
+        "v": "CREATE TEST CREDENTIAL",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "x": 140,
+    "y": 240,
+    "wires": [
+      [
+        "ocm-v12-node"
+      ]
+    ]
+  },
+  {
+    "procedureVersion": 12,
+    "instanceName": "ocm-wstack",
+    "domainAddress": "",
+    "emailAddress": "",
+    "provider": "auto",
+    "storageClass": "",
+    "lbAnnotations": "{}",
+    "externalDns": false,
+    "dnsProvider": "auto",
+    "dnsValues": "{}",
+    "tenantId": "demo-tenant",
+    "tenantSubdomain": "",
+    "tenantRelease": "demotenant",
+    "timeoutSeconds": 1800,
+    "id": "ocm-v12-node",
+    "type": "OCM-W-Stack",
+    "z": "ocm-v12-flow",
+    "name": "Official OCM bootstrap",
+    "x": 430,
+    "y": 170,
+    "wires": [
+      [
+        "ocm-v12-result"
+      ],
+      [
+        "ocm-v12-progress"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-v12-result",
+    "type": "debug",
+    "z": "ocm-v12-flow",
+    "name": "OCM result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 710,
+    "y": 130,
+    "wires": []
+  },
+  {
+    "id": "ocm-v12-progress",
+    "type": "debug",
+    "z": "ocm-v12-flow",
+    "name": "OCM progress",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 710,
+    "y": 220,
+    "wires": []
+  }
+]

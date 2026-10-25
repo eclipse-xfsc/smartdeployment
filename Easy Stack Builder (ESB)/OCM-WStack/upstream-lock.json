@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/eclipse-xfsc/deployment.git",
+  "commit": "739606691ecff72b3a40404a19fce44d9c22b0ee",
+  "reviewedAt": "2026-10-01",
+  "argoRevision": "main",
+  "sha256": {
+    "basic-cluster-init.sh": "af6918e713896585b8ae1c81c47e99cbd358439ef24890c186546ac486b11f82",
+    "ocm-wstack-init.sh": "f07ca1c81aa49a99464d581892844d0681950f4d1c6b192ee68757b9cc358f18",
+    "argocd-bootstrap.sh": "49d6b6fade5af657dd17948d4a4f97e675645e0573052275ad9bfc8c2c49a780",
+    "check-applicationset.sh": "70c50ad9b39494ffce28569788b9e161f541206f3f342fc6362d5dcec9e1ec7d",
+    "XFSC/Applicationsets/chart/templates/applicationset-template.yaml": "4b66c2249e0b199224c0458dd1fadc52059edaab7de72c29b2c29b62b00b708b",
+    "XFSC/tenant/chart/templates/tenant-registration.yaml": "a6b3d6a0fe21dac8b75fc1357ff8da0ce4dd6f181b400bf2e259e4482dadf590"
+  }
+}

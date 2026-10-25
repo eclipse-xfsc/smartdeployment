@@ -1,244 +1,70 @@
-<!-- Editor UI for OCM-W-Stack node -->
-<script type="text/x-red" data-template-name="OCM-W-Stack">
+<script type="text/html" data-template-name="OCM-W-Stack">
   <style>
-    .form-row { display:flex; align-items:center; margin-bottom:10px; }
-    .form-row label { width:160px!important; margin-right:10px; text-align:right; }
-    .form-row input[type="text"], .form-row input[type="email"] { flex:1; }
-    .form-row input[type="checkbox"] { flex:0 0 auto; width:auto; margin-right:8px; }
-    .ocm-inline-note { font-size:12px; color:#666; }
-    .ocm-tabs { display:flex; gap:8px; margin:6px 0 14px 170px; }
-    .ocm-tab-button.active { background:#dcecf6; border-color:#8aaec4; }
-    .ocm-tab-panel { display:none; border-left:2px solid #e6e6e6; padding-left:12px; margin-left:168px; }
-    .ocm-tab-panel.active { display:block; }
-    .ocm-tab-panel .form-row { margin-left:-168px; }
-    .ocm-hint { margin:0 0 10px 170px; font-size:12px; color:#666; }
-    .ocm-hint.warning { color:#b35f00; }
-    .ocm-inline-note.warning { color:#b35f00; font-weight:600; }
+    .esb-ocm-form .form-row label { width: 170px; vertical-align: top; }
+    .esb-ocm-form .form-row input:not([type=checkbox]), .esb-ocm-form select, .esb-ocm-form textarea { width: calc(100% - 190px); }
+    .esb-ocm-form textarea { min-height: 85px; font-family: monospace; }
+    .esb-ocm-form .esb-note { margin: 8px 0 16px; color: var(--red-ui-secondary-text-color); }
+    .esb-ocm-form h4 { margin-top: 20px; }
   </style>
-
-  <div class="form-row">
-    <label for="node-input-name">Node label</label>
-    <input type="text" id="node-input-name" placeholder="(optional) Display name in flow">
-  </div>
-
-  <div class="ocm-tabs">
-    <button type="button" class="red-ui-button ocm-tab-button active" data-target="instance">Instance Info</button>
-    <button type="button" class="red-ui-button ocm-tab-button" data-target="k8s">Kubernetes &amp; Domain</button>
-    <button type="button" class="red-ui-button ocm-tab-button" data-target="keycloak">Keycloak &amp; Credentials</button>
-    <button type="button" class="red-ui-button ocm-tab-button" data-target="orce">ORCE Initial Credentials</button>
-    <button type="button" class="red-ui-button ocm-tab-button" data-target="pcm">PCM Cloud</button>
-  </div>
-
-  <div class="ocm-hint" id="ocm-domain-hint">Use a bare FQDN such as apps.example.com. The node deploys cloud-wallet.&lt;domain&gt; and auth-cloud-wallet.&lt;domain&gt;.</div>
-
-  <div class="ocm-tab-panel active" data-panel="instance">
-    <div class="form-row">
-      <label for="node-input-instanceName">Instance name</label>
-      <input type="text" id="node-input-instanceName" placeholder="e.g. demo-01">
+  <div class="esb-ocm-form">
+    <p>OCM W-Stack · official XFSC deployment procedure</p>
+    <p class="esb-note">A fresh Kubernetes cluster is required. Deploy runs the upstream bootstrap and creates the tenant. Removing this node retains the deployment.</p>
+    <input type="hidden" id="node-input-procedureVersion">
+    <div class="form-row"><label for="node-input-name">Label</label><input type="text" id="node-input-name"></div>
+    <div class="form-row"><label for="node-input-instanceName">Instance name</label><input type="text" id="node-input-instanceName"></div>
+    <div class="form-row"><label for="node-input-domainAddress">Base domain</label><input type="text" id="node-input-domainAddress" placeholder="example.com"></div>
+    <div class="form-row"><label for="node-input-emailAddress">Certificate email</label><input type="email" id="node-input-emailAddress"></div>
+    <div class="form-row"><label for="node-input-kubeconfig">Kubeconfig credential</label><input type="password" id="node-input-kubeconfig" autocomplete="new-password" placeholder="Upload the cluster-admin kubeconfig below"></div>
+    <div class="form-row"><label for="esb-ocm-kube-file">Upload kubeconfig</label><input type="file" id="esb-ocm-kube-file" accept=".yaml,.yml,.conf,.txt"></div>
+    <p class="esb-note">Use a self-contained kubeconfig. Exec-based cloud authentication also requires its provider CLI and credentials in ORCE.</p>
+    <h4>Cluster and networking</h4>
+    <div class="form-row"><label for="node-input-provider">Cluster provider</label><select id="node-input-provider"><option value="auto">Detect automatically</option value="generic">Generic Kubernetes / bare metal</option value="hetzner">Hetzner</option><option value="aws">AWS</option><option value="azure">Azure</option><option value="gcp">Google Cloud</option><option value="openstack">OpenStack</option><option value="digitalocean">DigitalOcean</option><option value="oci">Oracle Cloud</option><option value="scaleway">Scaleway</option><option value="alibaba">Alibaba Cloud</option></select></div>
+    <div class="form-row"><label for="node-input-storageClass">StorageClass</label><input type="text" id="node-input-storageClass" placeholder="Detect the cluster default"></div>
+    <div class="form-row"><label for="node-input-lbAnnotations">Load-balancer annotations</label><textarea id="node-input-lbAnnotations" placeholder='{}'></textarea></div>
+    <p class="esb-note">Uses the cluster's existing LoadBalancer and storage provisioners. On bare metal, configure a load-balancer implementation first. Hetzner defaults apply only to Hetzner; other providers receive a generic service plus these optional annotations.</p>
+    <div class="form-row"><label for="node-input-externalDns">Manage DNS records</label><input type="checkbox" id="node-input-externalDns" style="width:auto"></div>
+    <div id="esb-ocm-dns-fields">
+      <div class="form-row"><label for="node-input-dnsProvider">DNS provider</label><select id="node-input-dnsProvider"><option value="auto">Infer Hetzner from cluster</option><option value="hetzner">Hetzner (upstream profile)</option><option value="ionos">IONOS (upstream profile)</option><option value="custom">Other ExternalDNS provider</option></select></div>
+      <div id="esb-ocm-dns-token" class="form-row"><label for="node-input-dnsToken">DNS API token</label><input type="password" id="node-input-dnsToken" autocomplete="new-password"></div>
+      <div id="esb-ocm-dns-custom">
+        <div class="form-row"><label for="node-input-dnsValues">ExternalDNS values JSON</label><textarea id="node-input-dnsValues" placeholder='{"provider":{"name":"aws"}}'></textarea></div>
+        <div class="form-row"><label for="node-input-dnsSecretData">DNS Secret JSON</label><input type="password" id="node-input-dnsSecretData" autocomplete="new-password" placeholder='{"api-key":"…"}'></div>
+        <p class="esb-note">Provider values belong inside the external-dns subchart. Reference credentials through secretKeyRef using Secret name external-dns and the keys entered above. Workload identity may leave Secret JSON empty. See the provider examples in README.</p>
+      </div>
     </div>
-  </div>
-
-  <div class="ocm-tab-panel" data-panel="k8s">
-    <div class="form-row">
-      <label for="node-input-domainAddress">Domain</label>
-      <input type="text" id="node-input-domainAddress" placeholder="e.g. apps.example.com">
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-kubeconfig">kubeconfig</label>
-      <input type="file" id="node-input-kubeconfig" accept=".yml,.yaml,.conf,.txt">
-      <input type="hidden" id="node-input-kubeconfigContent">
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-enableIngressNginxClusterConfig">Manage ingress controller</label>
-      <input type="checkbox" id="node-input-enableIngressNginxClusterConfig">
-      <span class="ocm-inline-note warning">Opt-in, cluster-wide: installs/reconciles ingress-nginx, enables snippet annotations, Critical annotation risk, TLS 1.3, and restarts the controller.</span>
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-deleteIngressNginxAdmissionWebhook">Delete ingress webhook</label>
-      <input type="checkbox" id="node-input-deleteIngressNginxAdmissionWebhook">
-      <span class="ocm-inline-note warning">Opt-in, cluster-wide: deletes the ingress-nginx admission webhook configuration and stale admission jobs.</span>
-    </div>
-  </div>
-
-  <div class="ocm-tab-panel" data-panel="keycloak">
-    <div class="form-row">
-      <label for="node-input-emailAddress">Email</label>
-      <input type="email" id="node-input-emailAddress" placeholder="e.g. admin@example.com">
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-privateKey">TLS Private Key</label>
-      <input type="file" id="node-input-privateKey" accept=".key,.pem,.txt">
-      <input type="hidden" id="node-input-privateKeyContent">
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-certificate">TLS Certificate</label>
-      <input type="file" id="node-input-certificate" accept=".crt,.pem,.cer,.txt">
-      <input type="hidden" id="node-input-certificateContent">
-    </div>
-
-    <div class="form-row">
-      <label for="node-input-useCustomCaBundle">Custom CA bundle</label>
-      <input type="checkbox" id="node-input-useCustomCaBundle">
-      <span class="ocm-inline-note">Append an uploaded CA bundle to the served TLS chain</span>
-    </div>
-
-    <div class="form-row" id="ocm-ca-bundle-row">
-      <label for="node-input-caBundle">CA Bundle</label>
-      <input type="file" id="node-input-caBundle" accept=".crt,.pem,.cer,.txt">
-      <input type="hidden" id="node-input-caBundleContent">
-    </div>
-  </div>
-  <div class="ocm-tab-panel" data-panel="orce">
-    <p>UI: https://cloud-wallet.&lt;domain&gt;/orce/. The editor uses a separate login and is accessible through port-forward only. Existing passwords are preserved on redeployment.</p>
-    <div class="form-row"><label for="node-input-editorUsername">Editor administrator</label><input type="text" id="node-input-editorUsername" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-editorPassword">Editor password</label><input type="password" id="node-input-editorPassword" autocomplete="new-password"></div>
-    <div class="form-row"><label for="node-input-uiAdminUsername">OCM UI administrator</label><input type="text" id="node-input-uiAdminUsername" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-uiAdminEmail">OCM UI administrator email</label><input type="email" id="node-input-uiAdminEmail" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-uiAdminPassword">OCM UI password</label><input type="password" id="node-input-uiAdminPassword" autocomplete="new-password"></div>
-    <div class="form-row"><label for="node-input-uiAdminFirstName">First name (optional)</label><input type="text" id="node-input-uiAdminFirstName" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-uiAdminLastName">Last name (optional)</label><input type="text" id="node-input-uiAdminLastName" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-orceStorageSize">ORCE PVC size</label><input type="text" id="node-input-orceStorageSize" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-mongoStorageSize">MongoDB PVC size</label><input type="text" id="node-input-mongoStorageSize" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-orceStorageClass">Storage class (blank: default)</label><input type="text" id="node-input-orceStorageClass" autocomplete="off"></div>
-    <div class="form-row"><label for="node-input-offerIssuerHosts">Approved offer hosts (comma separated)</label><input type="text" id="node-input-offerIssuerHosts"></div>
-    <div class="form-row"><label for="node-input-relationshipHosts">Approved remote OCM hosts (comma separated)</label><input type="text" id="node-input-relationshipHosts"></div>
-    <div class="form-row"><label for="node-input-useExternalMongo">Use external MongoDB</label><input type="checkbox" id="node-input-useExternalMongo"></div>
-    <div class="form-row" id="ocm-mongo-uri"><label for="node-input-mongoUri">MongoDB connection string</label><input type="password" id="node-input-mongoUri" autocomplete="new-password"></div>
-  </div>
-  <div class="ocm-tab-panel" data-panel="pcm">
-    <p>Connect an XFSC PCM Cloud installed separately using ESB PCM in this cluster. Each user signs into their own PCM account. Existing PCM users and credentials are preserved.</p>
-    <div class="form-row"><label for="node-input-pcmEnabled">Enable PCM Cloud integration</label><input type="checkbox" id="node-input-pcmEnabled"></div>
-    <div class="form-row"><label for="node-input-pcmNamespace">PCM namespace</label><input type="text" id="node-input-pcmNamespace"></div>
-    <div class="form-row"><label for="node-input-pcmRealm">PCM Keycloak realm</label><input type="text" id="node-input-pcmRealm"></div>
-    <div class="form-row"><label for="node-input-pcmTenant">PCM OCM tenant</label><input type="text" id="node-input-pcmTenant"></div>
-    <p>The deployer registers a PKCE client in the selected realm. PCM Account Service must use the same Keycloak server and the Storage instance of this OCM installation.</p>
+    <p id="esb-ocm-manual-dns" class="esb-note">The progress output will report the gateway address. Create the tenant's DNS record and allow public TCP 80/443, then run validate.</p>
+    <h4>Tenant</h4>
+    <div class="form-row"><label for="node-input-tenantId">Tenant ID</label><input type="text" id="node-input-tenantId"></div>
+    <div class="form-row"><label for="node-input-tenantSubdomain">Tenant subdomain</label><input type="text" id="node-input-tenantSubdomain" placeholder="Derived from tenant ID"></div>
+    <div class="form-row"><label for="node-input-tenantRelease">Tenant Helm release</label><input type="text" id="node-input-tenantRelease"></div>
+    <p id="esb-ocm-tenant-preview" class="esb-note"></p>
+    <div class="form-row"><label for="node-input-timeoutSeconds">Stage timeout (seconds)</label><input type="number" id="node-input-timeoutSeconds" min="60" max="7200"></div>
+    <p class="esb-note">Argo CD tracks upstream main with autosync, prune and self-healing enabled. The first output returns the result; the second streams progress. Use an Inject node with msg.action = deploy, inspect, validate or test-credentials.</p>
   </div>
 </script>
-
 <script type="text/javascript">
 (function() {
-  function setupFile(fieldFile, fieldHidden) {
-    var inp = $("#node-input-" + fieldFile)[0];
-    if (!inp) return;
-    inp.addEventListener("change", function() {
-      var f = this.files && this.files[0];
-      if (!f) return;
-      var reader = new FileReader();
-      reader.onload = function(e) {
-        $("#node-input-" + fieldHidden).val(e.target.result);
-      };
-      reader.readAsText(f);
-    });
-  }
-
-  function activateTab(target) {
-    $(".ocm-tab-button").removeClass("active");
-    $(".ocm-tab-button[data-target='" + target + "']").addClass("active");
-    $(".ocm-tab-panel").removeClass("active");
-    $(".ocm-tab-panel[data-panel='" + target + "']").addClass("active");
-  }
-
-  function updateCaBundleState() {
-    var enabled = $("#node-input-useCustomCaBundle").prop("checked");
-    $("#ocm-ca-bundle-row").toggle(enabled);
-    $("#node-input-caBundle").prop("disabled", !enabled);
-    return enabled;
-  }
-
-  function validateDomain() {
-    var value = $("#node-input-domainAddress").val().trim();
-    var hint = $("#ocm-domain-hint");
-    var valid = !value || (!/^https?:\/\//i.test(value) && value.indexOf("/") === -1 && /^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(value));
-    hint.toggleClass("warning", !valid);
-    if (valid) {
-      hint.text("Use a bare FQDN such as apps.example.com. The node deploys cloud-wallet.<domain> and auth-cloud-wallet.<domain>.");
-    } else {
-      hint.text("Domain must be a bare FQDN without scheme or path.");
-    }
-    return valid;
-  }
-
-  RED.nodes.registerType('OCM-W-Stack', {
-    category: 'FAPs',
-    color: '#c0deed',
-    icon: 'bridge.svg',
-    credentials: { editorPassword: {type:"password"}, uiAdminPassword: {type:"password"}, mongoUri: {type:"password"} },
-    defaults: {
-      editorUsername: {value:""},
-      uiAdminUsername: {value:""},
-      uiAdminEmail: {value:""},
-      uiAdminFirstName: {value:""},
-      uiAdminLastName: {value:""},
-      orceStorageSize: {value:"3Gi"},
-      mongoStorageSize: {value:"5Gi"},
-      orceStorageClass: {value:""},
-      useExternalMongo: {value:false},
-      pcmEnabled: {value:false},
-      pcmNamespace: {value:"pcm"},
-      pcmRealm: {value:"master"},
-      pcmTenant: {value:"tenant_space"},
-      offerIssuerHosts: {value:"compliance.lab.gaia-x.eu,registration.lab.gaia-x.eu,wizard.lab.gaia-x.eu"},
-      relationshipHosts: {value:""},
-
-      name:               { value: "" },
-      instanceName:       { value: "", required: true },
-      domainAddress:      { value: "", required: true },
-      emailAddress:       { value: "", required: true },
-      kubeconfigContent:  { value: "", required: true },
-      privateKeyContent:  { value: "", required: true },
-      certificateContent: { value: "", required: true },
-      useCustomCaBundle:  { value: false },
-      enableIngressNginxClusterConfig: { value: false },
-      deleteIngressNginxAdmissionWebhook: { value: false },
-      caBundleContent:    {
-        value: "",
-        validate: function(value) {
-          return !this.useCustomCaBundle || Boolean(value && String(value).trim());
-        }
-      }
+  function jsonObject(v) { if(!v)return true;try{var o=JSON.parse(v);return o&&typeof o==='object'&&!Array.isArray(o);}catch(e){return false;} }
+  RED.nodes.registerType('OCM-W-Stack',{
+    category:'Easy Stack Builder',color:'#d9eaf2',icon:'font-awesome/fa-cubes',inputs:1,outputs:2,
+    outputLabels:['Result','Progress'],label:function(){return this.name||'OCM W-Stack';},
+    defaults:{name:{value:''},procedureVersion:{value:12},instanceName:{value:'ocm-wstack',required:true},domainAddress:{value:'',required:true},emailAddress:{value:'',required:true},provider:{value:'auto'},storageClass:{value:''},lbAnnotations:{value:'{}',validate:jsonObject},externalDns:{value:false},dnsProvider:{value:'auto'},dnsValues:{value:'{}',validate:jsonObject},tenantId:{value:'demo-tenant',required:true},tenantSubdomain:{value:''},tenantRelease:{value:'demotenant',required:true},timeoutSeconds:{value:1800,validate:function(v){return Number.isInteger(Number(v))&&v>=60&&v<=7200;}}},
+    credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'}},
+    oneditprepare:function(){
+      function dns(){var enabled=$('#node-input-externalDns').prop('checked');var custom=$('#node-input-dnsProvider').val()==='custom';$('#esb-ocm-dns-fields').toggle(enabled);$('#esb-ocm-manual-dns').toggle(!enabled);$('#esb-ocm-dns-token').toggle(!custom);$('#esb-ocm-dns-custom').toggle(custom);}
+      function preview(){var sub=($('#node-input-tenantSubdomain').val()||$('#node-input-tenantId').val()||'demo-tenant').toLowerCase().replace(/_/g,'-');$('#esb-ocm-tenant-preview').text('Tenant endpoint: https://'+sub+'.'+($('#node-input-domainAddress').val()||'example.com'));}
+      $('#node-input-externalDns, #node-input-dnsProvider').on('change',dns);dns();
+      $('#node-input-domainAddress, #node-input-tenantId, #node-input-tenantSubdomain').on('input',preview);preview();
+      $('#esb-ocm-kube-file').on('change',function(){var file=this.files[0];if(!file)return;if(file.size>2*1024*1024){RED.notify('Kubeconfig must be smaller than 2 MiB.','error');return;}var reader=new FileReader();reader.onload=function(){$('#node-input-kubeconfig').val('base64:'+reader.result.slice(reader.result.indexOf(',')+1)).trigger('change');};reader.onerror=function(){RED.notify('Could not read kubeconfig.','error');};reader.readAsDataURL(file);});
     },
-    inputs: 1,
-    outputs: 1,
-    label: function() {
-      return this.name || this.instanceName || "OCM-W-Stack";
-    },
-    oneditprepare: function() {
-      $("#node-input-useExternalMongo").on("change", function(){ $("#ocm-mongo-uri").toggle(this.checked); }).trigger("change");
-      setupFile("kubeconfig", "kubeconfigContent");
-      setupFile("privateKey", "privateKeyContent");
-      setupFile("certificate", "certificateContent");
-      setupFile("caBundle", "caBundleContent");
-      $("#node-input-useCustomCaBundle").off("change.ocm").on("change.ocm", updateCaBundleState);
-      $(".ocm-tab-button").off("click.ocm").on("click.ocm", function(evt) {
-        evt.preventDefault();
-        activateTab($(this).data("target"));
-      });
-      $("#node-input-domainAddress").off("input.ocm blur.ocm").on("input.ocm blur.ocm", validateDomain);
-      activateTab("instance");
-      updateCaBundleState();
-      validateDomain();
-    },
-    oneditsave: function() {
-      if (!validateDomain()) {
-        RED.notify("Domain should be a bare hostname (no scheme or path).", "warning");
-      }
-      if (!$("#node-input-useCustomCaBundle").prop("checked")) {
-        $("#node-input-caBundleContent").val("");
-      } else if (!$("#node-input-caBundleContent").val().trim()) {
-        RED.notify("Select a CA bundle or disable the Custom CA bundle option.", "warning");
-      }
-      if ($("#node-input-enableIngressNginxClusterConfig").prop("checked")) {
-        RED.notify("Ingress controller management is enabled. This installs or reconciles shared cluster infrastructure.", "warning");
-      }
-      if ($("#node-input-deleteIngressNginxAdmissionWebhook").prop("checked")) {
-        RED.notify("Ingress admission webhook deletion is enabled. This changes cluster-wide security controls.", "warning");
-      }
-    }
+    oneditsave:function(){this.procedureVersion=12;}
   });
 })();
+</script>
+<script type="text/html" data-help-name="OCM-W-Stack">
+  <p>Runs the official eclipse-xfsc/deployment ocm-wstack-init.sh, which calls basic-cluster-init.sh, then installs XFSC/tenant. Requires cluster-admin kubeconfig, Helm 3, kubectl, git, bash, jq, curl and base64 in ORCE.</p>
+  <p>Set <code>msg.action</code> to <code>deploy</code> (default), <code>inspect</code> or <code>validate</code>. A fresh installation can be resumed with the same configuration. Existing unrelated upstream namespaces are never adopted.</p>
+  <p><code>test-credentials</code> requires <code>msg.confirm = "CREATE TEST CREDENTIAL"</code>. It creates a test offering, retrieves and accepts it, then checks Storage read-back. Test data is retained as evidence. Only this result can report credential lifecycle validation.</p>
+  <p><code>teardown</code> requires <code>msg.confirm = "REMOVE TENANT demotenant"</code> (substitute your configured release). It removes the tenant Helm release. Shared infrastructure, services, stored credentials and OpenBao keys remain. Removing the node only cancels its local process.</p>
+  <p>State <code>ready</code> covers cluster readiness, TLS and metadata. It does not prove retrieval or storage. Native credential testing reports its stages separately and exports no tokens or credential bodies.</p>
 </script>

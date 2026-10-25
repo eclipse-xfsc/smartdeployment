@@ -1,37 +1,12 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "11.1.0",
-  "description": "OCM-W-Stack deployer node",
-  "dependencies": {
-    "tmp": "0.2.5",
-    "bcryptjs": "2.4.3"
-  },
-  "scripts": {
-    "test": "node --test test/unit/*.test.cjs",
-    "test:runtime": "./test/runtime-health.sh",
-    "test:bdd": "./test/bdd/run.sh",
-    "test:evidence": "./test/evidence/collect-runtime-evidence.sh",
-    "test:legacy": "./test/static-validate.sh"
-  },
-  "keywords": [
-    "ocm",
-    "ocm-w-stack",
-    "easy",
-    "stack",
-    "builder",
-    "xfsc",
-    "faps",
-    "fap",
-    "kubernetes",
-    "k8s"
-  ],
-  "node-red": {
-    "nodes": {
-      "ocmwstack": "ocmwstack.js"
-    }
-  },
-  "engines": {
-    "node": ">=18.0.0",
-    "node-red": ">=3.0.0"
-  }
+  "version": "12.0.0",
+  "description": "ESB wrapper for the official eclipse-xfsc/deployment bootstrap procedure",
+  "license": "Apache-2.0",
+  "engines": {"node": ">=18.17.0", "node-red": ">=3.0.0"},
+  "node-red": {"nodes": {"ocmwstack": "ocmwstack.js"}},
+  "files": ["ocmwstack.js", "ocmwstack.html", "lib", "scripts", "upstream-lock.json", "README.md", "CHANGELOG.md", "VALIDATION.md", "NOTICE", "LICENSE", "examples"],
+  "scripts": {"test": "node --test test/*.test.js", "test:helm": "python3 test/render.py", "check": "node scripts/cli.js check", "pack:check": "npm pack --dry-run --ignore-scripts"},
+  "keywords": ["node-red", "xfsc", "esb", "ocm-wstack", "kubernetes"],
+  "devDependencies": {"jsdom": "26.1.0"}
 }

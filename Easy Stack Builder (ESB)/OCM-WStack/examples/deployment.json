@@ -1,0 +1,16 @@
+{
+  "procedureVersion": 12,
+  "instanceName": "ocm-wstack",
+  "domainAddress": "example.com",
+  "emailAddress": "admin@example.com",
+  "provider": "auto",
+  "storageClass": "",
+  "lbAnnotations": {},
+  "externalDns": false,
+  "dnsProvider": "auto",
+  "dnsValues": {},
+  "tenantId": "demo-tenant",
+  "tenantSubdomain": "",
+  "tenantRelease": "demotenant",
+  "timeoutSeconds": 1800
+}
