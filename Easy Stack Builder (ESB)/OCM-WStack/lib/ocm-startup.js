@@ -5,6 +5,10 @@ const {fail}=require('./config');
 const RESOLVER='http://universal-resolver-service.infrastructure.svc.cluster.local:8080';
 const IMAGE='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/credential-retrieval-service:1.1.5';
 const DIGEST='sha256:c6ff55eaff0624c9e3f94d23a823c9cbdb2b7235dc6d14180b359ad8e79176ae';
+const RECOVERY_IMAGES=Object.freeze({
+ [IMAGE]:DIGEST,
+ 'node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/credential-retrieval-service:1.1.7-alpha':'sha256:6a9363c4e8c4437fa185bf1dd859c34e1eebc100fcdbbcfc988fd258d4b333d7'
+});
 const CHECKSUM='8968c7a3719d337d84846d35aa370462e9977641cb2a876046ee82ade7bbb864';
 const AUDIT='esb-retrieval-migration-recovery';
 const DIRTY='migration V001 (create offerings table) is marked dirty';
@@ -23,7 +27,11 @@ function environment(d) {
 }
 function recoveryContract(d,pods) {
  const container=d.spec.template.spec.containers.find(x=>x.name==='credential-retrieval-service');
- if(container?.image!==IMAGE||d.status?.availableReplicas>0)fail('RETRIEVAL_RECOVERY_CONTRACT','Recovery requires the reviewed, unavailable Retrieval 1.1.5 deployment. No migration state was changed.');
+ // A workload that recovers during inspection must not cause a repair or a
+ // fatal recovery error based on an earlier dirty-migration log.
+ if(d.status?.availableReplicas>0)return null;
+ if(!Object.hasOwn(RECOVERY_IMAGES,container?.image))fail('RETRIEVAL_RECOVERY_CONTRACT','Recovery requires a reviewed Retrieval 1.1.5 or 1.1.7-alpha image. No migration state was changed.');
+ const image=container.image,digest=RECOVERY_IMAGES[image];
  const e=environment(d),user=e.CREDENTIALRETRIEVAL_CASSANDRA_USER?.valueFrom?.secretKeyRef,pw=e.CREDENTIALRETRIEVAL_CASSANDRA_PASSWORD?.valueFrom?.secretKeyRef;
  if(e.CREDENTIALRETRIEVAL_MIGRATIONS_TABLE?.value!=='retrieval_schema_migration'||
     e.CREDENTIALRETRIEVAL_CASSANDRA_HOSTS?.value!=='cassandra.infrastructure.svc.cluster.local'||
@@ -36,10 +44,13 @@ function recoveryContract(d,pods) {
    const c=p.spec?.containers?.find(x=>x.name==='credential-retrieval-service');
    const s=p.status?.containerStatuses?.find(x=>x.name==='credential-retrieval-service');
    const last=s?.state?.terminated||s?.lastState?.terminated;
-   if(s?.imageID&&!s.imageID.endsWith('@'+DIGEST))fail('RETRIEVAL_RECOVERY_IMAGE','The running Retrieval digest differs from the reviewed migration recovery image. No migration state was changed.');
-   return p.metadata.deletionTimestamp||c?.image!==IMAGE||!s?.imageID||s.ready||s.state?.running||last?.exitCode!==1;
+   // Wait for obsolete/terminating pods and any active native process before
+   // examining the digest of the selected, crashed image.
+   if(p.metadata.deletionTimestamp||c?.image!==image||!s?.imageID||s.ready||s.state?.running||last?.exitCode!==1)return true;
+   if(!s.imageID.endsWith('@'+digest))fail('RETRIEVAL_RECOVERY_IMAGE','The running Retrieval digest differs from the reviewed migration recovery image. No migration state was changed.');
+   return false;
  }))return null; // A native migration may still be running. Wait, never compete.
- return {secret:user.name};
+ return {secret:user.name,image,digest};
 }
 async function saveEvidence(r,record) {
  const old=await r.json('kubectl',['-n','ocm-wstack','get','configmap',AUDIT,'--ignore-not-found','-o','json']);
@@ -69,14 +80,14 @@ async function repair(r,d,pods) {
  }
  const inspection=await execute('inspect');
  if(inspection.state!=='repairable')return inspection;
- const record={image:IMAGE,digest:DIGEST,checksum:CHECKSUM,checkedAt:new Date().toISOString(),...inspection};
+ const record={image:contract.image,digest:contract.digest,checksum:CHECKSUM,checkedAt:new Date().toISOString(),...inspection};
  await saveEvidence(r,record);
  // Recheck the crashing image/config immediately before a database write.
  const latest=await r.json('kubectl',['-n','ocm-wstack','get','deployment',d.metadata.name,'-o','json']);
  const current=await r.json('kubectl',['-n','ocm-wstack','get','pods','-l','app.kubernetes.io/name=credential-retrieval-service','-o','json']);
  const again=recoveryContract(latest,current?.items||[]);
  if(!again)return {state:'settling'};
- if(again.secret!==contract.secret)fail('RETRIEVAL_RECOVERY_CONTRACT','Native credential reference changed during inspection.');
+ if(again.secret!==contract.secret||again.image!==contract.image||again.digest!==contract.digest)fail('RETRIEVAL_RECOVERY_CONTRACT','Retrieval image or native credential reference changed during inspection.');
  const result=await execute('repair',inspection.before);
  await saveEvidence(r,{...record,...result,finishedAt:new Date().toISOString()});
  r.emit({type:'migration-recovery',service:'credential-retrieval',state:result.state,version:1,checksum:CHECKSUM,evidence:'ocm-wstack/'+AUDIT});
@@ -128,4 +139,4 @@ async function stabilize(r,{timeoutSeconds=900,runtimeEnabled=true,runtimeServic
  }
  fail('OCM_STARTUP',`Native OCM services did not become ready: ${last}. Credential/listener check: ${JSON.stringify(lastOperational||{ready:false,code:'WORKLOADS_PENDING'})}. Existing services, credentials and volumes were retained.`);
 }
-module.exports={resolver,ready,recoveryContract,repair,stabilize,RESOLVER,IMAGE,DIGEST,CHECKSUM};
+module.exports={resolver,ready,recoveryContract,repair,stabilize,RESOLVER,IMAGE,DIGEST,CHECKSUM,RECOVERY_IMAGES};

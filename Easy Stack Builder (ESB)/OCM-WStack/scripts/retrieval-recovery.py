@@ -1,4 +1,6 @@
-"""Guarded recovery of the official Retrieval 1.1.5 V001 migration.
+"""Guarded recovery of the unchanged official Retrieval V001 migration.
+
+Supported image/digest pairs are checked by the ESB startup helper before exec.
 
 Executed via kubectl exec in the existing Cassandra container. Uses that image's
 bundled Python driver; no service binary, driver or database is shipped by ESB.
@@ -73,7 +75,7 @@ def recover(db, config, now=None):
     stamp = row['applied_at'].replace(tzinfo=datetime.timezone.utc)
     now = now or datetime.datetime.now(datetime.timezone.utc)
     age = (now - stamp).total_seconds()
-    # Native 1.1.5 has a two-minute migration deadline. The five-minute guard,
+    # The reviewed native runners have a two-minute migration deadline. The five-minute guard,
     # known crashed image and conditional update avoid racing its first attempt.
     if age < 300:
         return {'state': 'settling', 'retryAfterSeconds': max(1, int(301 - age))}
