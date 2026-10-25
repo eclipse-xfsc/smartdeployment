@@ -81,20 +81,14 @@ async function prerequisites(r,timeoutSeconds) {
   r.emit({type:'ocm-prerequisites',signing:current?'retained':'created',cassandraSecret:CASSANDRA_SECRET});
 }
 async function imagePreflight(r,directory) {
-  const accept='Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json';
-  const url=`https://${REGISTRY}/v2/tsa/policy/manifests/1.0.0`,body=path.join(directory,'policy-image.json'),headers=path.join(directory,'policy-image-headers.txt');
+  let result;
   try {
-    const args=['--fail','--silent','--show-error','--max-time','30','--header',accept];
-    // containerd resolves manifests with HEAD; GET alone misses the reported bug.
-    await r.run('curl',[...args,'--head','--output',headers,url],{timeout:35000});
-    await r.run('curl',[...args,'--output',body,url],{timeout:35000});
-    const manifest=JSON.parse(await fs.readFile(body,'utf8'));
-    if(manifest.schemaVersion!==2||!(manifest.manifests?.length||/^(application\/vnd\.oci\.image\.config\.v1\+json|application\/vnd\.docker\.container\.image\.v1\+json)$/.test(manifest.config?.mediaType||'')))throw new Error('The tag does not contain a container image manifest.');
+    result=await require('./registry').verifyImage(r,directory,{registry:REGISTRY,repository:'tsa/policy',tag:'1.0.0'});
   } catch(e) {
     if(r.signal?.aborted||e.code==='CANCELLED')throw e;
-    fail('POLICY_IMAGE',`Cannot resolve public policy image ${POLICY_IMAGE} using HEAD and GET. No cluster changes were started. ${r.redact(e.message).slice(-700)}`);
+    fail('POLICY_IMAGE',`Cannot resolve policy image ${POLICY_IMAGE} using HEAD and GET. No cluster changes were started. ${r.redact(e.message).slice(-700)}`);
   }
-  r.emit({type:'image-preflight',image:POLICY_IMAGE,status:'resolvable'});
+  r.emit({type:'image-preflight',image:POLICY_IMAGE,status:'resolvable',authentication:result.authentication});
 }
 function validateManifests(documents,chart) {
   const name=chart===POLICY?'policy':'credential-verification-service';
@@ -104,7 +98,7 @@ function validateManifests(documents,chart) {
   const pod=workload.spec.template,container=pod.spec.containers.find(x=>x.name===name),env=Object.fromEntries((container.env||[]).map(x=>[x.name,x]));
   if(JSON.stringify(container.env).includes('NAMESPACE'))fail('OCM_VALUES',`Unresolved namespace in ${name} environment.`);
   if(chart===POLICY) {
-    if(container.image!==POLICY_IMAGE||pod.spec.imagePullSecrets?.some(x=>x.name))fail('OCM_VALUES','Policy did not render the public tsa/policy image without a pull secret.');
+    if(container.image!==POLICY_IMAGE||pod.spec.imagePullSecrets?.some(x=>x.name))fail('OCM_VALUES','Policy did not render the selected tsa/policy image without a stale pull-secret reference.');
     if(env.NATS_ADDR?.value!=='nats://nats.infrastructure.svc.cluster.local:4222')fail('OCM_VALUES','Policy NATS override was ignored.');
     const port=container.ports?.find(x=>x.name==='http')?.containerPort;
     const service=Object.values(documents).find(d=>d?.kind==='Service'&&d.metadata?.name==='policy');

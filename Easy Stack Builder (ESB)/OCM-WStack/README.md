@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.8
+# OCM W-Stack ESB 12.0.9
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -12,7 +12,7 @@ The wrapper fetches that checkout at deployment time and executes `bash ocm-wsta
 
 No service image is rebuilt, patched or bundled. Both distribution archives contain source text only. The upstream scripts and charts download their normal dependencies when you deploy.
 
-## Updating from 12.0.0–12.0.7
+## Updating from 12.0.0–12.0.8
 
 Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. A failed partial bootstrap can resume when settings match and the affected Helm release is absent, failed or deployed. A pending Helm operation requires inspection; ESB never clears it automatically.
 
@@ -20,7 +20,7 @@ The credential enforcement introduced in 12.0.7 pins all ESB kubectl and Helm ca
 
 ## Repairing the policy and verification deployment
 
-12.0.8 supplies chart-specific Helm values through the OCM ApplicationSet. Argo retains these values while continuing to track upstream main. Policy uses the dependency chart's published `tsa/policy:1.0.0` image, clears its unavailable deployment-key-light reference, resolves NATS/resolver/signer addresses, aligns its HTTP listener and Service on port 8080, and loads `OCM W-Stack/Policies` from the current official GitHub deployment repository.
+12.0.8 supplies chart-specific Helm values through the OCM ApplicationSet. Argo retains these values while continuing to track upstream main. Policy selects `tsa/policy:1.0.0`, clears its unavailable deployment-key-light reference, resolves NATS/resolver/signer addresses, aligns its HTTP listener and Service on port 8080, and loads `OCM W-Stack/Policies` from the current official GitHub deployment repository. Registry access must pass preflight; the repository path alone does not prove anonymous pull permission.
 
 Verification connects to Cassandra and NATS in infrastructure, and to signer in ocm-wstack. It uses a dedicated ESO Secret for the legacy Cassandra password reference. This chart still uses the infrastructure Cassandra login; ESO reads its password from the existing infrastructure-openbao ClusterSecretStore and refreshes it without putting credentials in Helm values. A future migration of this legacy chart to application ResourceClaims is separate from this compatibility correction.
 
@@ -29,6 +29,10 @@ A fresh deployment generates the missing signing Secret before starting OCM appl
 For the current partial installation, install this TGZ and restart ORCE to stop the previous local operation. Keep the same node settings and uploaded administrator kubeconfig. Trigger an Inject node with **msg.action = "repair-ocm"**. Repair requires the matching ESB ownership marker, an existing deployed/failed OCM Helm release and healthy storage/network/core ApplicationSets. It updates OCM prerequisites and the OCM ApplicationSet, waits for all OCM applications, then continues the tenant setup and validation. It does not replay shared infrastructure Helm releases or delete workloads/PVCs. A cluster lease held by the stopped operation may need up to three minutes to expire.
 
 Preflight renders both corrected workloads for install and upgrade, checks the actual environment/Secret references and policy Service ports, and resolves the policy image using both registry HEAD and GET requests. Registry failures stop before installation writes. This is a check from the ORCE runtime; cluster-node network access and live service startup still require deployment validation.
+
+12.0.9 handles the registry's HTTP 401 Bearer challenge: request an anonymous token for `repository:tsa/policy:pull`, then retry the manifest request. An initial 401 can occur for a public repository and is not proof that credentials are required. The token stays in a temporary private file, is omitted from command arguments/events and is removed when preflight ends. If the token endpoint or authenticated manifest request refuses anonymous access, preflight stops with that specific status; it does not skip image verification or use Kubernetes credentials for registry authentication.
+
+For the reported 12.0.8 preflight failure, install 12.0.9, restart ORCE, keep the existing node and uploaded admin kubeconfig, and trigger `msg.action = "preflight"`. After it succeeds, repeat the action that failed (`deploy` for a fresh/resumable bootstrap or `repair-ocm` for the existing matching partial OCM installation).
 
 ## Kubernetes API EOF recovery
 
@@ -71,10 +75,10 @@ node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.8.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.9.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.8.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.9.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.

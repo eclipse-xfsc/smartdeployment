@@ -44,6 +44,26 @@ test('executes real official entrypoint once, in order, and installs upstream te
   await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
   const after=(await h.readCalls()).filter(x=>x.command==='helm'&&x.args[0]==='upgrade');assert.equal(after.length,before+1);assert.equal(after.at(-1).args[2],'demotenant');
 });
+test('registry Bearer challenge completes before any installation writes without exposing its token',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_POLICY_CHALLENGE='true';return r;};
+  const report=await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);assert.equal(report.status,'ready');
+  const calls=await h.readCalls();
+  const tokenIndex=calls.findIndex(x=>x.command==='curl'&&x.args.at(-1).includes('/service/token?'));
+  const lastManifest=calls.findLastIndex(x=>x.command==='curl'&&x.args.at(-1).includes('/v2/tsa/policy/'));
+  const firstMutation=calls.findIndex(x=>(x.command==='helm'&&x.args[0]==='upgrade')||(x.command==='kubectl'&&x.args.some(a=>['create','replace','apply'].includes(a))));
+  assert.ok(tokenIndex>=0&&lastManifest>tokenIndex&&firstMutation>lastManifest);
+  assert.equal(h.events.find(e=>e.type==='image-preflight').authentication,'anonymous-bearer');
+  assert.ok(!JSON.stringify(calls).includes('private-mock-registry-token'));assert.ok(!JSON.stringify(h.events).includes('private-mock-registry-token'));
+  const file=calls[lastManifest].args.find(a=>a.startsWith('@')).slice(1);await assert.rejects(fs.stat(file),{code:'ENOENT'});
+});
+test('denied anonymous registry token stops before lease, marker, Helm or Kubernetes writes',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_POLICY_CHALLENGE='true';r.env.ESB_TEST_POLICY_TOKEN_DENIED='true';return r;};
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.code==='POLICY_IMAGE'&&e.message.includes('token request returned HTTP 401'));
+  const calls=await h.readCalls();
+  assert.ok(!calls.some(x=>(x.command==='helm'&&x.args[0]==='upgrade')||(x.command==='kubectl'&&x.args.some(a=>['create','replace','apply'].includes(a)))));
+});
 test('upstream Helm failure stops before network/OCM/tenant, retains progress and permits a matching resume',async t=>{
   const h=await setup(t,{failRelease:'storage'});
   await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'COMMAND_FAILED'});

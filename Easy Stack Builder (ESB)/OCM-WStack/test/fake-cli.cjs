@@ -25,8 +25,17 @@ if(cmd==='git') {
 }
 if(cmd==='curl') {
   if(args.at(-1).includes('/v2/tsa/policy/')) {
-    if(process.env.ESB_TEST_BAD_POLICY_IMAGE==='true')fail('HTTP 400 Bad Request');
-    fs.writeFileSync(args[args.indexOf('--output')+1],args.includes('--head')?'HTTP/1.1 200 OK\n':JSON.stringify({schemaVersion:2,config:{mediaType:'application/vnd.oci.image.config.v1+json'},layers:[]}));process.exit(0);
+    const bad=process.env.ESB_TEST_BAD_POLICY_IMAGE==='true';
+    const bearer=args.some(a=>a.startsWith('@'));
+    const challenged=process.env.ESB_TEST_POLICY_CHALLENGE==='true'&&!bearer;
+    const status=bad?400:challenged?401:200;
+    fs.writeFileSync(args[args.indexOf('--dump-header')+1],`HTTP/1.1 ${status}\r\n${challenged?'WWW-Authenticate: Bearer realm="https://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/service/token",service="harbor-registry",scope="repository:tsa/policy:pull"\r\n':''}\r\n`);
+    fs.writeFileSync(args[args.indexOf('--output')+1],args.includes('--head')?'':JSON.stringify({schemaVersion:2,config:{mediaType:'application/vnd.oci.image.config.v1+json'},layers:[]}));out(String(status));process.exit(0);
+  }
+  if(args.at(-1).includes('/service/token?')) {
+    const denied=process.env.ESB_TEST_POLICY_TOKEN_DENIED==='true';
+    fs.writeFileSync(args[args.indexOf('--dump-header')+1],`HTTP/1.1 ${denied?401:200}\r\n\r\n`);
+    fs.writeFileSync(args[args.indexOf('--output')+1],JSON.stringify(denied?{error:'unauthorized'}:{token:'private-mock-registry-token'}));out(denied?'401':'200');process.exit(0);
   }
   fs.writeFileSync(args[args.indexOf('--output')+1],'kind: CustomResourceDefinition\n---\nkind: Deployment\nmetadata:\n  name: argocd-server\nspec:\n  template:\n    spec:\n      containers:\n        - name: redis\n          image: public.ecr.aws/docker/library/redis:8.2.3-alpine\n');
   process.exit(0);

@@ -29,7 +29,7 @@ test('cancelling an outer bootstrap also terminates a nested helper and its chil
   controller.abort();await rejected;assert.ok(pid,'nested child started');
   let running=true;
   for(let attempt=0;attempt<100;attempt++){
-    try {const stat=await fs.readFile(`/proc/${pid}/stat`,'utf8');running=!/^\d+ \(.*\) Z /.test(stat);}catch(e){if(e.code==='ENOENT')running=false;else throw e;}
+    try {const stat=await fs.readFile(`/proc/${pid}/stat`,'utf8');running=!/^\d+ \(.*\) Z /.test(stat);}catch(e){if(['ENOENT','ESRCH'].includes(e.code))running=false;else throw e;}
     if(!running)break;await new Promise(resolve=>setTimeout(resolve,20));
   }
   assert.equal(running,false,'nested command must not survive bootstrap cancellation');
@@ -49,7 +49,7 @@ test('cancelling the actual OCM prerequisites helper also stops its active kubec
   controller.abort();await rejected;assert.ok(pid);
   let running=true;
   for(let i=0;i<100;i++){
-    try{running=!/^\d+ \(.*\) Z /.test(await fs.readFile(`/proc/${pid}/stat`,'utf8'));}catch(e){if(e.code==='ENOENT')running=false;else throw e;}
+    try{running=!/^\d+ \(.*\) Z /.test(await fs.readFile(`/proc/${pid}/stat`,'utf8'));}catch(e){if(['ENOENT','ESRCH'].includes(e.code))running=false;else throw e;}
     if(!running)break;await new Promise(resolve=>setTimeout(resolve,20));
   }
   assert.equal(running,false,'prerequisite kubectl must stop with the bootstrap');

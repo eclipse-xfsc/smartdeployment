@@ -43,7 +43,7 @@ test('foreign Cassandra ExternalSecret is retained rather than overwritten',asyn
 test('policy image preflight requires HEAD and a real image manifest, not an OCI Helm artifact',async t=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'ocm-image-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const calls=[];let media='application/vnd.cncf.helm.config.v1+json';
-  const r={redact:String,emit(){},run:async(cmd,args)=>{calls.push(args);await fs.writeFile(args[args.indexOf('--output')+1],args.includes('--head')?'HTTP/1.1 200 OK':JSON.stringify({schemaVersion:2,config:{mediaType:media}}));}};
+  const r={secrets:[],redact:String,emit(){},run:async(cmd,args)=>{calls.push(args);await fs.writeFile(args[args.indexOf('--dump-header')+1],'HTTP/1.1 200 OK\r\n\r\n');await fs.writeFile(args[args.indexOf('--output')+1],args.includes('--head')?'':JSON.stringify({schemaVersion:2,config:{mediaType:media}}));return {stdout:'200'};}};
   await assert.rejects(ocm.imagePreflight(r,dir),{code:'POLICY_IMAGE'});
   media='application/vnd.oci.image.config.v1+json';await ocm.imagePreflight(r,dir);
   assert.ok(calls[0].includes('--head'));assert.ok(!calls[1].includes('--head'));
