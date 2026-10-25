@@ -9,10 +9,18 @@ async function boot(t,{failure=false}={}){
  const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
  w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
- let removed=false,accepted=false,connections={pcm:{enabled:false},trustedHosts:[],redirectUri:'https://wallet.example/orce/pcm/callback'};
+ let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'roles.manage',kind:'atomic',editable:false,permissions:['roles.manage']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false,connections={pcm:{enabled:false},trustedHosts:[],redirectUri:'https://wallet.example/orce/pcm/callback'};
  w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').replace(/^\/pcm/,'').split('?')[0];let data={items:[]};
   if(p==='/connections'){if(o.method==='PUT')connections={...connections,...JSON.parse(o.body)};data=connections;}
-  else if(p==='/connections/test')data={state:'succeeded'};
+  else if(p==='/connections/test')data={state:'partial',checkedAt:new Date().toISOString(),checks:[{name:'oidc',state:'passed'},{name:'accountEndpoint',state:'authentication_required',httpStatus:401},{name:'personalLogin',state:'not_tested'}]};
+  else if(p==='/connection-test')data={state:'succeeded',checks:[{name:'credentials',state:'passed'},{name:'offers',state:'passed'}]};
+  else if(p==='/credential-types'&&o.method==='GET')data={items:registry,nativeTypes:[{id:'Native',format:'ldp_vc'}]};
+  else if(p==='/credential-types'&&o.method==='POST'){registry.push({...JSON.parse(o.body),revision:1,available:false});data={state:'succeeded'};}
+  else if(p.startsWith('/credential-types/')){const id=decodeURIComponent(p.split('/').at(-1));if(o.method==='DELETE')registry=registry.filter(x=>x.id!==id);else registry=registry.map(x=>x.id===id?{...JSON.parse(o.body),revision:x.revision+1}:x);data={state:'succeeded'};}
+  else if(p==='/roles'&&o.method==='GET')data={items:roles};
+  else if(p==='/role-assignments')data={items:users};
+  else if(p.endsWith('/effective'))data={permissions:['credentials.read']};
+  else if(p==='/audit')data={items:[{timestamp:new Date().toISOString(),actor:{username:'Alice',subject:'user-1'},action:'createType',outcome:'succeeded',requestId:'r1'},{timestamp:new Date().toISOString(),subject:'legacy-user',action:'accept',outcome:'succeeded',requestId:'r2'}]};
   else if(p==='/auth/me')data={subject:'operator',username:'Mani',permissions};
   else if(p==='/me')data={account:'alice'};
   else if(p==='/preferences')data={locale:'en'};
@@ -22,6 +30,7 @@ async function boot(t,{failure=false}={}){
   else if(p==='/credentials/one/verify')data={overall:'valid',cryptographic:{state:'valid'},status:{state:'not_required'},disclosedClaims:{name:'Alice'}};
   else if(p==='/credentials/one'&&o.method==='DELETE'){removed=true;data={state:'succeeded',credentialId:'one'};}
   else if(p==='/credentials/one')data={...summary,raw:{type:['VerifiableCredential']},claims:{name:'Alice'},capabilities:{revoke:false,delete:true,verify:true}};
+  else if(p==='/credentials/import')data={state:'succeeded',credentialId:'new',lifecycle:{state:'checked',persistence:'confirmed',credentialId:'new',options:[{action:'verify',available:true},{action:'revoke',available:false,reason:'STATUS_NOT_MANAGED_HERE'}]}};
   else if(p==='/offers')data={items:accepted?[]:[{requestId:'offer-1',issuer:'https://issuer.example',credentialConfigurationIds:['Participant'],state:'pending'}]};
   else if(p==='/offers/import')data={state:'succeeded',upstreamRequestId:'offer-1'};
   else if(p.endsWith('/accept')){accepted=true;data={state:'succeeded',accepted:true,upstreamRequestId:'offer-1'};}
@@ -51,6 +60,36 @@ test('OCM Connections page saves PCM and trusted peers without a deployer config
  const b=await boot(t);await b.click('Connections');assert.match(b.text(),/Personal OCM context connection/);
  const enabled=b.w.document.querySelector('input[type=checkbox]');enabled.checked=true;enabled.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.settle();
  for(const [id,value]of Object.entries({'f-pcmIssuer':'https://identity.pcm.example/realms/pcm','f-pcmClient':'wallet','f-pcmTenant':'pcm','f-pcmAccountUrl':'https://pcm.example'})){const field=b.w.document.getElementById(id);assert.ok(field);field.value=value;field.dispatchEvent(new b.w.Event('input',{bubbles:true}));}
- const trusted=b.w.document.getElementById('a-trustedHosts');trusted.value='peer.example';trusted.dispatchEvent(new b.w.Event('input',{bubbles:true}));await b.click('Test connection');assert.match(b.text(),/OIDC discovery succeeded/);await b.click('Save');
+ const trusted=b.w.document.getElementById('a-trustedHosts');trusted.value='peer.example';trusted.dispatchEvent(new b.w.Event('input',{bubbles:true}));await b.click('Test connection');assert.match(b.text(),/Discovery and endpoint checks completed/);await b.click('Save');
  const call=b.calls.find(x=>x.url.endsWith('/connections')&&x.o.method==='PUT');assert.ok(call);assert.equal(JSON.parse(call.o.body).pcm.accountUrl,'https://pcm.example');assert.deepEqual(JSON.parse(call.o.body).trustedHosts,['peer.example']);assert.match(b.text(),/Connection settings saved/);
+});
+async function fill(b,id,value){const el=b.w.document.getElementById(id);assert.ok(el,id);el.value=value;el.dispatchEvent(new b.w.Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));await b.settle();}
+test('SVG logo and registry create, edit, delete interactions work in the real DOM',async t=>{
+ const b=await boot(t);assert.equal(b.w.document.querySelector('img[alt="FACIS"]').getAttribute('src'),'/orce/facis-logo.svg');
+ await b.click('Credential registry');await b.click('Create credential type');await fill(b,'f-identifier','Business');await fill(b,'f-name','Business type');await b.click('Add field');await fill(b,'f-fieldName0','company');await b.click('Save');assert.match(b.text(),/Business type/);
+ const edit=[...b.w.document.querySelectorAll('tr')].find(x=>x.textContent.includes('Business type'));[...edit.querySelectorAll('button')].find(x=>x.textContent==='Edit').click();await b.settle();assert.equal(b.w.document.getElementById('s-issuerConfiguration').value,'');await fill(b,'f-name','Updated business');await b.click('Save');assert.match(b.text(),/Updated business/);
+ const row=[...b.w.document.querySelectorAll('tr')].find(x=>x.textContent.includes('Updated business'));[...row.querySelectorAll('button')].find(x=>x.textContent==='Delete type').click();await b.settle();assert.doesNotMatch(b.text(),/Updated business/);
+ const create=b.calls.find(x=>x.url.endsWith('/credential-types')&&x.o.method==='POST');assert.equal(JSON.parse(create.o.body).fields.company.maxLength,256);
+});
+test('roles and permission panels expose grouped labels and send permission edits',async t=>{
+ const b=await boot(t);await b.click('Roles');assert.match(b.text(),/viewer/);assert.doesNotMatch(b.text(),/Create user/);await b.click('Create role');await fill(b,'f-name','custom');
+ const checkbox=b.w.document.querySelector('.permission-grid input');checkbox.checked=true;checkbox.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.click('Save');
+ const call=b.calls.find(x=>x.url.endsWith('/roles')&&x.o.method==='POST');assert.deepEqual(JSON.parse(call.o.body).permissions,['credentials.read']);
+ await b.click('Permissions');assert.match(b.text(),/Read credentials/);assert.equal(b.w.document.querySelector('.permission-grid input'),null);
+});
+test('users panel supports profile creation and displays effective role permissions',async t=>{
+ const b=await boot(t);await b.click('Users');assert.match(b.text(),/Alice/);await b.click('Manage access');assert.match(b.text(),/Effective permissions/);assert.match(b.text(),/Read credentials/);await b.click('Close');
+ await b.click('Create user');await fill(b,'f-username','bob');await fill(b,'f-temporaryPassword','test-long-password');await b.click('Save');
+ assert.equal(JSON.parse(b.calls.find(x=>x.url.endsWith('/users')&&x.o.method==='POST').o.body).username,'bob');
+});
+test('audit shows actor usernames and stable fallback IDs for earlier events',async t=>{
+ const b=await boot(t);await b.click('Audit log');assert.match(b.text(),/Alice/);assert.match(b.text(),/user-1/);assert.match(b.text(),/legacy-user/);
+});
+test('PCM test results distinguish reachable endpoints and test signed-in operations',async t=>{
+ const b=await boot(t);await b.click('Connections');const enabled=b.w.document.querySelector('input[type=checkbox]');enabled.checked=true;enabled.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.settle();
+ for(const [id,value]of Object.entries({'f-pcmIssuer':'https://identity.example/realms/pcm','f-pcmClient':'wallet','f-pcmTenant':'pcm','f-pcmAccountUrl':'https://pcm.example'}))await fill(b,id,value);
+ await b.click('Test connection');assert.match(b.text(),/Reachable; login required/);assert.match(b.text(),/Not tested/);await b.click('Save');await b.click('Connect PCM Cloud');await b.click('Test signed-in account');assert.ok(b.calls.some(x=>x.url.endsWith('/pcm/connection-test')&&x.o.headers['X-PCM-Authorization']==='Bearer pcm-token'));
+});
+test('credential import renders lifecycle checks without offering unsupported revocation',async t=>{
+ const b=await boot(t);await b.click('Receive credential');await fill(b,'a-credentialJson','{"type":["VerifiableCredential"]}');await b.click('Import credential file');assert.match(b.text(),/Credential lifecycle checks/);assert.match(b.text(),/Storage confirmed/);assert.match(b.text(),/STATUS_NOT_MANAGED_HERE/);
 });

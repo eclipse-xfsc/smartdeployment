@@ -35,9 +35,24 @@ class Roles {
   string(search,0,128);if(search&&search.length<2)fail(400,'VALIDATION_ERROR');
   const users=await this.call('/users?max=100'+(search?'&search='+id(search):''));
   const base=await this.base();const items=[];
-  for(const user of users){if(user.serviceAccountClientId)continue;const roles=await this.call('/users/'+id(user.id)+'/role-mappings/clients/'+this.client);items.push({id:user.id,username:user.username,enabled:user.enabled,roles:roles.map(r=>({id:r.id,name:r.name}))});}
+  for(const user of users){if(user.serviceAccountClientId)continue;const roles=await this.call('/users/'+id(user.id)+'/role-mappings/clients/'+this.client);items.push({id:user.id,username:user.username,email:user.email||'',firstName:user.firstName||'',lastName:user.lastName||'',enabled:user.enabled,roles:roles.map(r=>({id:r.id,name:r.name}))});}
   return {items};
  }
+ async user(uid,body,remove=false){return this.lock(async()=>{
+  if(!remove){
+   object(body,['username','email','firstName','lastName','enabled','temporaryPassword']);
+   string(body.username,1,128);if(/\s/.test(body.username))fail(400,'VALIDATION_ERROR');
+   for(const key of ['email','firstName','lastName'])if(body[key]!==undefined)string(body[key],0,256);
+   if(body.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)||typeof body.enabled!=='boolean')fail(400,'VALIDATION_ERROR');
+   if(!uid)string(body.temporaryPassword,12,256);else if(body.temporaryPassword!==undefined)fail(400,'VALIDATION_ERROR');
+  }
+  let old;if(uid){old=await this.call('/users/'+id(uid));if(old.serviceAccountClientId)fail(403,'SYSTEM_USER_PROTECTED');if(remove||!body.enabled)await this.protect({uid,assigned:[]});}
+  if(remove){await this.call('/users/'+id(uid),'DELETE');return {state:'succeeded',resourceId:uid};}
+  const value={username:body.username,email:body.email||'',firstName:body.firstName||'',lastName:body.lastName||'',enabled:body.enabled};
+  if(uid){if(old.username!==body.username)fail(400,'USER_NAME_IMMUTABLE');await this.call('/users/'+id(uid),'PUT',{...value,...(old.email!==value.email?{emailVerified:false}:{})});}
+  else{await this.call('/users','POST',{...value,requiredActions:['UPDATE_PASSWORD'],credentials:[{type:'password',value:body.temporaryPassword,temporary:true}]});}
+  return {state:'succeeded',...(uid?{resourceId:uid}:{}),refreshRequired:true};
+ });}
  async effective(uid){const base=await this.base();return (await this.call('/users/'+id(uid)+'/role-mappings/clients/'+this.client+'/composite')).filter(r=>atomic.includes(r.name)).map(r=>r.name);}
  async lock(fn){
   const locks=this.db.collection('coordination_locks'),key='roles:'+this.c.realm;

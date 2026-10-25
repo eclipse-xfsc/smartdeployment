@@ -49,7 +49,16 @@ class Integrations {
   const cryptoNamespace=p.cryptoNamespace||'pcm-cloud';if(!/^[a-z0-9][a-z0-9-]{0,62}$/.test(cryptoNamespace))fail(400,'VALIDATION_ERROR');
   return {pcm:{enabled:true,issuer,clientId:p.clientId,tenant:p.tenant,accountUrl,cryptoNamespace,services,userInfo:remote.userinfo_endpoint,authorizationEndpoint:remote.authorization_endpoint,tokenEndpoint:remote.token_endpoint},trustedHosts};
  }
- async test(body){const settings=await this.validate(body);return {state:'succeeded',oidc:settings.pcm.enabled?'discovered':'disabled',redirectUri:this.r.c.publicOrigin+'/orce/pcm/callback'};}
+ async test(body){
+  const checkedAt=new Date().toISOString(),redirectUri=this.r.c.publicOrigin+'/orce/pcm/callback';
+  let settings;try{settings=await this.validate(body);}catch(e){return {state:'failed',checkedAt,checks:[{name:'oidc',state:'failed',code:e.code||'CONNECTION_FAILED'}],redirectUri};}
+  if(!settings.pcm.enabled)return {state:'disabled',checkedAt,checks:[],redirectUri};
+  const checks=[{name:'oidc',state:'passed'},{name:'pkce',state:'passed'}],p=settings.pcm;
+  try{await this.fetch(p.accountUrl+'/v1/tenants/'+encodeURIComponent(p.tenant)+'/api/accounts/credentials/schemas',{timeout:5000,maxBytes:262144});checks.push({name:'accountEndpoint',state:'reachable'});}
+  catch(e){checks.push({name:'accountEndpoint',state:[401,403].includes(e.upstreamStatus)?'authentication_required':'failed',...(e.upstreamStatus?{httpStatus:e.upstreamStatus}:{}),code:e.code||'CONNECTION_FAILED'});}
+  checks.push({name:'personalLogin',state:'not_tested'});
+  return {state:checks.some(x=>x.state==='failed')?'failed':'partial',checkedAt,checks,redirectUri};
+ }
  async save(body){const settings={...await this.validate(body),updatedAt:new Date().toISOString()};await this.db.collection('integrations').updateOne({tenant:this.r.c.tenant},{$set:{settings}},{upsert:true});this.apply(settings);return {state:'succeeded',...this.get()};}
 }
 module.exports={Integrations,endpoint,hosts};

@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.2.1
+# OCM W-Stack ESB 12.3.0
 
 This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. The inspected native Storage source has a route/middleware defect; see **Native acceptance limitation** below.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.2.1.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.0.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.2.1.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.0.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -19,6 +19,18 @@ Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack
 Provider, StorageClass, image, PVC sizes and timeout overrides are under Advanced. ORCE defaults to `ecofacis/xfsc-orce:2.0.15`; `2.0.13` is selectable. There are no PCM, ACME, internal-routing, service endpoint or annotation JSON fields in the normal deployment flow.
 
 Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS targets and readiness; output 1 returns the result. A failed operation retains cluster data. Correct configuration and trigger Deploy again to reconcile the same installation. Do not create a different tenant to recover the existing one.
+
+## Upgrade and dashboard recovery
+
+Install 12.3.0, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. Keep the existing cluster, ownership marker, Secrets and PVCs. Both dashboard Secret patch calls are corrected. Existing native services remain at the frozen upstream revision.
+
+Storage `STORAGE_REGION_MISSING` is still unresolved. If it remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
+
+```sh
+node scripts/diagnose-storage.js --kubeconfig /path/to/cluster.yaml
+```
+
+It records image identities and native HTTP status/routes without displaying stored credentials or secrets. The POST it performs is the native credential filter/read operation, not an import.
 
 ## DNS and internet access
 
@@ -36,7 +48,7 @@ The tenant hostname is mapped to the **discovered Envoy Service ClusterIP** insi
 
 The reviewed official bootstrap installs observability, OpenBao, ESO, Kyverno, the XFSC operator, Argo CD and the Storage, Network, Core and OCM ApplicationSets. Then the deployer installs tenant keys/registration/routing, uploaded TLS, the persistent ORCE OCM UI runtime, UI identity, and optional dashboard routes.
 
-Native OCM service implementations are not forked or replaced. Compatibility changes are Helm/bootstrap configuration: provider annotations, traffic policy, chart/environment corrections, namespace/key preparation and internal routing. Storage and DIDComm remain the credential and relationship authorities. MongoDB stores UI preferences, connection settings, audit metadata, idempotency records and encrypted temporary offer results; it is not a substitute OCM context database.
+Native OCM service implementations are not forked or replaced. Compatibility changes are Helm/bootstrap configuration: provider annotations, traffic policy, chart/environment corrections, namespace/key preparation and internal routing. Storage and DIDComm remain the credential and relationship authorities. MongoDB stores UI preferences, connection settings, credential-type definitions, audit metadata, idempotency records and encrypted temporary offer results; it is not a substitute OCM context database.
 
 | URL | Purpose |
 |---|---|
@@ -65,6 +77,8 @@ This is a source-revision freeze, not a claim of a fully immutable supply chain:
 
 ## OCM context and PCM
 
+12.3.0 adds the supplied SVG branding, credential-type CRUD, dedicated Users/Roles/Permissions panels, audit actor identity, visible PCM test results and post-import lifecycle checks. See `docs/BACKLOG-12.3.0.md` for the exact scope and remaining Storage blocker.
+
 The OCM context retains the FACIS branding, navigation, credential cards/detail dialog and EN/DE/FR controls from 11.1.0. It includes native credential browsing, verification, local deletion, supported issuer revocation, offers, issuance, relationships, roles/assignments, audit, health, provenance and **Connections**.
 
 An administrator configures an existing PCM in **OCM context → Connections**. The deployer neither installs PCM nor requests PCM parameters. PCM users sign in separately with PKCE. Organizational tokens are not forwarded to PCM; personal tokens stay in browser memory and are never stored in the settings/audit database. See `docs/PCM-INTEGRATION.md` for the remote client registration and capability-dependent native endpoints.
@@ -77,7 +91,7 @@ The inspected Credential Storage source (`567201e524967d5b9c0798a866f5fb587e9120
 
 The deployer checks native Storage, Retrieval, issuer bootstrap and NATS health and reports `action-required` if they fail. A native HTTP 400 is surfaced promptly instead of silently waiting or returning an empty OCM context. UI availability, internet connectivity and credential lifecycle acceptance are separate results. No Storage fork, database bypass or fake successful lifecycle was added.
 
-The four requested business credential types depend on real issuer plugins/policies supplied by the repository or an authorized issuer. The UI lists available native definitions; demo Developer/SDJWT templates are explicitly labeled. A second-instance exchange, real production Clearing House issuance, and complete live OCM/PCM lifecycle acceptance remain outstanding. See `docs/CR-COVERAGE.md` and `VALIDATION.md`.
+The four requested business credential types depend on real issuer plugins/policies supplied by the repository or an authorized issuer. The registry supports creating and editing local type definitions and linking them to available native issuer configurations. A registry definition alone does not install an issuer plugin or authorize production issuance; demo Developer/SDJWT templates remain explicitly labeled. A second-instance exchange, real production Clearing House issuance, and complete live OCM/PCM lifecycle acceptance remain outstanding. See `docs/CR-COVERAGE.md` and `VALIDATION.md`.
 
 ## CLI and checks
 

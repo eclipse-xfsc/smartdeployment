@@ -19,7 +19,7 @@ class Coordination {
  }
  scope(c){return {tenant:c.tenant,subject:c.subject,account:c.account,group:c.group};}
  async audit(c,action,outcome,requestId,code=null){
-  await this.db.collection('audit_events').insertOne({eventId:randomUUID(),...this.scope(c),action,outcome,requestId,code,timestamp:new Date(),expiresAt:new Date(Date.now()+90*86400000),schemaVersion:1});
+  await this.db.collection('audit_events').insertOne({eventId:randomUUID(),...this.scope(c),actor:{subject:c.subject,username:c.username||null},action,outcome,requestId,code,timestamp:new Date(),expiresAt:new Date(Date.now()+90*86400000),schemaVersion:2});
  }
  async run(c,operation,key,body,fn,reconcile){
   if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,128}$/.test(key))fail(400,'IDEMPOTENCY_KEY_REQUIRED');

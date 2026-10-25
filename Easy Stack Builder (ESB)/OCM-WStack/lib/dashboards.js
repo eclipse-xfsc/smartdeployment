@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs/promises'),path=require('node:path');
 const {fail}=require('./config'),{upgrade}=require('./api-recovery'),tls=require('./tls');
+const {privatePatch}=require('./private-patch');
 const get=(r,kind,name,ns)=>r.json('kubectl',['-n',ns,'get',kind,name,'--ignore-not-found','-o','json']);
 async function preflight(r,c,credentials){
  if(!c.publicDashboards)return;
@@ -13,12 +14,12 @@ async function seedAdmins(r,c,credentials,grafana){
  if(marker?.data?.initialized==='true')return;
  if(typeof credentials.editorPassword!=='string'||credentials.editorPassword.length<12)fail('DASHBOARD_CREDENTIALS','The initial editor password is required to enable dashboard access.');
  const hash=await require('bcryptjs').hash(credentials.editorPassword,12);
- await r.run('kubectl',['-n','argocd','patch','secret','argocd-secret','--type=merge','--patch-file=/dev/stdin'],{input:JSON.stringify({stringData:{'admin.password':hash,'admin.passwordMtime':new Date().toISOString()}})});
+ await privatePatch(r,['-n','argocd','patch','secret','argocd-secret','--type=merge'],{stringData:{'admin.password':hash,'admin.passwordMtime':new Date().toISOString()}});
  const deployments=await r.json('kubectl',['-n','observability','get','deployments','-l','app.kubernetes.io/name=grafana,app.kubernetes.io/instance=observability','-o','json']);
  if(deployments.items?.length!==1)fail('DASHBOARD_DISCOVERY','Expected one Grafana deployment.');
  const deployment=deployments.items[0];
  const ref=deployment.spec?.template?.spec?.containers?.find(x=>x.name==='grafana')?.env?.find(x=>x.name==='GF_SECURITY_ADMIN_PASSWORD')?.valueFrom?.secretKeyRef;
- if(ref?.name&&ref.key)await r.run('kubectl',['-n','observability','patch','secret',ref.name,'--type=merge','--patch-file=/dev/stdin'],{input:JSON.stringify({stringData:{[ref.key]:credentials.editorPassword}})});
+ if(ref?.name&&ref.key)await privatePatch(r,['-n','observability','patch','secret',ref.name,'--type=merge'],{stringData:{[ref.key]:credentials.editorPassword}});
  await r.run('kubectl',['-n','observability','exec','-i','deployment/'+deployment.metadata.name,'-c','grafana','--','grafana','cli','--homepath','/usr/share/grafana','--config','/etc/grafana/grafana.ini','admin','reset-admin-password','--password-from-stdin'],{input:credentials.editorPassword+'\n',timeout:120000});
  await r.run('kubectl',['apply','-f','-'],{input:JSON.stringify({apiVersion:'v1',kind:'ConfigMap',metadata:{name:'esb-dashboard-access',namespace:'infrastructure',labels:{'app.kubernetes.io/managed-by':'esb-ocmwstack'}},data:{initialized:'true',username:'admin'}})});
 }

@@ -301,6 +301,10 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     await require('./connectivity').waitDns(r,c);
     emit({type:'phase',phase:'native-validation'});
     const report=await waitValidation(r,c);report.ui={...report.ui,...ui};report.dashboards={...report.dashboards,...admin};
+    if(/STORAGE_(REGION|COUNTRY)_MISSING/.test(JSON.stringify(report))){
+      try{report.storageDiagnostics=await require('./storage-diagnostics').diagnose(r);emit({type:'storage-diagnostics',...report.storageDiagnostics});}
+      catch(e){emit({type:'storage-diagnostics',error:e.code||'DIAGNOSTIC_FAILED'});}
+    }
     marker=await updateMarker(r,marker,{state:report.status,updatedAt:new Date().toISOString()});
     return report;
   } catch(e) {
