@@ -34,7 +34,7 @@ for upgrade in [False,True]:
         checks+=1
     for policy in ['Cluster','Local']:
         docs=render(root/'charts-gateway',{'externalTrafficPolicy':policy},upgrade)
-        resource=docs[0]
+        resource=next(d for d in docs if d['metadata']['name']=='esb-ocm-envoy-traffic')
         assert resource['spec']['rules'][0]['mutate']['patchStrategicMerge']['spec']['provider']['kubernetes']['envoyService']['externalTrafficPolicy']==policy
         assert resource['spec']['rules'][0]['match']['any'][0]['resources']['names']==['envoy']
         checks+=1

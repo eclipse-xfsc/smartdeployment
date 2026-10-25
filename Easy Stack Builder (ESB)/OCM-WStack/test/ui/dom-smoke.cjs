@@ -5,12 +5,13 @@ const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
 const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
 const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.manage','roles.read','roles.manage','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
-async function boot(t,{failure=false}={}){
+async function boot(t,{failure=false,issuanceFailure=false}={}){
  const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
  w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
  let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'roles.manage',kind:'atomic',editable:false,permissions:['roles.manage']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false,connections={pcm:{enabled:false},trustedHosts:[],redirectUri:'https://wallet.example/orce/pcm/callback'};
  w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').replace(/^\/pcm/,'').split('?')[0];let data={items:[]};
+  if(p==='/issuance'&&issuanceFailure)return {ok:false,status:500,headers:{get:()=> 'parser-request-1'},json:async()=>{throw new SyntaxError('Unexpected token I, Internal Server Error');}};
   if(p==='/connections'){if(o.method==='PUT')connections={...connections,...JSON.parse(o.body)};data=connections;}
   else if(p==='/connections/test')data={state:'partial',checkedAt:new Date().toISOString(),checks:[{name:'oidc',state:'passed'},{name:'accountEndpoint',state:'authentication_required',httpStatus:401},{name:'personalLogin',state:'not_tested'}]};
   else if(p==='/connection-test')data={state:'succeeded',checks:[{name:'credentials',state:'passed'},{name:'offers',state:'passed'}]};
@@ -92,4 +93,8 @@ test('PCM test results distinguish reachable endpoints and test signed-in operat
 });
 test('credential import renders lifecycle checks without offering unsupported revocation',async t=>{
  const b=await boot(t);await b.click('Receive credential');await fill(b,'a-credentialJson','{"type":["VerifiableCredential"]}');await b.click('Import credential file');assert.match(b.text(),/Credential lifecycle checks/);assert.match(b.text(),/Storage confirmed/);assert.match(b.text(),/STATUS_NOT_MANAGED_HERE/);
+});
+
+test('issuance plain-text 500 shows HTTP evidence and keeps the same idempotency key on retry',async t=>{
+ const b=await boot(t,{issuanceFailure:true});await b.click('Issue credential');await b.click('Review and issue');const alert=b.w.document.querySelector('[role="alert"]').textContent;assert.match(alert,/HTTP 500/);assert.match(alert,/parser-request-1/);assert.doesNotMatch(alert,/Unexpected token|SyntaxError/);await b.click('Review and issue');const requests=b.calls.filter(x=>x.url.endsWith('/issuance'));assert.equal(requests.length,2);assert.equal(requests[0].o.headers['X-Idempotency-Key'],requests[1].o.headers['X-Idempotency-Key']);
 });

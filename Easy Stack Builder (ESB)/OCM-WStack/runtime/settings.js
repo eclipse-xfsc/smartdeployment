@@ -9,7 +9,7 @@ module.exports={
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' "+new URL(config.issuer).origin+"; frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
   res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-  next();
+  require('./lib/api-body.cjs').parseApiBody(req,res,next);
  },
  apiMaxLength:'1mb',
  uibuilder:{uibRoot:'/data/uibuilder',socketOptions:{path:'/orce/socket.io',serveClient:true,maxHttpBufferSize:65536,connectionStateRecovery:{maxDisconnectionDuration:0,skipMiddlewares:false},cors:{origin:config.publicOrigin,credentials:false}}},

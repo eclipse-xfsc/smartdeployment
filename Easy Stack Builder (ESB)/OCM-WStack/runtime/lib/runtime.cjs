@@ -35,7 +35,7 @@ class Runtime {
  async probeNative(){
   if(this.probing)return;this.probing=true;
   const c={tenant:this.c.tenant,account:this.c.account,group:this.c.group,token:''};
-  try{const checks=await Promise.all([['storage',()=>this.adapters.records(c)],['retrieval',()=>this.adapters.offers(c)],['issuer',()=>this.issuerBootstrap.ensure()]].map(async([name,fn])=>{try{await fn();return {name,ok:true};}catch(e){return {name,ok:false,code:e.code||'UPSTREAM_UNAVAILABLE',...(e.reason?{reason:e.reason}:{}),...(e.upstreamStatus?{httpStatus:e.upstreamStatus}:{})};}}));checks.push({name:'nats',ok:this.events.connected===true});this.nativeState={ready:checks.every(x=>x.ok),checks,checkedAt:new Date().toISOString()};}finally{this.probing=false;}
+  try{const checks=await Promise.all([['storage',()=>this.adapters.records(c)],['retrieval',()=>this.adapters.offers(c)],['issuer',()=>this.issuerBootstrap.ensure()],['didcomm',()=>this.adapters.relationships(c)]].map(async([name,fn])=>{try{await fn();return {name,ok:true};}catch(e){return {name,ok:false,code:e.code||'UPSTREAM_UNAVAILABLE',...(e.reason?{reason:e.reason}:{}),...(e.upstreamStatus?{httpStatus:e.upstreamStatus}:{})};}}));checks.push({name:'nats',ok:this.events.connected===true});this.nativeState={ready:checks.every(x=>x.ok),checks,checkedAt:new Date().toISOString()};}finally{this.probing=false;}
  }
  limit(key){const now=Date.now();let r=this.rates.get(key);if(!r||now-r.start>=60000){r={start:now,count:0};this.rates.set(key,r);}if(++r.count>180)fail(429,'RATE_LIMITED');if(this.rates.size>10000){for(const[k,v]of this.rates)if(now-v.start>60000)this.rates.delete(k);if(this.rates.size>10000)fail(503,'SERVER_BUSY');}}
  async execute(action,c,key,body,q,requestId){
@@ -49,7 +49,7 @@ class Runtime {
    case 'saveConnections':return this.integrations.save(body);
    case 'me':return {subject:c.subject,username:c.username,tenant:c.tenant,account:c.account,group:c.group,permissions:c.permissions,expiresAt:c.expiresAt};
    case 'metrics':return {requests:Object.fromEntries(this.counts),natsConnected:this.events.connected,mongoReady:this.ready};
-   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'12.3.1',pcmConfigured:Boolean(this.c.pcm?.enabled),native:this.nativeState};
+   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'12.3.2',pcmConfigured:Boolean(this.c.pcm?.enabled),native:this.nativeState};
    case 'preferences':return await this.db.collection('ui_preferences').findOne(scope,{projection:{_id:0}})||{locale:'en',pageSize:25};
    case 'setPreferences':object(body,['locale','pageSize']);if(body.locale&&!['en','de','fr'].includes(body.locale))fail(400,'VALIDATION_ERROR');if(body.pageSize!==undefined&&![10,25,50,100].includes(body.pageSize))fail(400,'VALIDATION_ERROR');await this.db.collection('ui_preferences').updateOne(scope,{$set:{...body,updatedAt:new Date()}},{upsert:true});return body;
    case 'audit':return {items:await this.db.collection('audit_events').find({tenant:c.tenant},{projection:{_id:0}}).sort({timestamp:-1}).limit(100).toArray()};

@@ -272,7 +272,13 @@ export const locales = {
     "permission_roles.manage": "Manage users, roles and connections",
     "permission_system.health.read": "View system health",
     "temporaryPassword": "Temporary password",
-    "temporaryPasswordHelp": "New users must change their temporary password at first login. No email is sent."
+    "temporaryPasswordHelp": "New users must change their temporary password at first login. No email is sent.",
+    "API_HTTP_ERROR": "The server returned an HTTP error before a valid API response.",
+    "API_INVALID_RESPONSE": "The server returned an invalid API response.",
+    "INVALID_JSON_BODY": "The request body must be a valid JSON object.",
+    "JSON_CONTENT_TYPE_REQUIRED": "This request requires JSON.",
+    "REQUEST_BODY_UNAVAILABLE": "The request body was consumed before reaching the OCM context API.",
+    "REQUEST_TOO_LARGE": "The request exceeds the 1 MiB limit."
   },
   "de": {
     "copyInvitation": "Einladungs-URL kopieren",
@@ -547,7 +553,10 @@ export const locales = {
     "permission_roles.manage": "Benutzer, Rollen und Verbindungen verwalten",
     "permission_system.health.read": "Systemzustand ansehen",
     "temporaryPassword": "Temporäres Passwort",
-    "temporaryPasswordHelp": "Neue Benutzer müssen ihr temporäres Passwort bei der ersten Anmeldung ändern. Es wird keine E-Mail versendet."
+    "temporaryPasswordHelp": "Neue Benutzer müssen ihr temporäres Passwort bei der ersten Anmeldung ändern. Es wird keine E-Mail versendet.",
+    "API_HTTP_ERROR": "Der Server hat einen HTTP-Fehler statt einer gültigen API-Antwort zurückgegeben.",
+    "API_INVALID_RESPONSE": "Die API-Antwort des Servers ist ungültig.",
+    "INVALID_JSON_BODY": "Die Anfrage muss ein gültiges JSON-Objekt enthalten."
   },
   "fr": {
     "copyInvitation": "Copier le lien d’invitation",
@@ -822,6 +831,9 @@ export const locales = {
     "permission_roles.manage": "Gérer utilisateurs, rôles et connexions",
     "permission_system.health.read": "Voir l’état du système",
     "temporaryPassword": "Mot de passe temporaire",
-    "temporaryPasswordHelp": "Les nouveaux utilisateurs doivent changer leur mot de passe à la première connexion. Aucun e-mail n’est envoyé."
+    "temporaryPasswordHelp": "Les nouveaux utilisateurs doivent changer leur mot de passe à la première connexion. Aucun e-mail n’est envoyé.",
+    "API_HTTP_ERROR": "Le serveur a renvoyé une erreur HTTP au lieu d’une réponse API valide.",
+    "API_INVALID_RESPONSE": "La réponse API du serveur est invalide.",
+    "INVALID_JSON_BODY": "La requête doit contenir un objet JSON valide."
   }
 };

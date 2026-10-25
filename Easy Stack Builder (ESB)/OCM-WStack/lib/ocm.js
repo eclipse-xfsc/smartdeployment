@@ -5,6 +5,7 @@ const crypto=require('node:crypto');
 const {fail}=require('./config');
 const POLICY='OCM W-Stack/Policy Chart';
 const VERIFICATION='OCM W-Stack/Credential Verification Service Chart';
+const DIDCOMM='OCM W-Stack/Didcomm';
 const REGISTRY='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io';
 // The published dependency chart's image name is tsa/policy. The wrapper
 // incorrectly replaces it with a repository at the registry root.
@@ -32,7 +33,8 @@ function overrides(c) {
           enbaled:'"true"'},
         signerService:{presentationVerifyUrl:'http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify',
           presentationSignUrl:'http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof'},
-        messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}}}}}
+        messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}}}}},
+    [DIDCOMM]: {'didcomm-connector':{ingress:{enabled:false},podAnnotations:{'inject.xfsc.io/enabled':'false'},config:{env:'DEV',logLevel:'error',url:c.tenantUrl+'/api/didcomm',didcomm:{resolverUrl:'http://universal-resolver.infrastructure.svc.cluster.local:8080'},messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}},database:{inMemory:false,host:'cassandra.infrastructure.svc.cluster.local',port:9042,password:{passwordSecret:CASSANDRA_SECRET,passwordKey:'cassandra-password'}}}}}
   };
 }
 function routingValues(){
@@ -49,6 +51,9 @@ function routingValues(){
 `;
   return {tag:require('../upstream-lock.json').argoRevision,esbTemplatePatch:common};
 }
+function applicationExcludes(c,upstream=[]) {
+  return upstream.filter(p=>!(c.runtimeEnabled&&!c.runtimeServices?.didcomm&&p===DIDCOMM));
+}
 function values(c) {
   const common=routingValues().esbTemplatePatch;
   const conditional=Object.entries(overrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}
@@ -56,7 +61,7 @@ function values(c) {
     helm:
       valuesObject: null
       values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`).join('\n')+'\n{{ end }}\n';
-  return {tag:require('../upstream-lock.json').argoRevision,esbTemplatePatch:common+conditional};
+  return {tag:require('../upstream-lock.json').argoRevision,...(c.ocmExcludes?{excludes:c.ocmExcludes}:{}),esbTemplatePatch:common+conditional};
 }
 
 function signingKey() {
@@ -111,13 +116,20 @@ async function imagePreflight(r,directory) {
   r.emit({type:'image-preflight',image:POLICY_IMAGE,status:'resolvable',authentication:result.authentication});
 }
 function validateManifests(documents,chart) {
-  const name=chart===POLICY?'policy':'credential-verification-service';
+  const name=chart===POLICY?'policy':chart===DIDCOMM?'didcomm-connector':'credential-verification-service';
   const deployments=Object.values(documents).filter(d=>d?.kind==='Deployment');
   const workload=deployments.find(d=>d.spec?.template?.spec?.containers?.some(x=>x.name===name));
   if(!workload)fail('OCM_VALUES',`No ${name} Deployment rendered; dependency contract changed.`);
   const pod=workload.spec.template,container=pod.spec.containers.find(x=>x.name===name),env=Object.fromEntries((container.env||[]).map(x=>[x.name,x]));
   if(JSON.stringify(container.env).includes('NAMESPACE'))fail('OCM_VALUES',`Unresolved namespace in ${name} environment.`);
-  if(chart===POLICY) {
+  if(chart===DIDCOMM) {
+    const required={DIDCOMMCONNECTOR_DATBASE_HOST:'cassandra.infrastructure.svc.cluster.local',DIDCOMMCONNECTOR_DATBASE_PORT:'9042',DIDCOMMCONNECTOR_DIDCOMM_RESOLVERURL:'http://universal-resolver.infrastructure.svc.cluster.local:8080',DIDCOMMCONNECTOR_CLOUDFORWARDING_NATS_URL:'nats://nats.infrastructure.svc.cluster.local:4222'};
+    for(const [key,value] of Object.entries(required))if(String(env[key]?.value)!==value)fail('OCM_VALUES',`DIDComm ${key} override was ignored.`);
+    const ref=env.DIDCOMMCONNECTOR_DATBASE_PASSWORD?.valueFrom?.secretKeyRef;
+    if(ref?.name!==CASSANDRA_SECRET||ref.key!=='cassandra-password')fail('OCM_VALUES','DIDComm must use the prepared Cassandra Secret.');
+    if(!/^https:\/\/[^/]+\/api\/didcomm$/.test(env.DIDCOMMCONNECTOR_URL?.value||''))fail('OCM_VALUES','DIDComm public URL is invalid.');
+    if(Object.values(documents).some(d=>d?.kind==='Ingress'))fail('OCM_VALUES','DIDComm legacy Ingress must be disabled.');
+  } else if(chart===POLICY) {
     if(container.image!==POLICY_IMAGE||pod.spec.imagePullSecrets?.some(x=>x.name))fail('OCM_VALUES','Policy did not render the selected tsa/policy image without a stale pull-secret reference.');
     if(env.NATS_ADDR?.value!=='nats://nats.infrastructure.svc.cluster.local:4222')fail('OCM_VALUES','Policy NATS override was ignored.');
     const port=container.ports?.find(x=>x.name==='http')?.containerPort;
@@ -140,4 +152,4 @@ async function inspect(r,root,directory,readYaml,chart) {
   }}
   await walk(root);validateManifests(await readYaml(r,directory,sources),chart);
 }
-module.exports={routingValues,overrides,values,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET};
+module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,DIDCOMM};

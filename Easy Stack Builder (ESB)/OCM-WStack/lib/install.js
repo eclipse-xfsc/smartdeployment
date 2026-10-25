@@ -149,6 +149,7 @@ async function validate(r,c) {
   if(c.runtimeEnabled){
     const realm='ocm-ui-'+c.tenantId;
     const checks=await Promise.all([['ui-ready','/orce/ui-api/v1/health/ready',d=>d?.ready===true],['ui-auth','/orce/ui-api/v1/auth/config',d=>d?.data?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm&&d?.data?.clientId==='ocm-ui'],['ui-issuer','/orce/identity/realms/'+realm+'/.well-known/openid-configuration',d=>d?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm]].map(async([name,url,check])=>{try{const response=await publicRequest(c.tenantUrl+url,{signal:r.signal});return {name,httpStatus:response.status,ok:response.ok&&check(response.data),...(name==='ui-ready'?{nativeReady:response.data?.nativeReady===true,dependencies:response.data?.dependencies||[]}: {})};}catch{return {name,ok:false};}}));
+    checks.push(...await require('./api-check').checks(c.tenantUrl,{requester:publicRequest,signal:r.signal}));
     report.ui={...report.ui,checks};if(checks.some(x=>!x.ok)||checks.find(x=>x.name==='ui-ready')?.nativeReady!==true)report.status='action-required';
   }
   if(c.publicDashboards){
@@ -293,7 +294,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     await gatewayConfig.nativeRouting(r,c);
     emit({type:'phase',phase:'tenant'});
     await tls.install(r,c,certificate);
-    const tenant=await privateFile(dir,'tenant-values.json',JSON.stringify({certificate:{enabled:false,secretName:tls.secretName(c)},tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}));
+    const tenant=await privateFile(dir,'tenant-values.json',JSON.stringify(c.tenantValues));
     await helmUpgrade(r,['upgrade','--install',c.tenantRelease,path.join(source,'XFSC/tenant/chart'),'-f',path.join(source,'XFSC/tenant/values/tenant-ocm-wstack-values.yaml'),'-f',tenant,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{namespace:'ocm-wstack',release:c.tenantRelease,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
     held.check();marker=await updateMarker(r,marker,{state:'installed',updatedAt:new Date().toISOString()});
     await gatewayConfig.internalRouting(r,c);

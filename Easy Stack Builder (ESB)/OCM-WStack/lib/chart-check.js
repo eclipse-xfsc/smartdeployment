@@ -38,7 +38,7 @@ async function readYaml(r, directory, documents) {
 
 async function plan(r, source, argoSource, c, directory) {
   const definitions={};
-  for(let i=0;i<SETS.length;i++)definitions[SETS[i]]=await fs.readFile(path.join(source,`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`),'utf8');
+  for(let i=0;i<SETS.length;i++)definitions[SETS[i]]=await fs.readFile(path.join(argoSource,`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`),'utf8');
   const sets=await readYaml(r,directory,definitions);
   const jobs=BOOTSTRAP.map(([release,chart,namespace])=>({release,chart,namespace,root:source,files:[],values:release==='observability'?require('./observability').values(c):{},parameters:[]}));
   for(const target of ['infrastructure','ocm-wstack'])jobs.push({release:`${target}-namespace`,chart:'INFRA/app-management/app-namespace',namespace:'security',root:source,
@@ -49,7 +49,8 @@ async function plan(r, source, argoSource, c, directory) {
   for(let i=0;i<SETS.length;i++) {
     const name=SETS[i], set=sets[name];
     if(set.tag!=='main'||set.matrix?.enabled||!set.path?.endsWith('/*')||set.path.slice(0,-2).includes('*'))fail('CHART_PLAN',`Unsupported upstream ApplicationSet generator: ${name}.`);
-    const excluded=new Set(set.excludes||[]);
+    const excluded=new Set(name==='ocm-wstack'?ocm.applicationExcludes(c,set.excludes):set.excludes||[]);
+    if(name==='ocm-wstack')c.ocmExcludes=[...excluded];
     if(name==='network'&&!c.externalDns)excluded.add('INFRA/network/external-dns');
     if(name==='network')excluded.add('INFRA/network/cluster-issuer');
     const values={storageClass:c.actualStorageClass,tag:lock.argoRevision};
@@ -77,7 +78,7 @@ async function plan(r, source, argoSource, c, directory) {
   jobs.push({release:'esb-ocm-gateway',chart:'charts-gateway',namespace:'security',root:path.join(__dirname,'..'),files:[],parameters:[],values:{externalTrafficPolicy:c.externalTrafficPolicy,tenantHost:c.tenantHost,gatewayClusterIP:'192.0.2.1'}});
   jobs.push({release:'esb-dashboard-routes',chart:'charts-dashboards',namespace:'infrastructure',root:path.join(__dirname,'..'),files:[],parameters:[],values:{tlsSecret:require('./tls').secretName(c),services:c.publicDashboards?[{name:'argocd',namespace:'argocd',host:'argocd.'+c.domain,service:'argocd-server',port:80},{name:'grafana',namespace:'observability',host:'grafana.'+c.domain,service:'observability-grafana',port:80}]:[]}});
   if(c.runtimeEnabled)jobs.push({release:'ocm-orce-ui',chart:'charts-runtime',namespace:'ocm-wstack',root:path.join(__dirname,'..'),files:[],parameters:[],values:{host:c.tenantHost,gatewayPorts:[80,443,10080,10443],hostAliases:c.internalGatewayRouting?[{ip:'192.0.2.1',hostnames:[c.tenantHost]}]:[],listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,storage:{class:c.actualStorageClass,orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize},mongo:{embedded:!c.useExternalMongo,externalPorts:[27017]},runtimeConfig:require('./runtime-install').runtimeConfig(c)}});
-  jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:{certificate:{enabled:false,secretName:require('./tls').secretName(c)},tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}});
+  jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:c.tenantValues});
   return jobs;
 }
 
@@ -95,6 +96,8 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   const retrievalConfig=envoyDefaults.retrieval['credential-retrieval-service']?.config||{};
   Object.assign(c,require('./storage-scope').scope(retrievalConfig.region,retrievalConfig.country));
   c.upstreamAnnotationKeys=Object.keys(envoyDefaults.envoy.envoyProxy?.service?.annotations||{});
+  const tenantDefaults=await readYaml(r,validationDir,{tenant:await fs.readFile(path.join(source,'XFSC/tenant/values/tenant-ocm-wstack-values.yaml'),'utf8')});
+  c.tenantValues=require('./tenant-values').values(c,tenantDefaults.tenant);
   const jobs=await plan(r,source,argoSource,c,validationDir);
   if(c.externalDns){
     const dns=require('./dns-values'),chartRoot=path.join(validationDir,'frozen-charts');
@@ -133,10 +136,10 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
       const rendered=await r.run('helm',args,{timeout:180000});
       if(/cannot overwrite table with non table|destination for .* is a table/.test(rendered.stderr))throw new Error(rendered.stderr);
       if(job.release==='observability')await require('./grafana').inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml);
-      if(job.chart===ocm.POLICY||job.chart===ocm.VERIFICATION)await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
+      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       // Exercise upgrade branches as well as first-install branches in Helm templates.
       await r.run('helm',[...args,'--is-upgrade'],{timeout:180000});
-      if(job.chart===ocm.POLICY||job.chart===ocm.VERIFICATION)await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
+      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       const lockfile=path.join(location,'Chart.lock');
       results.push({chart:job.chart,release:job.release,namespace:job.namespace,applicationSet:job.applicationSet||null,
         dependencyLockSha256:await exists(lockfile)?crypto.createHash('sha256').update(await fs.readFile(lockfile)).digest('hex'):null});

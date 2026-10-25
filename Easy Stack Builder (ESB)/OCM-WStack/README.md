@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.1
+# OCM W-Stack ESB 12.3.2
 
-This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. This version integrates official Storage 1.2.5, tracks deployment main in Argo CD, and improves DNS validation; live acceptance remains required.
+This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. Storage listing is confirmed fixed by the user. This version repairs OCM context JSON mutation handling and deploys the native DIDComm connector for Relationships. Argo CD continues following deployment main; live acceptance of these new fixes remains required.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.1.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.2.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.1.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.2.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.1, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. Keep the existing cluster, ownership marker, Secrets and PVCs. The four Git ApplicationSets switch to `main`, adopting the official Storage 1.2.5 update. Existing users, roles, Secrets and PVCs are retained. No new editor fields are required.
+Install 12.3.2, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. Keep the existing cluster, ownership marker, Secrets and PVCs. The Git ApplicationSets continue following `main`. The OCM set now includes the official `OCM W-Stack/Didcomm` chart, which upstream excludes by default. The deployer supplies its infrastructure addresses and managed Cassandra Secret, and allows time for native database migrations. Existing users, roles, Secrets and PVCs are retained. No new editor fields are required.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
@@ -31,6 +31,12 @@ node scripts/diagnose-storage.js --kubeconfig /path/to/cluster.yaml
 ```
 
 It records image identities and native HTTP status/routes without displaying stored credentials or secrets. The POST it performs is the native credential filter/read operation, not an import.
+
+## Issuance and Relationships repair
+
+The OCM context API parses JSON request bodies once, before ORCE's HTTP-in JSON/raw parser chain, with a 1 MiB limit and JSON error responses. Existing persisted flows are retained. The browser displays HTTP status and request ID for invalid/non-JSON responses and retains the original idempotency key after uncertain failures. Deploy tests unauthenticated POST, PATCH and DELETE requests: each must reach the OCM context's JSON authentication boundary, without creating credentials or changing data. GET readiness alone is insufficient.
+
+Relationships uses the official native DIDComm service and its persistent Cassandra database. Argo manages its chart from deployment main, with only the required configuration overrides. The native service runs its own schema migration. A startup probe allows migration to finish before liveness checks. Only POST `/api/didcomm/message/receive` is exposed publicly; `/admin` operations stay behind the OCM context's authenticated, scoped API. Existing externally configured DIDComm services remain operator-owned. See `docs/REPAIR-12.3.2.md` for evidence and limits.
 
 ## DNS and internet access
 
@@ -72,7 +78,7 @@ The Argo CD installation manifest and bootstrap observability dependency version
 
 ## OCM context and PCM
 
-The retained 12.3.0 UI work adds the supplied SVG branding, credential-type CRUD, dedicated Users/Roles/Permissions panels, audit actor identity, visible PCM test results and post-import lifecycle checks. See `docs/BACKLOG-12.3.0.md` for its historical scope; this release adds the official Storage fix.
+The retained 12.3.0 UI work adds the supplied SVG branding, credential-type CRUD, dedicated Users/Roles/Permissions panels, audit actor identity, visible PCM test results and post-import lifecycle checks. See `docs/BACKLOG-12.3.0.md` for its historical scope; this release retains that work and the confirmed Storage fix.
 
 The OCM context retains the FACIS branding, navigation, credential cards/detail dialog and EN/DE/FR controls from 11.1.0. It includes native credential browsing, verification, local deletion, supported issuer revocation, offers, issuance, relationships, roles/assignments, audit, health, provenance and **Connections**.
 
@@ -84,9 +90,9 @@ Clearing Houses are discovered from Gaia-X's published compliance registry throu
 
 Steffen confirmed the missing route parameters and released official Storage 1.2.5. The adapter, native test action and diagnostics now use its geography-aware route. The published source retains `/v1/tenants/`; the shorthand URL in the email omitted `/tenants/`. Listing/import/delete and lifecycle read-back share the updated path builder. External PCM Account Service integration retains its separate contract.
 
-Test the actual image through the Credentials page and the explicit native credential test after upgrading.
+The user confirmed Storage listing now works. This does not establish that every issuance, acceptance, verification and revocation path has passed live acceptance.
 
-The deployer checks native Storage, Retrieval, issuer bootstrap and NATS health and reports `action-required` if they fail. A native HTTP 400 is surfaced promptly instead of silently waiting or returning an empty OCM context. UI availability, internet connectivity and credential lifecycle acceptance are separate results. No Storage fork, database bypass or fake successful lifecycle was added.
+The deployer checks native Storage, Retrieval, issuer bootstrap, DIDComm relationship listing and NATS health and reports `action-required` if they fail. A native HTTP 400 is surfaced promptly instead of silently waiting or returning an empty OCM context. UI availability, internet connectivity and credential lifecycle acceptance are separate results. No Storage fork, database bypass or fake successful lifecycle was added.
 
 The four requested business credential types depend on real issuer plugins/policies supplied by the repository or an authorized issuer. The registry supports creating and editing local type definitions and linking them to available native issuer configurations. A registry definition alone does not install an issuer plugin or authorize production issuance; demo Developer/SDJWT templates remain explicitly labeled. A second-instance exchange, real production Clearing House issuance, and complete live OCM/PCM lifecycle acceptance remain outstanding. See `docs/CR-COVERAGE.md` and `VALIDATION.md`.
 
