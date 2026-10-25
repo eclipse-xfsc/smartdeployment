@@ -3,6 +3,7 @@ const {randomUUID}=require('node:crypto');
 const {Auth}=require('./auth.cjs'),{Client}=require('./http.cjs'),{Adapters}=require('./adapters.cjs'),{Coordination}=require('./coordination.cjs'),{Roles}=require('./roles.cjs'),{Events}=require('./events.cjs');
 const {fail,object}=require('./errors.cjs');
 const {IssuerBootstrap}=require('./issuer-bootstrap.cjs');
+const {offerUrl}=require('./offers.cjs');
 const routes=[
  ['GET','/metrics','system.health.read','metrics'],['GET','/auth/me',null,'me'],['GET','/health/dependencies','system.health.read','health'],
  ['GET','/preferences',null,'preferences'],['PATCH','/preferences',null,'setPreferences'],['GET','/audit','audit.read','audit'],
@@ -30,7 +31,7 @@ class Runtime {
   switch(action){
    case 'me':return {subject:c.subject,username:c.username,tenant:c.tenant,account:c.account,group:c.group,permissions:c.permissions,expiresAt:c.expiresAt};
    case 'metrics':return {requests:Object.fromEntries(this.counts),natsConnected:this.events.connected,mongoReady:this.ready};
-   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'11.0.6'};
+   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'11.0.7'};
    case 'preferences':return await this.db.collection('ui_preferences').findOne(scope,{projection:{_id:0}})||{locale:'en',pageSize:25};
    case 'setPreferences':object(body,['locale','pageSize']);if(body.locale&&!['en','de','fr'].includes(body.locale))fail(400,'VALIDATION_ERROR');if(body.pageSize!==undefined&&![10,25,50,100].includes(body.pageSize))fail(400,'VALIDATION_ERROR');await this.db.collection('ui_preferences').updateOne(scope,{$set:{...body,updatedAt:new Date()}},{upsert:true});return body;
    case 'audit':return {items:await this.db.collection('audit_events').find({tenant:c.tenant},{projection:{_id:0}}).sort({timestamp:-1}).limit(100).toArray()};
@@ -90,8 +91,8 @@ class Runtime {
     this.events.emit('hint',{type:'resync',requiresRefresh:true});
    }else data=await fn();
    if(data?.offer){
-    const params=new URLSearchParams();for(const k of ['credential_offer','credential_offer_uri'])if(data.offer[k])params.set(k,typeof data.offer[k]==='string'?data.offer[k]:JSON.stringify(data.offer[k]));
-    if(params.size){data.offerUrl='openid-credential-offer://?'+params.toString();if(Buffer.byteLength(data.offerUrl)<2000)data.offerQr=await require('qrcode').toDataURL(data.offerUrl,{errorCorrectionLevel:'M',margin:2,width:320});}
+    data.offerUrl=offerUrl(data.offer);
+    if(Buffer.byteLength(data.offerUrl)<2000)data.offerQr=await require('qrcode').toDataURL(data.offerUrl,{errorCorrectionLevel:'M',margin:2,width:320});
    }
    const status=['unknown','dispatching','pending'].includes(data?.state)?202:200;
    this.counts.set(route.action,(this.counts.get(route.action)||0)+1);

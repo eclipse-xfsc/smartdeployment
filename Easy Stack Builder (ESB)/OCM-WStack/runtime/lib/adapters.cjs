@@ -1,6 +1,7 @@
 'use strict';
 const {gunzipSync}=require('node:zlib');
 const {request}=require('./http.cjs');
+const {normalizeOffer,offerUrl}=require('./offers.cjs');
 const {fail,object,string,id}=require('./errors.cjs');
 const {decode,summarize,overall,statusRef}=require('./credentials.cjs');
 class Adapters {
@@ -65,24 +66,18 @@ class Adapters {
  offerPath(c,action){return '/v1/tenants/'+id(c.tenant)+'/offering/'+action+'/'+id(c.group);}
  async offers(c){const r=await this.call(c,'retrieval',this.offerPath(c,'list'));if(r===null)return {items:[]};if(!Array.isArray(r))fail(502,'UPSTREAM_PROTOCOL_ERROR');return {items:r.map(o=>({requestId:o.requestId,issuer:o.metadata?.credential_issuer||o.offering?.credential_issuer,credentialConfigurationIds:o.offering?.credential_configuration_ids||o.offering?.credentials||[],state:o.status||'pending',receivedAt:o.timestamp}))};}
  async importOffer(c,offer){
-  string(offer,1,16384);let payload;
-  try{
-   if(offer.trim().startsWith('{'))payload=JSON.parse(offer);
-   else{const u=new URL(offer);if(u.protocol!=='openid-credential-offer:')fail(400,'OFFER_SCHEME_UNSUPPORTED');payload=Object.fromEntries(u.searchParams);}
-  }catch(e){if(e.code)throw e;fail(400,'VALIDATION_ERROR');}
-  if(payload.credential_issuer)payload={credential_offer:JSON.stringify(payload)};
-  object(payload,['credential_offer','credential_offer_uri']);
-  if(Boolean(payload.credential_offer)===Boolean(payload.credential_offer_uri))fail(400,'VALIDATION_ERROR');
+  string(offer,1,16384);let payload=normalizeOffer(offer);
   const approved=value=>{let u;try{u=new URL(value);}catch{fail(400,'VALIDATION_ERROR');}if(u.protocol!=='https:'||u.username||u.password||!this.c.offerIssuerHosts.includes(u.hostname))fail(400,'OFFER_ISSUER_NOT_ALLOWED');return u;};
   if(payload.credential_offer_uri){
    const u=approved(string(payload.credential_offer_uri,1,4096));
    const downloaded=await request(u.toString(),{timeout:5000,maxBytes:16384});
-   payload={credential_offer:JSON.stringify(downloaded)};
+   payload=normalizeOffer(downloaded);
+   if(!payload.credential_offer)fail(400,'VALIDATION_ERROR');
   }
   string(payload.credential_offer,1,16000);
   let inner;try{inner=JSON.parse(payload.credential_offer);}catch{fail(400,'VALIDATION_ERROR');}
   approved(inner.credential_issuer);
-  const result=await this.call(c,'retrieval',this.offerPath(c,'retrieve'),'PUT',payload);
+  const result=await this.call(c,'retrieval',this.offerPath(c,'retrieve'),'PUT',{credential_offer:offerUrl(payload)});
   if(typeof result!=='string')fail(502,'UPSTREAM_PROTOCOL_ERROR');return {state:'succeeded',upstreamRequestId:result};
  }
  async accept(c,key,accept,body){
