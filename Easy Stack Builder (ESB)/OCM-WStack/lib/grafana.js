@@ -5,6 +5,8 @@ const {fail}=require('./config');
 function validateWorkload(documents) {
   const workloads=Object.values(documents).filter(doc=>['Deployment','StatefulSet'].includes(doc?.kind)&&doc.metadata?.labels?.['app.kubernetes.io/name']==='grafana'&&doc.metadata?.labels?.['app.kubernetes.io/instance']==='observability');
   if(workloads.length!==1)fail('GRAFANA_STARTUP','Expected one rendered observability Grafana workload.');
+  const workload=workloads[0];
+  if(workload.kind==='Deployment'&&((workload.spec?.replicas??1)!==1||workload.spec?.strategy?.type!=='Recreate'||workload.spec.strategy.rollingUpdate!=null))fail('GRAFANA_STARTUP','Persistent Grafana must use one replica and Recreate without rollingUpdate settings so the old pod releases its volume before replacement.');
   const pod=workloads[0].spec?.template?.spec;
   if(pod?.initContainers?.some(container=>container.name==='init-chown-data'))fail('GRAFANA_STARTUP','Grafana still includes the failing BusyBox chown init container.');
   const security=pod?.securityContext;

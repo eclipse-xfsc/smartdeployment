@@ -4,7 +4,8 @@
 function values(c){return {
  // Let Kubernetes/CSI apply the PVC group permissions. The optional BusyBox
  // chown init container can fail in the runtime before Grafana ever starts.
- monitoring:{grafana:{initChownData:{enabled:false},securityContext:{runAsNonRoot:true,runAsUser:472,runAsGroup:472,fsGroup:472,fsGroupChangePolicy:'Always'},persistence:{enabled:true,storageClassName:c.actualStorageClass,size:'5Gi'},'grafana.ini':{server:{root_url:'https://grafana.'+c.domain}}}},
+ // One persistent Grafana instance must release its volume before replacement.
+ monitoring:{grafana:{replicas:1,deploymentStrategy:{type:'Recreate',rollingUpdate:null},initChownData:{enabled:false},securityContext:{runAsNonRoot:true,runAsUser:472,runAsGroup:472,fsGroup:472,fsGroupChangePolicy:'Always'},persistence:{enabled:true,storageClassName:c.actualStorageClass,size:'5Gi'},'grafana.ini':{server:{root_url:'https://grafana.'+c.domain}}}},
  jaeger:{userconfig:{
   service:{extensions:['jaeger_storage','jaeger_query','healthcheckv2'],pipelines:{traces:{receivers:['otlp'],processors:['batch'],exporters:['jaeger_storage_exporter']}}},
   extensions:{healthcheckv2:{use_v2:true,http:{endpoint:'0.0.0.0:13133'}},jaeger_query:{storage:{traces:'primary_store'}},jaeger_storage:{backends:{primary_store:{memory:{max_traces:100000}}}}},

@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.15
+# OCM W-Stack ESB 12.3.16
 
-Version 12.3.15 fixes the reported verification Deployment synchronization timeout caused by relocation of four identical NATS environment entries. Argo excludes only these four injector-managed entries in the named container; the guard independently checks their exact values, uniqueness, current Deployment and current pods. Other fields remain compared. All previous fixes, DNS-step removal and neutral placeholders are retained. See docs/REPAIR-12.3.15.md and VALIDATION.md.
+Version 12.3.16 fixes the reported Grafana persistent-volume Multi-Attach rollout block. It sets the persistent Grafana Deployment to one replica with Recreate, and checks this strategy during both install and upgrade manifest preflight. The existing PVC and security settings are retained. All previous fixes, DNS-step removal and neutral placeholders remain. See docs/REPAIR-12.3.16.md and VALIDATION.md.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.15.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.16.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.15.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.16.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.15, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known subscription startup recovery is included; this does not claim to repair unrelated metadata/database bugs. See docs/REPAIR-12.3.8.md and VALIDATION.md.
+Install 12.3.16, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known subscription startup recovery is included; this does not claim to repair unrelated metadata/database bugs. See docs/REPAIR-12.3.8.md and VALIDATION.md.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
