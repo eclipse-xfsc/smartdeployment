@@ -98,6 +98,8 @@ async function adapt(dir) {
   let text = await fs.readFile(path.join(dir,argo),'utf8');
   text = once(text, 'readonly TIMEOUT="300s"', 'readonly TIMEOUT="${ESB_TIMEOUT_SECONDS:-300}s"', argo);
   text = once(text, 'readonly ARGO_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"', 'readonly ARGO_MANIFEST="${ESB_ARGO_MANIFEST:?ESB Argo manifest preflight is required}"', argo);
+  const crdWait = ['applications','applicationsets','appprojects'].map(kind => `node "\${ESB_KUBE_READ:?ESB API reader is required}" /apis/apiextensions.k8s.io/v1/customresourcedefinitions/${kind}.argoproj.io established >/dev/null`).join('\n');
+  text = once(text, 'components=(', crdWait + '\n\ncomponents=(', argo);
   text = once(text, 'echo "Admin Password: $password"', 'echo "Admin password remains in the argocd-initial-admin-secret Secret."', argo);
   // Do not read the password at all; leave the official existence check intact.
   const start = text.indexOf('password=$(\n');
@@ -115,6 +117,8 @@ async function adapt(dir) {
   await fs.writeFile(path.join(dir,registration),text);
   const appWait='check-applicationset.sh';
   let waitText=await fs.readFile(path.join(dir,appWait),'utf8');
+  const query = '    kubectl get applications.argoproj.io \\\n      --namespace "$ARGOCD_NAMESPACE" \\\n      --output json';
+  waitText=once(waitText, query, '    ESB_READ_TIMEOUT_SECONDS="$(( TIMEOUT_SECONDS - $(date +%s) + START_TIME > 0 ? TIMEOUT_SECONDS - $(date +%s) + START_TIME : 1 ))" node "${ESB_KUBE_READ:?ESB API reader is required}" \\\n      "/apis/argoproj.io/v1alpha1/namespaces/$ARGOCD_NAMESPACE/applications"', appWait);
   waitText=once(waitText, '  count="$(jq \'length\' <<< "$appset_applications")"', '  count="$(jq \'length\' <<< "$appset_applications")"\n  expected="$(jq -er --arg name "$APPSET_NAME" \'.[$name]\' <<< "${ESB_APPSET_COUNTS:?ESB chart plan is required}")"', appWait);
   waitText=once(waitText, '    if [[ -z "$not_ready" ]]; then', '    if [[ -z "$not_ready" && "$count" -eq "$expected" ]]; then', appWait);
   waitText=once(waitText, '    echo "Noch nicht bereit:"', '    echo "Applications: ${count}/${expected}; waiting for the complete ApplicationSet."\n    echo "Noch nicht bereit:"', appWait);

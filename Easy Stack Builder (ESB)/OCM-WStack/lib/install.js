@@ -167,7 +167,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     if(action==='preflight')return chartReport;
     const holder=crypto.randomUUID();
     held=await lease(r,holder,()=>controller.abort());
-    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js')};
+    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
     const network=await privateFile(dir,'network-values.json',JSON.stringify(networkValues(c)));

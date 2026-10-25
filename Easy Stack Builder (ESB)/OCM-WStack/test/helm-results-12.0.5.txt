@@ -1,0 +1,45 @@
+PASS ApplicationSet + Envoy render: aws/disabled
+PASS ApplicationSet + Envoy render: hetzner/ionos
+PASS ApplicationSet + Envoy render: generic/custom
+PASS tenant routes, certificate, registration and transit mount: demo-tenant
+PASS tenant routes, certificate, registration and transit mount: company_one
+PASS wrapper install + upgrade: observability (INFRA/observability/opentelemtry)
+PASS wrapper install + upgrade: openbao (INFRA/security/openbao)
+PASS wrapper install + upgrade: eso (INFRA/security/eso)
+PASS wrapper install + upgrade: kyverno (INFRA/security/kyverno)
+PASS wrapper install + upgrade: kubernetes-operator (INFRA/kubernetes-operator)
+PASS wrapper install + upgrade: infrastructure-namespace (INFRA/app-management/app-namespace)
+PASS wrapper install + upgrade: ocm-wstack-namespace (INFRA/app-management/app-namespace)
+PASS wrapper install + upgrade: storage (XFSC/Applicationsets/chart)
+PASS wrapper install + upgrade: cassandra (INFRA/storage/cassandra)
+PASS wrapper install + upgrade: postgres (INFRA/storage/postgres)
+PASS wrapper install + upgrade: postgres-operator (INFRA/storage/postgres-operator)
+PASS wrapper install + upgrade: redis (INFRA/storage/redis)
+PASS wrapper install + upgrade: redis-operator (INFRA/storage/redis-operator)
+PASS wrapper install + upgrade: network (XFSC/Applicationsets/chart)
+PASS wrapper install + upgrade: cert-manager (INFRA/network/cert-manager)
+PASS wrapper install + upgrade: cluster-issuer (INFRA/network/cluster-issuer)
+PASS wrapper install + upgrade: envoy (INFRA/network/envoy)
+PASS wrapper install + upgrade: core (XFSC/Applicationsets/chart)
+PASS wrapper install + upgrade: nats (INFRA/core/nats)
+PASS wrapper install + upgrade: universal-resolver (INFRA/core/universal-resolver)
+PASS wrapper install + upgrade: ocm-wstack (XFSC/Applicationsets/chart)
+PASS wrapper install + upgrade: credential-issuance (OCM W-Stack/Credential Issuance)
+PASS wrapper install + upgrade: credential-retrieval (OCM W-Stack/Credential Retrieval)
+PASS wrapper install + upgrade: credential-verification-service-chart (OCM W-Stack/Credential Verification Service Chart)
+PASS wrapper install + upgrade: crypto-service (OCM W-Stack/Crypto Service)
+PASS wrapper install + upgrade: dummy-content-signer (OCM W-Stack/Dummy Content Signer)
+PASS wrapper install + upgrade: offering-dummy (OCM W-Stack/Offering Dummy)
+PASS wrapper install + upgrade: policy-chart (OCM W-Stack/Policy Chart)
+PASS wrapper install + upgrade: pre-authorization-bridge-chart (OCM W-Stack/Pre Authorization Bridge Chart)
+PASS wrapper install + upgrade: sdjwt-service (OCM W-Stack/SdJwt Service)
+PASS wrapper install + upgrade: status-list-service-chart (OCM W-Stack/Status List Service Chart)
+PASS wrapper install + upgrade: storage-service (OCM W-Stack/Storage Service)
+PASS wrapper install + upgrade: well-known-chart (OCM W-Stack/Well Known Chart)
+PASS wrapper install + upgrade: demotenant (XFSC/tenant/chart)
+PASS TelemetryConfig CRD field placement and Tempo receiver types
+PASS AppProject upgrade ownership: absent
+PASS AppProject upgrade ownership: owned
+PASS AppProject upgrade ownership: foreign
+PASS existing OpenBao mount type: kv
+PASS existing OpenBao mount type: transit

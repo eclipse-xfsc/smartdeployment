@@ -128,3 +128,15 @@ test('diagnose-api uses the operation kubeconfig without chart downloads or muta
   assert.ok(calls.every(c=>c.command==='kubectl'&&c.args.includes('--raw=/readyz')));
   assert.deepEqual((await h.readState()).objects,{});
 });
+
+test('real bootstrap recovers an Argo Application read EOF without replaying Storage',async t=>{
+  const h=await setup(t);const factory=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_ARGO_READ_EOF='true';return r;};
+  assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
+  const state=await h.readState();assert.equal(state.attempts['infrastructure/storage'],1);
+  const calls=await h.readCalls();
+  const crdIndex=calls.findIndex(c=>c.args.includes('--raw=/apis/apiextensions.k8s.io/v1/customresourcedefinitions/applications.argoproj.io'));
+  const storageIndex=calls.findIndex(c=>c.command==='helm'&&c.args[0]==='upgrade'&&c.args.includes('storage'));
+  assert.ok(crdIndex>0&&crdIndex<storageIndex);
+  assert.ok(h.events.some(e=>e.type==='log'&&e.message.includes('api-read-retry')));
+});

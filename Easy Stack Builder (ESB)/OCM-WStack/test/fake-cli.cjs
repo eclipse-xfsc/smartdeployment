@@ -70,13 +70,23 @@ if(verb==='wait'){
 }
 if(verb==='cluster-info'||verb==='rollout'){out('ready');process.exit(0);}
 if(verb==='get'&&kind==='--raw=/readyz'){out('ok');process.exit(0);}
+if(verb==='get'&&kind.startsWith('--raw=/apis/')) {
+  if(!state.argoInstalled)fail('Error from server (NotFound): the server could not find the requested resource');
+  if(kind.includes('/customresourcedefinitions/')){out({status:{conditions:[{type:'Established',status:'True'}]}});process.exit(0);}
+  if(kind.endsWith('/applications')) {
+    state.applicationReads=(state.applicationReads||0)+1;save();
+    if(process.env.ESB_TEST_ARGO_READ_EOF==='true'&&state.applicationReads===1)fail('Error: Get "https://api.example.test/apis/argoproj.io/v1alpha1/namespaces/argocd/applications": EOF');
+    // Reuse the Application response below, without Kubernetes discovery.
+    a[1]='applications.argoproj.io';
+  } else fail('Unexpected raw read');
+}
 if(verb==='get'){
   if(kind==='nodes')out({items:[{spec:{providerID:'aws:///eu/test'},status:{conditions:[{type:'Ready',status:'True'}]}}]});
   else if(kind==='storageclasses')out({items:[{metadata:{name:'fast',annotations:{'storageclass.kubernetes.io/is-default-class':'true'}}}]});
   else if(kind==='namespace'&&name==='kube-system')out({metadata:{name,uid:'test-cluster-uid'}});
   else if(kind==='namespaces')out({items:state.namespaces.map(name=>({metadata:{name}}))});
   else if(kind==='configmap'||kind==='lease'){const v=state.objects[`${ns}/${kind}/${name}`];if(v)out(v);else if(!a.includes('--ignore-not-found'))fail('NotFound');}
-  else if(kind==='applications.argoproj.io')out({items:state.appsets.flatMap(set=>Array.from({length:JSON.parse(process.env.ESB_APPSET_COUNTS||'{}')[set]||1},(_,i)=>({metadata:{name:`${set}-component-${i}`,ownerReferences:[{kind:'ApplicationSet',name:set,controller:true}]},spec:{destination:{namespace:set==='ocm-wstack'?'ocm-wstack':'infrastructure'}},status:{sync:{status:'Synced',revision:'mock-main-sha'},health:{status:'Healthy'}}})))});
+  else if(kind==='applications.argoproj.io'||a[1]==='applications.argoproj.io')out({items:state.appsets.flatMap(set=>Array.from({length:JSON.parse(process.env.ESB_APPSET_COUNTS||'{}')[set]||1},(_,i)=>({metadata:{name:`${set}-component-${i}`,ownerReferences:[{kind:'ApplicationSet',name:set,controller:true}]},spec:{destination:{namespace:set==='ocm-wstack'?'ocm-wstack':'infrastructure'}},status:{sync:{status:'Synced',revision:'mock-main-sha'},health:{status:'Healthy'}}})))});
   else if(kind==='pods'){if(a.includes('--no-headers'))out('argocd-server 1/1 Running 0 1m');else out({items:[{metadata:{name:'credential-retrieval-service-1',namespace:'ocm-wstack'},status:{phase:'Running',containerStatuses:[{name:'retrieval',ready:true,restartCount:0,image:'upstream:1.1.5',imageID:'sha256:test'}]}}]});}
   else if(kind==='pvc')out({items:[]});
   else if(kind==='gateway')out({status:{addresses:[{type:'Hostname',value:'example.elb.amazonaws.com'}]}});
@@ -88,7 +98,7 @@ if(verb==='get'){
 if(verb==='create'&&kind==='namespace') {out({apiVersion:'v1',kind:'Namespace',metadata:{name}});process.exit(0);}
 if(['create','replace','apply'].includes(verb)){
   const f=a[a.indexOf('-f')+1];
-  if(!f||f.startsWith('https://')||f.endsWith('argo-install.yaml')){out('applied');process.exit(0);}
+  if(!f||f.startsWith('https://')||f.endsWith('argo-install.yaml')){if(f?.endsWith('argo-install.yaml')){state.argoInstalled=true;save();}out('applied');process.exit(0);}
   const doc=JSON.parse(fs.readFileSync(f==='-'?0:f,'utf8'));
   if(doc.kind==='Lease')for(const field of ['acquireTime','renewTime']){
     if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(doc.spec[field]))fail('BadRequest: Lease '+field+' must use Kubernetes RFC3339Micro');
