@@ -25,6 +25,7 @@
     <button type="button" class="red-ui-button ocm-tab-button active" data-target="instance">Instance Info</button>
     <button type="button" class="red-ui-button ocm-tab-button" data-target="k8s">Kubernetes &amp; Domain</button>
     <button type="button" class="red-ui-button ocm-tab-button" data-target="keycloak">Keycloak &amp; Credentials</button>
+    <button type="button" class="red-ui-button ocm-tab-button" data-target="orce">ORCE Initial Credentials</button>
   </div>
 
   <div class="ocm-hint" id="ocm-domain-hint">Use a bare FQDN such as apps.example.com. The node deploys cloud-wallet.&lt;domain&gt; and auth-cloud-wallet.&lt;domain&gt;.</div>
@@ -91,6 +92,23 @@
       <input type="hidden" id="node-input-caBundleContent">
     </div>
   </div>
+  <div class="ocm-tab-panel" data-panel="orce">
+    <p>UI: https://cloud-wallet.&lt;domain&gt;/orce/. The editor uses a separate login and is accessible through port-forward only. Existing passwords are preserved on redeployment.</p>
+    <div class="form-row"><label for="node-input-editorUsername">Editor administrator</label><input type="text" id="node-input-editorUsername" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-editorPassword">Editor password</label><input type="password" id="node-input-editorPassword" autocomplete="new-password"></div>
+    <div class="form-row"><label for="node-input-uiAdminUsername">OCM UI administrator</label><input type="text" id="node-input-uiAdminUsername" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-uiAdminEmail">OCM UI administrator email</label><input type="email" id="node-input-uiAdminEmail" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-uiAdminPassword">OCM UI password</label><input type="password" id="node-input-uiAdminPassword" autocomplete="new-password"></div>
+    <div class="form-row"><label for="node-input-uiAdminFirstName">First name (optional)</label><input type="text" id="node-input-uiAdminFirstName" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-uiAdminLastName">Last name (optional)</label><input type="text" id="node-input-uiAdminLastName" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-orceStorageSize">ORCE PVC size</label><input type="text" id="node-input-orceStorageSize" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-mongoStorageSize">MongoDB PVC size</label><input type="text" id="node-input-mongoStorageSize" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-orceStorageClass">Storage class (blank: default)</label><input type="text" id="node-input-orceStorageClass" autocomplete="off"></div>
+    <div class="form-row"><label for="node-input-offerIssuerHosts">Approved offer hosts (comma separated)</label><input type="text" id="node-input-offerIssuerHosts"></div>
+    <div class="form-row"><label for="node-input-relationshipHosts">Approved remote OCM hosts (comma separated)</label><input type="text" id="node-input-relationshipHosts"></div>
+    <div class="form-row"><label for="node-input-useExternalMongo">Use external MongoDB</label><input type="checkbox" id="node-input-useExternalMongo"></div>
+    <div class="form-row" id="ocm-mongo-uri"><label for="node-input-mongoUri">MongoDB connection string</label><input type="password" id="node-input-mongoUri" autocomplete="new-password"></div>
+  </div>
 </script>
 
 <script type="text/javascript">
@@ -140,7 +158,20 @@
     category: 'FAPs',
     color: '#c0deed',
     icon: 'bridge.svg',
+    credentials: { editorPassword: {type:"password"}, uiAdminPassword: {type:"password"}, mongoUri: {type:"password"} },
     defaults: {
+      editorUsername: {value:""},
+      uiAdminUsername: {value:""},
+      uiAdminEmail: {value:""},
+      uiAdminFirstName: {value:""},
+      uiAdminLastName: {value:""},
+      orceStorageSize: {value:"3Gi"},
+      mongoStorageSize: {value:"5Gi"},
+      orceStorageClass: {value:""},
+      useExternalMongo: {value:false},
+      offerIssuerHosts: {value:"clearing.gaia-x.eu"},
+      relationshipHosts: {value:""},
+
       name:               { value: "" },
       instanceName:       { value: "", required: true },
       domainAddress:      { value: "", required: true },
@@ -164,6 +195,7 @@
       return this.name || this.instanceName || "OCM-W-Stack";
     },
     oneditprepare: function() {
+      $("#node-input-useExternalMongo").on("change", function(){ $("#ocm-mongo-uri").toggle(this.checked); }).trigger("change");
       setupFile("kubeconfig", "kubeconfigContent");
       setupFile("privateKey", "privateKeyContent");
       setupFile("certificate", "certificateContent");

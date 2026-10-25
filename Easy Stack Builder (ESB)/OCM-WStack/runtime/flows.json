@@ -1,0 +1,126 @@
+[
+  {
+    "id": "ocm-base",
+    "type": "tab",
+    "label": "OCM UI - Auth, adapters and RBAC",
+    "disabled": false
+  },
+  {
+    "id": "ocm-runtime",
+    "type": "ocm-ui-runtime",
+    "z": "ocm-base",
+    "name": "Authenticated OCM service router",
+    "x": 500,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "ocm-http-get",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "GET UI API",
+    "url": "/orce/ui-api/v1/*",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 80,
+    "wires": [
+      [
+        "ocm-runtime"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-http-post",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "POST UI API",
+    "url": "/orce/ui-api/v1/*",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 130,
+    "wires": [
+      [
+        "ocm-runtime"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-http-patch",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "PATCH UI API",
+    "url": "/orce/ui-api/v1/*",
+    "method": "patch",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 180,
+    "wires": [
+      [
+        "ocm-runtime"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-http-put",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "PUT UI API",
+    "url": "/orce/ui-api/v1/*",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 230,
+    "wires": [
+      [
+        "ocm-runtime"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-http-delete",
+    "type": "http in",
+    "z": "ocm-base",
+    "name": "DELETE UI API",
+    "url": "/orce/ui-api/v1/*",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 280,
+    "wires": [
+      [
+        "ocm-runtime"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-uibuilder",
+    "type": "uibuilder",
+    "z": "ocm-base",
+    "name": "OCM W-Stack UI",
+    "url": "orce",
+    "fwdInMessages": false,
+    "allowScripts": false,
+    "allowStyles": false,
+    "copyIndex": false,
+    "templateFolder": "blank",
+    "extTemplate": "",
+    "showfolder": true,
+    "reload": false,
+    "sourceFolder": "dist",
+    "deployedVersion": "7.5.0",
+    "showMsgUib": false,
+    "x": 240,
+    "y": 390,
+    "wires": [
+      [],
+      []
+    ]
+  }
+]

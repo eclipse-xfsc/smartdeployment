@@ -1,78 +1,85 @@
-storage-service:  
+storage-service:
   replicaCount: 1
   name: storage-service
-
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
     imagePullPolicy: Always
     name: storage-service
-    tag: main
-
-  podAnnotations: {}
-
-  resources:
-    # requests:
-    #   cpu: 25m
-    #   memory: 64Mi
-    # limits:
-    #   cpu: 150m
-    #   memory: 128Mi
-
+    tag: 1.2.4
+  podAnnotations:
+    inject.xfsc.io/enabled: 'false'
+  resources: null
   service:
     port: 8080
     type: ClusterIP
-
   cors:
     active: true
-    origins: "*"
-
+    origins: '*'
   server:
     http:
       port: 8080
       address: 0.0.0.0
-
-  ingress:
-    enabled: false
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
-      nginx.org/client-max-body-size: 2K #Maximum Size of Credentials which are uploadable
-      nginx.ingress.kubernetes.io/rewrite-target: /v1/tenants/tenant_space/storage/$2
-    hosts:
-      - host:
-        paths:
-          - path: /storage(/|$)(.*)
-            port: 8080
-    tls:
-      - secretName: xfsc-wildcard
-        hosts:
-          - cloud-wallet.DOMAIN
   security:
     runAsNonRoot: false
     runAsUid: 1000
     runAsGid: 1000
   config:
     port: 8080
+    crypto:
+      signKey: storagekey
+      namespace: NAMESPACE
+      group: tenant_space
+    service:
+      profiles: API
+      mode: DIRECT
+      country: DE
+      region: EU
+      logLevel: info
+    messaging:
+      storageTopic: storage.service.store
+      enabled: true
+      host: nats://nats.NAMESPACE.svc.cluster.local:4222
+      protocol: nats
+      queueGroup: storage-service
+      url: nats://nats.NAMESPACE.svc.cluster.local:4222
+      requestTimeout: 10s
     cassandra:
       hosts: cassandra.NAMESPACE.svc.cluster.local:9042
       keyspace: tenant_space
       user: cassandra
       passwordSecret: cassandra
       passwordKey: cassandra-password
-    crypto:
-      signKey: storagekey
-      namespace: NAMESPACE
-    service:
-      profiles: API
-      country: DE
-      region: EU
-      mode: DIRECT
-    messaging:
-      enabled: true
-      storageTopic: storage.service.store
-      host: nats://nats.NAMESPACE.svc.cluster.local:4222
-      protocol: nats
-      queueGroup: storage-service
     vault:
       address: http://vault.NAMESPACE.svc.cluster.local:8200
       tokenName: vault
       tokenKey: token
+    engine:
+      clusterAddress: 127.0.0.1:50051
+      address: 0.0.0.0:50051
+      image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/crypto-provider-hashicorp-vault-plugin:2.0.6
+      pullPolicy: IfNotPresent
+      env:
+        VAULT_ADRESS: http://vault.NAMESPACE.svc.cluster.local:8200
+      secretEnv:
+        VAULT_TOKEN:
+          name: vault
+          key: token
+  ingress:
+    enabled: false
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.org/client-max-body-size: 2K
+      nginx.ingress.kubernetes.io/rewrite-target: /v1/tenants/tenant_space/storage/$2
+    hosts:
+    - host: null
+      paths:
+      - path: /storage(/|$)(.*)
+        port: 8080
+    tls:
+    - secretName: xfsc-wildcard
+      hosts:
+      - cloud-wallet.DOMAIN
+  resourceProvider:
+    enabled: false
+  resourceClaim:
+    enabled: false

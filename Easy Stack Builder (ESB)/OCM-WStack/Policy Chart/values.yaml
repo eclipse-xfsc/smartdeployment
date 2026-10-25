@@ -1,23 +1,20 @@
 policy:
   replicaCount: 1
   name: policy
-  nameOverride: ""
-
+  nameOverride: ''
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io
     name: tsa/policy
-    tag: "latest"
-    sha: ""
+    tag: latest
+    sha: ''
     pullPolicy: IfNotPresent
     pullSecrets: deployment-key-light
-
   useConfigMap: false
   configMapName: my-configmap
   useSecretRef: false
   secretRefName: my-secret
-
-  podAnnotations: {}
-
+  podAnnotations:
+    inject.xfsc.io/enabled: 'false'
   resources:
     requests:
       cpu: 25m
@@ -25,56 +22,47 @@ policy:
     limits:
       cpu: 150m
       memory: 128Mi
-
   autoscaling:
     enabled: false
     minReplicas: 1
     maxReplicas: 3
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 70
-
   metrics:
     enabled: true
     port: 2112
-
   log:
-    level: "debug"
+    level: debug
     encoding: json
-
   security:
     runAsNonRoot: false
     runAsUid: 0
     runAsGid: 0
   service:
     port: 8080
-
   policy:
     nats:
       url: nats://nats.NAMESPACE.svc.cluster.local:4222
       subject: external
     http:
-      host: ""
+      host: ''
       port: 8222
       timeout:
         idle: 120s
         read: 10s
         write: 10s
-
   mongo:
-    addr: ""
-    user: ""
-    pass: ""
+    addr: ''
+    user: ''
+    pass: ''
     dbname: policy
     collection: policies
-
   addresses:
     cache: http://redis.NAMESPACE.svc.cluster.local:8080
     task: http://task:8080
     didResolver: http://didresolver:8080
     signer: http://signer:8080
     NAMESPACE: https://gaiax.vereign.com/NAMESPACE
-
-
   ingress:
     enabled: false
     annotations:
@@ -83,15 +71,16 @@ policy:
     tlsEnabled: true
     frontendDomain: cloud-wallet.DOMAIN
     frontendTlsSecretName: xfsc-wildcard
-
   memoryStorage:
     policiesRepo: https://gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/deployment.git
     policiesRepoVar: POLICY_REPOSITORY_CLONE_URL
     policiesFolder: Policies
     policiesFolderVar: POLICY_REPO_FOLDER
-
   istio:
     injection:
       pod: true
-
-  secretEnv:
+  secretEnv: null
+  resourceProvider:
+    enabled: false
+  resourceClaim:
+    enabled: false

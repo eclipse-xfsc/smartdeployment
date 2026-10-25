@@ -8,6 +8,8 @@ module.exports = function(RED) {
   function DeployNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
+    let deploying = false;
+    const runtimeSecrets = node.credentials || {};
 
     const kubeContent = config.kubeconfigContent;
     const keyContent = config.privateKeyContent;
@@ -36,12 +38,22 @@ module.exports = function(RED) {
         fs.writeFileSync(caTmp.name, caBundleContent, { encoding: 'utf8', mode: 0o600 });
       }
 
-      return { kubeTmp, keyTmp, crtTmp, caTmp };
+      const runtimeTmp = tmp.fileSync({prefix:'ocm-ui-',postfix:'.json',mode:0o600});
+      const runtimeConfig = {
+        editorUsername: config.editorUsername, editorPassword: runtimeSecrets.editorPassword,
+        uiAdminUsername: config.uiAdminUsername, uiAdminEmail: config.uiAdminEmail,
+        uiAdminPassword: runtimeSecrets.uiAdminPassword, uiAdminFirstName:config.uiAdminFirstName||'', uiAdminLastName:config.uiAdminLastName||'',
+        useExternalMongo: config.useExternalMongo === true || config.useExternalMongo === 'true', mongoUri:runtimeSecrets.mongoUri||'',
+        offerIssuerHosts:config.offerIssuerHosts||'clearing.gaia-x.eu', relationshipHosts:config.relationshipHosts||'',
+        orceStorageSize:config.orceStorageSize||'3Gi', mongoStorageSize:config.mongoStorageSize||'5Gi', storageClass:config.orceStorageClass||''
+      };
+      fs.writeFileSync(runtimeTmp.name, JSON.stringify(runtimeConfig), {mode:0o600});
+      return { kubeTmp, keyTmp, crtTmp, caTmp, runtimeTmp };
     }
 
     function cleanupTempFiles(files) {
       if (!files) return;
-      for (const handle of [files.kubeTmp, files.keyTmp, files.crtTmp, files.caTmp]) {
+      for (const handle of [files.kubeTmp, files.keyTmp, files.crtTmp, files.caTmp, files.runtimeTmp]) {
         try {
           if (handle && typeof handle.removeCallback === 'function') handle.removeCallback();
         } catch (_) {
@@ -61,7 +73,9 @@ module.exports = function(RED) {
 
     function maskSecrets(text) {
       if (!text) return text;
-      return String(text)
+      let clean = String(text);
+      for(const value of Object.values(runtimeSecrets)) if(typeof value==='string' && value.length) clean = clean.split(value).join('[REDACTED]');
+      return clean
         .replace(/(BRIDGE_CLIENT_SECRET=)[^\s]+/g, '$1***')
         .replace(/("clientSecret"\s*:\s*")[^"]+("?)/g, '$1***$2')
         .replace(/(clientSecret["'=:\s]+)[^,\s\"]+/gi, '$1***')
@@ -85,6 +99,10 @@ module.exports = function(RED) {
 
     node.on('input', function(msg, send, done) {
       send = send || node.send;
+      if (deploying) { if(done) done(new Error('A deployment is already running for this node.')); return; }
+      if (!config.editorUsername || !runtimeSecrets.editorPassword || !config.uiAdminUsername || !config.uiAdminEmail || !runtimeSecrets.uiAdminPassword) {
+        if(done) done(new Error('Complete the ORCE Initial Credentials tab.')); return;
+      }
 
       if (!suffix || !domain || !email || !kubeContent || !keyContent || !crtContent || (useCustomCaBundle && !caBundleContent.trim())) {
         const err = new Error('Missing required configuration (instanceName, domain, email, kubeconfig, key, certificate, and CA bundle when enabled).');
@@ -119,8 +137,11 @@ module.exports = function(RED) {
         useCustomCaBundle ? 'true' : 'false',
         tempFiles.caTmp ? tempFiles.caTmp.name : '',
         enableIngressNginxClusterConfig ? 'true' : 'false',
-        deleteIngressNginxAdmissionWebhook ? 'true' : 'false'
+        deleteIngressNginxAdmissionWebhook ? 'true' : 'false',
+        tempFiles.runtimeTmp.name
       ];
+      deploying = true;
+      let settled = false;
       const child = spawn('bash', [deployScript, ...args], {
         cwd: __dirname,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -174,6 +195,7 @@ module.exports = function(RED) {
       stderrReader.on('line', (line) => handleLine('stderr', line));
 
       child.on('error', (err) => {
+        if(settled)return; settled=true; deploying=false;
         cleanupTempFiles(tempFiles);
         const message = maskSecrets(err.message);
         node.error(message, msg);
@@ -185,6 +207,7 @@ module.exports = function(RED) {
       });
 
       child.on('close', (code) => {
+        if(settled)return; settled=true; deploying=false;
         cleanupTempFiles(tempFiles);
         try { stdoutReader.close(); } catch (_) {}
         try { stderrReader.close(); } catch (_) {}
@@ -270,5 +293,5 @@ module.exports = function(RED) {
     });
   }
 
-  RED.nodes.registerType('OCM-W-Stack', DeployNode);
+  RED.nodes.registerType('OCM-W-Stack', DeployNode, {credentials:{editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}}});
 };

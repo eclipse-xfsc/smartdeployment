@@ -1,32 +1,50 @@
 pre-authorization-bridge:
-  image: 
+  image:
     pullPolicy: Always
-    tag: "v2.2.1"
+    tag: 2.5.6
   ingress:
-   enabled: true
-   annotations:
-     kubernetes.io/ingress.class: nginx
-     cert-manager.io/cluster-issuer: letsencrypt-prod
-   hosts:
-     - host: cloud-wallet.DOMAIN
-       paths:
-         - path: /.well-known/openid-configuration
-           pathtype: Exact
-           port: 8080
-         - path: /token
-           pathtype: Exact
-           port: 8080
-   tls:
-     - secretName: xfsc-wildcard
-       hosts:
-         - cloud-wallet.DOMAIN
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+    - host: cloud-wallet.DOMAIN
+      paths:
+      - path: /.well-known/openid-configuration
+        pathtype: Exact
+        port: 8080
+      - path: /token
+        pathtype: Exact
+        port: 8080
+    tls:
+    - secretName: xfsc-wildcard
+      hosts:
+      - cloud-wallet.DOMAIN
+  podAnnotations:
+    inject.xfsc.io/enabled: 'false'
+  redis:
+    provider: redis
   config:
+    logLevel: debug
+    servingPort: 8080
+    oAuth:
+      signerTopic: sign
+      signerJwksUrl: http://signer.NAMESPACE.svc.cluster.local/v1/jwks
+      credentialEndpoint: http://signer.NAMESPACE.svc.cluster.local/v1/credential
+      key: signerkey
+      namespace: NAMESPACE
+      groupid: null
+      issuerKid: did:web:cloud-wallet.DOMAIN#signerkey
+    wellKnown:
+      grant_types_supported:
+      - urn:ietf:params:oauth:grant-type:pre-authorized_code
+      issuer: https://cloud-wallet.DOMAIN
+      token_endpoint: https://cloud-wallet.DOMAIN/token
+      jwks_uri: https://cloud-wallet.DOMAIN/.well-known/jwks.json
     nats:
       url: nats.NAMESPACE.svc.cluster.local:4222
       queuegroup: preauth
       timeoutInSec: 10s
-    logLevel: debug
-    servingPort: 8080
     database:
       username: default
       password: pass
@@ -34,17 +52,7 @@ pre-authorization-bridge:
       port: 6379
       db: 0
       IsCluster: false
-    oAuth:
-      signerTopic: sign
-      signerJwksUrl: http://signer.NAMESPACE.svc.cluster.local/v1/jwks
-      credentialEndpoint: http://signer.NAMESPACE.svc.cluster.local/v1/credential
-      key: signerkey
-      namespace: NAMESPACE 
-      groupid:
-      issuerKid: "did:web:cloud-wallet.DOMAIN#signerkey"
-    wellKnown:
-      issuer: https://cloud-wallet.DOMAIN
-      token_endpoint: https://cloud-wallet.DOMAIN/token
-      jwks_uri: https://cloud-wallet.DOMAIN/.well-known/jwks.json
-      grant_types_supported:
-        - urn:ietf:params:oauth:grant-type:pre-authorized_code
+  resourceProvider:
+    enabled: false
+  resourceClaim:
+    enabled: false

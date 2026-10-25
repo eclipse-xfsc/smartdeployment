@@ -1,6 +1,7 @@
 #! /bin/bash
 
 set -euo pipefail
+umask 077
 
 # BusyBox and GNU coreutils both support the short decode flag.
 # Keep the short decode option; ORCE images use BusyBox base64.
@@ -20,6 +21,7 @@ USE_CUSTOM_CA_BUNDLE="${7:-false}"
 CA_BUNDLE_PATH="${8:-}"
 ENABLE_INGRESS_NGINX_CLUSTER_CONFIG="${9:-false}"
 DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK="${10:-false}"
+RUNTIME_INPUT="${11:-}"
 TLS_SECRET="xfsc-wildcard"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$(mktemp -d /tmp/ocm-w-stack-XXXXXX)"
@@ -148,11 +150,11 @@ metadata:
 spec:
   hard:
     pods: "80"
-    requests.cpu: "8"
-    requests.memory: 16Gi
-    limits.cpu: "16"
-    limits.memory: 32Gi
-    persistentvolumeclaims: "20"
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "18"
+    limits.memory: 36Gi
+    persistentvolumeclaims: "22"
 ---
 apiVersion: v1
 kind: LimitRange
@@ -245,17 +247,9 @@ post_deploy_smoke_checks() {
 handle_error() {
   local exit_code=$?
   local line="$1"
-
   set +e
-  record_phase "$LAST_PHASE" "failed" "Deployment failed at line ${line}; starting rollback"
-
-  if [[ "$ROLLBACK_IN_PROGRESS" -eq 0 ]]; then
-    ROLLBACK_IN_PROGRESS=1
-    emit_event "rollback" "running" "Executing uninstall rollback for namespace ${NAMESPACE}"
-    bash "$SCRIPT_DIR/uninstall.sh" "$NAMESPACE" "$KUBE" >/dev/null 2>&1 || true
-    emit_event "rollback" "done" "Rollback completed"
-  fi
-
+  record_phase "$LAST_PHASE" "failed" "Deployment failed at line ${line}; resources retained for inspection and retry"
+  emit_warning "No namespace deletion was attempted. Inspect the failed phase and retry using the same inputs."
   exit "$exit_code"
 }
 
@@ -274,6 +268,8 @@ bash "$SCRIPT_DIR/preflight.sh" \
   "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE" \
   "$USE_CUSTOM_CA_BUNDLE" "$CA_BUNDLE_PATH" \
   "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK"
+[[ -f "$RUNTIME_INPUT" ]] || { echo 'ORCE initial-credentials JSON file (argument 11) is required.' >&2; exit 1; }
+node "$SCRIPT_DIR/scripts/runtime-input.cjs" "$RUNTIME_INPUT"
 record_phase "preflight" "done" "Input validation completed"
 
 record_phase "helm-bootstrap" "running" "Preparing Helm repositories and ingress controller"
@@ -332,6 +328,7 @@ fi
 if [[ "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" == "true" ]]; then
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found
 fi
+node "$SCRIPT_DIR/scripts/runtime-install.cjs" preflight "$NAMESPACE" "$DOMAIN" "$RUNTIME_INPUT"
 record_phase "helm-bootstrap" "done" "Ingress controller prerequisites are ready"
 
 record_phase "namespace" "running" "Creating namespace, TLS secret, and guardrails"
@@ -431,6 +428,9 @@ done
 [ -n "$ok" ] || { echo "Cassandra auth not ready"; exit 1; }
 kubectl -n "$NAMESPACE" exec -i cassandra-0 -c cassandra -- \
   bash -lc "/opt/bitnami/cassandra/bin/cqlsh 127.0.0.1 9042 -u cassandra -p '$CASSANDRA_PASSWORD'" <<'CQL'
+CREATE KEYSPACE IF NOT EXISTS ocm
+  WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
+
 CREATE KEYSPACE IF NOT EXISTS tenant_space
   WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
 
@@ -469,10 +469,21 @@ CREATE TABLE IF NOT EXISTS tenant_space.credentials (
 CREATE INDEX IF NOT EXISTS credentials_locked_idx ON tenant_space.credentials (locked);
 CREATE INDEX IF NOT EXISTS credentials_id_idx ON tenant_space.credentials (id);
 CQL
+# The merged Storage service partitions credentials by tenant in ocm.credentials.
+# Do not silently hide a pre-11 OCM installation behind an empty replacement database.
+LEGACY_ROWS="$WORKDIR/legacy-storage-check.txt"
+kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
+  /opt/bitnami/cassandra/bin/cqlsh 127.0.0.1 9042 -u cassandra -p "$CASSANDRA_PASSWORD" \
+  -e 'SELECT JSON account FROM tenant_space.credentials LIMIT 1;' > "$LEGACY_ROWS"
+if grep -q '"account"' "$LEGACY_ROWS"; then
+  echo 'Existing pre-11 credential data requires a reviewed native Storage migration. Deployment stopped; data retained.' >&2
+  exit 1
+fi
 record_phase "cassandra" "done" "Cassandra initialized"
 
 record_phase "redis" "running" "Deploying Redis"
-REDIS_PASSWORD="$(openssl rand -hex 16)"
+REDIS_PASSWORD="$(kubectl -n "$NAMESPACE" get secret preauthbridge-redis --ignore-not-found -o jsonpath='{.data.redis-password}' | decode_base64)"
+if [[ -z "$REDIS_PASSWORD" ]]; then REDIS_PASSWORD="$(openssl rand -hex 16)"; fi
 kubectl create secret generic preauthbridge-redis \
   --from-literal=redis-password="$REDIS_PASSWORD" \
   --from-literal=redis-user="default" \
@@ -654,6 +665,12 @@ VAULT_ENV="VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
 # enable a TRANSIT engine at path 'tenant_space' and also the default 'transit' engine
 kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=tenant_space transit || true"
 kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable transit || true"
+for mount in "$NAMESPACE" "$NAMESPACE/tenant_space"; do
+  kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=$mount transit || true"
+  for key in signerkey DeveloperCredential SDJWTCredential eckey storagekey; do
+    ensure_vault_key "$mount/keys/$key"
+  done
+done
 ensure_vault_key tenant_space/keys/DeveloperCredential
 ensure_vault_key tenant_space/keys/SDJWTCredential
 ensure_vault_key tenant_space/keys/signerkey
@@ -674,11 +691,11 @@ record_phase "vault" "done" "Vault transit keys are ready"
 
 record_phase "storage" "running" "Deploying storage service"
 sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Storage Service/values.yaml"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Storage Service/values.yaml"
+sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g; s/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Storage Service/values.yaml"
 helm dependency build "./Storage Service"
 helm upgrade --install storage-service "./Storage Service" --namespace "$NAMESPACE" -f "./Storage Service/values.yaml"
 mv ./Storage\ Service/values.yaml.bak ./Storage\ Service/values.yaml
-kubectl set env deployment/storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
+kubectl set env deployment/storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" STORAGESERVICE_NATS_URL="nats://nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
 record_phase "storage" "done" "Storage service deployed"
 
 record_phase "status-list" "running" "Deploying status list service"
@@ -716,7 +733,9 @@ helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "./signer/v
 mv ./signer/values.yaml.bak ./signer/values.yaml
 kubectl set env deployment/signer \
   -n "$NAMESPACE" \
-  VAULT_ADDR="https://vault.${NAMESPACE}.svc:8200" \
+  NATS_STATUS_TOPIC=status.data.verify \
+  NATS_HOST="nats://nats.${NAMESPACE}.svc.cluster.local:4222" \
+  VAULT_ADDR="http://vault.${NAMESPACE}.svc:8200" \
   TRANSIT_MOUNT_PATH=transit \
   TRANSIT_KEY_NAME=SDJWTCredential
 record_phase "signer" "done" "Signer deployed"
@@ -818,7 +837,7 @@ sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Well Known Chart/values.yaml"
 sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Well Known Chart/values.yaml"
 helm dependency build "./Well Known Chart"
 helm upgrade --install well-known-service "./Well Known Chart" \
-  --namespace "$NAMESPACE" -f "./Well Known Chart/values.yaml" --force
+  --namespace "$NAMESPACE" -f "./Well Known Chart/values.yaml"
 mv ./Well\ Known\ Chart/values.yaml.bak ./Well\ Known\ Chart/values.yaml
 
 sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Well Known Ingress Rules/values.yaml"
@@ -840,6 +859,13 @@ mv ./Didcomm/values.yaml.bak ./Didcomm/values.yaml
 kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=15m
 record_phase "didcomm" "done" "DIDComm connector deployed and healthy"
 
+record_phase "ocm-readiness" "running" "Waiting for every OCM Deployment before provisioning the UI"
+kubectl -n "$NAMESPACE" rollout status deployment --all --timeout=15m
+record_phase "ocm-readiness" "done" "All OCM Deployments passed readiness"
+record_phase "orce-runtime" "running" "Provisioning ORCE, UI identity, persistent data and MongoDB"
+node "$SCRIPT_DIR/scripts/runtime-install.cjs" install "$NAMESPACE" "$DOMAIN" "$RUNTIME_INPUT" "$KC_POD" "$KCADM_CFG"
+record_phase "orce-runtime" "done" "ORCE/UI Deployment passed readiness"
+
 record_phase "smoke-tests" "running" "Verifying ingress, Keycloak connectivity, and stored secrets"
 post_deploy_smoke_checks
 record_phase "smoke-tests" "done" "Smoke checks completed"
@@ -847,7 +873,7 @@ record_phase "smoke-tests" "done" "Smoke checks completed"
 OCM_URL="https://cloud-wallet.${DOMAIN}"
 KEYCLOAK_URL="https://auth-cloud-wallet.${DOMAIN}"
 EXTERNAL_IP="$(collect_external_ip)"
-CLIENT_SECRET="$(kubectl -n "$NAMESPACE" get secret ocm-keycloak-client -o jsonpath='{.data.clientSecret}' | decode_base64)"
+
 DURATION_SECONDS="$(( $(date +%s) - START_TS ))"
 
 if (( DURATION_SECONDS > 600 )); then
@@ -858,7 +884,8 @@ record_phase "complete" "done" "Deployment completed in ${DURATION_SECONDS}s"
 jq -cn \
   --arg ocmUrl "$OCM_URL" \
   --arg keycloakUrl "$KEYCLOAK_URL" \
-  --arg clientSecret "$CLIENT_SECRET" \
+  --arg namespace "$NAMESPACE" \
+  --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecret:$clientSecret,externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.0",runtimeVersion:"11.0.0",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'

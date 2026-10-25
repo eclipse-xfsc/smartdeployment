@@ -4,28 +4,32 @@ credential-verification-service:
   image:
     repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
     name: credential-verification-service
-    tag: "main"
+    tag: main
     pullPolicy: Always
-  podAnnotations: {}
+  podAnnotations:
+    inject.xfsc.io/enabled: 'false'
   ingress:
     enabled: true
     annotations:
-      nginx.ingress.kubernetes.io/configuration-snippet: |
-        proxy_set_header X-DID did:web:cloud-wallet.DOMAIN;
+      nginx.ingress.kubernetes.io/configuration-snippet: 'proxy_set_header X-DID did:web:cloud-wallet.DOMAIN;
+
         proxy_set_header X-NAMESPACE tenant_space;
+
         proxy_set_header X-KEY eckey;
+
+        '
       nginx.org/client-max-body-size: 2K
       nginx.ingress.kubernetes.io/rewrite-target: /v1/tenants/tenant_space/presentation/$2
     hosts:
-      - host: cloud-wallet.DOMAIN
-        paths:
-          - path: /api/presentation(/|$)(.*)
-            port: 8080
-            pathType: ImplementationSpecific
+    - host: cloud-wallet.DOMAIN
+      paths:
+      - path: /api/presentation(/|$)(.*)
+        port: 8080
+        pathType: ImplementationSpecific
     tls:
-      - secretName: xfsc-wildcard
-        hosts:
-          - cloud-wallet.DOMAIN
+    - secretName: xfsc-wildcard
+      hosts:
+      - cloud-wallet.DOMAIN
   resources:
     requests:
       cpu: 25m
@@ -38,7 +42,7 @@ credential-verification-service:
     type: ClusterIP
   server:
     http:
-      host: ""
+      host: ''
       port: 8080
   config:
     serverMode: production
@@ -49,8 +53,8 @@ credential-verification-service:
       cassandraHosts: cassandra.NAMESPACE.svc.cluster.local
       cassandraUser: cassandra
     signing:
-      Name:  signing
-      Key:   signing-key
+      Name: signing
+      Key: signing-key
     servingPort: 8080
     country: DE
     region: EU
@@ -58,8 +62,8 @@ credential-verification-service:
     externalPresentation:
       enabled: true
       authorizeEndpoint: credential-verification-service.NAMESPACE.svc.cluster.local:8080/v1/tenants/tenant_space/presentation/
-      requestObjectPolicy:
-      clientIdPolicy:
+      requestObjectPolicy: null
+      clientIdPolicy: null
       clientUrlSchema: https
     signerService:
       presentationVerifyUrl: http://signer.NAMESPACE.svc.cluster.local:8080/v1/presentation/verify
@@ -77,3 +81,7 @@ credential-verification-service:
         url: nats.NAMESPACE.svc.cluster.local:4222
         queueGroup: credential-verification-service
         timeoutInSec: 10
+  resourceProvider:
+    enabled: false
+  resourceClaim:
+    enabled: false

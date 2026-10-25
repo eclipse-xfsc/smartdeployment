@@ -1,14 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OCM-W-Stack Output Contract",
+  "title": "OCM-W-Stack 11 Output Contract",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "ocmUrl",
     "keycloakUrl",
-    "clientSecret",
     "externalIp",
-    "status"
+    "status",
+    "clientSecretRef",
+    "namespace",
+    "uiUrl",
+    "releaseVersion",
+    "runtimeVersion",
+    "referenceRef",
+    "referenceSha"
   ],
   "properties": {
     "ocmUrl": {
@@ -19,10 +25,6 @@
       "type": "string",
       "pattern": "^https://"
     },
-    "clientSecret": {
-      "type": "string",
-      "minLength": 1
-    },
     "externalIp": {
       "type": "string"
     },
@@ -31,6 +33,48 @@
       "enum": [
         "Implemented"
       ]
+    },
+    "clientSecretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "name",
+        "key"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "uiUrl": {
+      "type": "string",
+      "pattern": "^https://[^/]+/orce/$"
+    },
+    "releaseVersion": {
+      "const": "11.0.0"
+    },
+    "runtimeVersion": {
+      "const": "11.0.0"
+    },
+    "referenceRef": {
+      "const": "main"
+    },
+    "referenceSha": {
+      "const": "a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069"
     }
   }
 }

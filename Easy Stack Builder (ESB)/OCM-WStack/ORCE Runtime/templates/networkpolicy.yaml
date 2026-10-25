@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ocm-orce
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels: {app: ocm-orce}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.controllerNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+      ports: [{protocol: TCP, port: 1880}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to: [{podSelector: {}}]
+      ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 8080}, {protocol: TCP, port: 9090}, {protocol: TCP, port: 4222}, {protocol: TCP, port: 27017}]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16]
+      ports: [{protocol: TCP, port: 443}]
+    {{- if not .Values.mongo.embedded }}
+    - ports:
+        {{- range .Values.mongo.externalPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ocm-ui-mongodb
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels: {app: ocm-ui-mongodb}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: ocm-orce}
+      ports: [{protocol: TCP, port: 27017}]
+  egress: []

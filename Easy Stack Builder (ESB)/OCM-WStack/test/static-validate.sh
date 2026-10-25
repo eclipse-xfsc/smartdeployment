@@ -147,8 +147,8 @@ for executable in test/runtime-health.sh test/bdd/run.sh test/evidence/collect-r
   [[ -x "$executable" ]] || { echo "Acceptance runner is not executable: $executable" >&2; exit 1; }
 done
 
-if ! grep -q '"version": "10.1.8"' package.json; then
-  echo 'Package version is not 10.1.8.' >&2
+if ! grep -q '"version": "11.0.0"' package.json; then
+  echo 'Package version is not 11.0.0.' >&2
   exit 1
 fi
 
@@ -164,7 +164,7 @@ node <<'NODE'
 const fs = require('fs');
 
 const schema = JSON.parse(fs.readFileSync('schema/ocm-output.schema.json', 'utf8'));
-const requiredKeys = ['ocmUrl', 'keycloakUrl', 'clientSecret', 'externalIp', 'status'];
+const requiredKeys = ['ocmUrl', 'keycloakUrl', 'clientSecretRef', 'uiUrl', 'namespace', 'externalIp', 'status'];
 for (const key of requiredKeys) {
   if (!(schema.required || []).includes(key)) {
     throw new Error(`Missing schema key: ${key}`);

@@ -1,15 +1,17 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "10.1.8",
+  "version": "11.0.0",
   "description": "OCM-W-Stack deployer node",
   "dependencies": {
-    "tmp": "^0.2.1"
+    "tmp": "0.2.5",
+    "bcryptjs": "2.4.3"
   },
   "scripts": {
-    "test": "./test/static-validate.sh",
+    "test": "node --test test/unit/*.test.cjs",
     "test:runtime": "./test/runtime-health.sh",
     "test:bdd": "./test/bdd/run.sh",
-    "test:evidence": "./test/evidence/collect-runtime-evidence.sh"
+    "test:evidence": "./test/evidence/collect-runtime-evidence.sh",
+    "test:legacy": "./test/static-validate.sh"
   },
   "keywords": [
     "ocm",
@@ -29,7 +31,7 @@
     }
   },
   "engines": {
-    "node": ">=14.0.0",
+    "node": ">=18.0.0",
     "node-red": ">=3.0.0"
   }
 }
