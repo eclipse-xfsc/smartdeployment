@@ -76,10 +76,12 @@ class Adapters {
  }
  async verify(c,key){
   const raw=await this.raw(c,key),parsed=decode(raw);
-  const base={credentialId:key,format:parsed.format,service:'XFSC Signer',checkedAt:new Date().toISOString(),cryptographic:{state:'not_separately_reported'},status:{state:'not_separately_reported',source:'XFSC Signer'}};
+  const base={credentialId:key,format:parsed.format,service:'XFSC Signer',checkedAt:new Date().toISOString(),cryptographic:{state:'not_separately_reported'},status:{state:parsed.format==='ldp_vc'?'not_checked':'not_separately_reported',source:'XFSC Signer'}};
   if(!['ldp_vc','dc+sd-jwt'].includes(parsed.format))return {...base,overall:'unsupported',code:'UNSUPPORTED_FORMAT'};
   try{
-   const r=await this.http.call('signer','/v1/credential/verify',{method:'POST',headers:{...this.headers(c),'x-format':parsed.format},body:{credential:Buffer.from(typeof raw==='string'?raw:JSON.stringify(raw)).toString('base64'),...(parsed.format==='dc+sd-jwt'?{disclosureFrame:[]}: {})},timeout:15000});
+   // Crypto 2.3.7 verifies without tenant/group/namespace scope. Keep the Storage
+   // read scoped above and preserve an optional transport authorization token.
+   const r=await this.http.call('signer','/v1/credential/verify',{method:'POST',headers:{...(c.token?{authorization:'Bearer '+c.token}:{}),'x-format':parsed.format},body:{credential:Buffer.from(typeof raw==='string'?raw:JSON.stringify(raw)).toString('base64'),...(parsed.format==='dc+sd-jwt'?{disclosureFrame:[]}: {})},timeout:15000});
    if(typeof r?.valid!=='boolean')fail(502,'UPSTREAM_PROTOCOL_ERROR');
    // Signer returns one native verdict; it does not expose separate proof/status verdicts.
    return {...base,nativeValid:r.valid,overall:r.valid?'valid':'invalid',...(r.valid&&r.disclosedCredential&&typeof r.disclosedCredential==='object'?{disclosedClaims:r.disclosedCredential}:{})};

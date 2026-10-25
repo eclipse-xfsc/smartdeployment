@@ -10,6 +10,7 @@ const lock=require('../upstream-lock.json');
 
 const SETS = ['storage','network','core','ocm-wstack'];
 const SET_FILES = ['03_storage','04_network','05_core','06_ocm_wstack'];
+const SET_PATHS = ['INFRA/storage/*','INFRA/network/*','INFRA/core/*','OCM W-Stack/*'];
 const BOOTSTRAP = [
   ['observability','INFRA/observability/opentelemtry','observability'],
   ['openbao','INFRA/security/openbao','security'],
@@ -48,7 +49,14 @@ async function plan(r, source, argoSource, c, directory) {
   const overrides={...networkOverrides(c),...ocm.overrides(c)};
   for(let i=0;i<SETS.length;i++) {
     const name=SETS[i], set=sets[name];
-    if(set.tag!=='main'||set.matrix?.enabled||!set.path?.endsWith('/*')||set.path.slice(0,-2).includes('*'))fail('CHART_PLAN',`Unsupported upstream ApplicationSet generator: ${name}.`);
+    // tag is a source default, not a generator type. ESB explicitly overrides
+    // it in both Helm preflight and bootstrap; the fetched children follow main.
+    if(set.matrix?.enabled||set.path!==SET_PATHS[i])fail('CHART_PLAN',`Unsupported upstream ApplicationSet generator for ${name}: expected non-matrix path ${SET_PATHS[i]}.`);
+    if(set.name!==name||set.namespace!==(name==='ocm-wstack'?'ocm-wstack':'infrastructure'))fail('CHART_PLAN',`Upstream ApplicationSet identity or namespace changed: ${name}.`);
+    // Install the same current-main definition that was used to enumerate and
+    // render children, including its excludes. The chart template stays reviewed.
+    await fs.writeFile(path.join(source,`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`),definitions[name]);
+    if(set.tag!==lock.argoRevision)r.emit({type:'application-set-revision',applicationSet:name,upstreamDefault:set.tag,effectiveRevision:lock.argoRevision});
     const excluded=new Set(name==='ocm-wstack'?ocm.applicationExcludes(c,set.excludes):set.excludes||[]);
     if(name==='ocm-wstack')c.ocmExcludes=[...excluded];
     if(name==='network'&&!c.externalDns)excluded.add('INFRA/network/external-dns');

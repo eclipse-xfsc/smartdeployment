@@ -1,6 +1,6 @@
 {
   "name": "ocm-orce-runtime",
-  "version": "12.3.7",
+  "version": "12.3.8",
   "private": true,
   "dependencies": {
     "bcryptjs": "2.4.3",

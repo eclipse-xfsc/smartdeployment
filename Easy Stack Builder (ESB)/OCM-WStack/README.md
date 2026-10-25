@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.7
+# OCM W-Stack ESB 12.3.8
 
-This package retains the approved uploaded-certificate deployment and 11.1.0 OCM context design. Version 12.3.7 repairs native lifecycle API integration and holder/verifier display, removes local status/validity decisions, and keeps native OCM services responsible for lifecycle. It preserves the 12.3.5 acceptance-to-Storage handoff. Native verification failures are now explicit; reviewed upstream SD-JWT/Status contracts remain a live acceptance limitation. Argo CD continues following deployment main; native service images are unchanged.
+Version 12.3.8 fixes CHART_PLAN after the upstream ApplicationSet default changed to oid4vp. ESB continues following deployment main, advances its reviewed bootstrap baseline, and updates the native Crypto verification request. Existing uploaded-kubeconfig, provider, TLS, UI, Storage and native lifecycle repairs remain included. See docs/REPAIR-12.3.8.md for exact versions and source evidence.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.7.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.8.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.7.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.8.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.7, restart the deployer ORCE/Node-RED process, and run Deploy once with the existing configuration. Open an existing SD-JWT and retest holder display, native Verify and an explicit Revoke on a disposable credential. No re-acceptance, new configuration fields or cleanup are needed. See docs/REPAIR-12.3.7.md for native limitations and the focused test sequence. All earlier deployment and acceptance repairs remain included.
+Install 12.3.8, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known remains an open upstream issue. See docs/REPAIR-12.3.8.md and VALIDATION.md.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
@@ -72,7 +72,7 @@ Optional dashboards initially use username `admin` and the configured initial ed
 
 Argo CD's storage, network, core and OCM Git ApplicationSets follow `main`, including their directory generators and generated Applications. Automated synchronization remains enabled. Future main changes therefore reconcile automatically as requested. The corrected direct ExternalDNS Helm chart remains versioned; it is not a Git source.
 
-Bootstrap shell adaptations use reviewed commit `d87b061990160fa6a34cf97c98d1e6e2a4289e9b` with byte checks. This commit changes only the Storage wrapper version and image tag relative to 12.3.0. On every Deploy, chart preflight separately fetches current main and records the exact commit rendered. ApplicationSets still receive the branch `main`, not that recorded hash. A later upstream commit may arrive after preflight; future automatic syncs are not covered by that earlier render.
+Bootstrap shell adaptations use reviewed commit `5d09c7f1012d1e9bb792fda226da478ffcca27a0` with byte checks. All guarded adaptation files are unchanged from the preceding bootstrap lock. On every Deploy, chart preflight separately fetches current main and records the exact commit rendered. ApplicationSets explicitly receive the branch `main`, including when an upstream default names another branch. Planning and installation use the same current-main values. A later upstream commit may arrive after preflight; future automatic syncs are not covered by that earlier render.
 
 The Argo CD installation manifest and bootstrap observability dependency versions remain listed in `upstream-lock.json`. Completed bootstrap releases are retained during an upgrade. No source push or native service rebuild is performed.
 
@@ -88,7 +88,7 @@ Clearing Houses are discovered from Gaia-X's published compliance registry throu
 
 ## Native acceptance limitation
 
-Steffen confirmed the missing route parameters and released official Storage 1.2.5. The adapter, native test action and diagnostics now use its geography-aware route. The published source retains `/v1/tenants/`; the shorthand URL in the email omitted `/tenants/`. Listing/import/delete and lifecycle read-back share the updated path builder. External PCM Account Service integration retains its separate contract.
+The reviewed deployment uses Storage 1.3.0. The adapter, native test action and diagnostics use its geography-aware route, retaining `/v1/tenants/`. Listing/import/delete and lifecycle read-back share the same path builder. External PCM Account Service integration retains its separate contract. The new Retrieval source supports LDP and SD-JWT through Signer; validate the selected images through the native credential lifecycle.
 
 The user confirmed Storage listing now works. This does not establish that every issuance, acceptance, verification and revocation path has passed live acceptance.
 
@@ -113,7 +113,7 @@ Add `--dns-token-file /private/dns-token.txt` when using automatic DNS. A custom
 
 Explicit `teardown` requires `REMOVE TENANT <release>` and removes tenant routing only. Node deletion cancels local processes and retains cluster data. Core services, PVCs, key material, users and roles are not deleted by the normal deployment or dashboard toggles.
 
-## Kubernetes access checks in 12.3.7
+## Kubernetes access checks (retained from 12.3.7)
 
 The uploaded kubeconfig determines the identity for the deployer and every helper. The account name “cluster-admin” alone does not prove its permissions. Preflight submits exact SelfSubjectAccessReview requests for cluster-wide access in all API groups and for Argo resources in argocd, without requiring those CRDs to be installed. Argo bootstrap and ApplicationSet readiness also recheck that the identity is unchanged and the permissions remain allowed.
 

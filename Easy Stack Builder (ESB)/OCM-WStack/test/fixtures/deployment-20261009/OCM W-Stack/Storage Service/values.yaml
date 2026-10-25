@@ -1,0 +1,48 @@
+storage-service:  
+  replicaCount: 1
+  name: storage-service
+
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+    imagePullPolicy: Always
+    name: storage-service
+    tag: 1.3.0
+
+  podAnnotations: 
+    inject.xfsc.io/enabled: "true"
+
+  resources:
+    # requests:
+    #   cpu: 25m
+    #   memory: 64Mi
+    # limits:
+    #   cpu: 150m
+    #   memory: 128Mi
+
+  service:
+    port: 8080
+    type: ClusterIP
+
+  cors:
+    active: true
+    origins: "*"
+
+  server:
+    http:
+      port: 8080
+      address: 0.0.0.0
+
+  security:
+    runAsNonRoot: false
+    runAsUid: 1000
+    runAsGid: 1000
+  config:
+    port: 8080
+    crypto:
+      signKey: storagekey
+      namespace: ocm-wstack
+    service:
+      profiles: API
+      mode: DIRECT
+    messaging:
+      storageTopic: storage.service.store
