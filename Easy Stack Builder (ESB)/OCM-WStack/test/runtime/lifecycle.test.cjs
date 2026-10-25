@@ -27,7 +27,7 @@ test('list sorts, filters and paginates without reporting unverified credentials
  const expired=await a.list(org,{status:'expired'});assert.equal(expired.total,1);assert.equal(expired.items[0].status.state,'expired');
 });
 test('native import uses the coordinated operation ID and exact credential',async()=>{
- const a=new Adapters(config,{call:async(n,p,o)=>{assert.equal(p,'/v1/tenants/tenant_space/storage/org/credentials/op-1');assert.equal(o.method,'PUT');assert.deepEqual(o.body,vc);}});
+ const a=new Adapters(config,{call:async(n,p,o)=>{assert.equal(p,'/v1/tenants/tenant_space/storage/EU/DE/org/credentials/op-1');assert.equal(o.method,'PUT');assert.deepEqual(o.body,vc);}});
  assert.equal((await a.importCredential(org,{credential:vc},'op-1')).credentialId,'op-1');
 });
 test('list checks managed revocation once per list and filters revoked credentials',async()=>{

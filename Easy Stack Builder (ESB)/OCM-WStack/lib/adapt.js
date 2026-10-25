@@ -46,7 +46,7 @@ ${p==='INFRA/network/external-dns'?'      valueFiles: []\n      parameters: []\n
       - CreateNamespace=true
       - ServerSideApply=true
       - RespectIgnoreDifferences=true`:'' )).join('\n')+'\n{{ end }}\n';
-  return {tag:lock.commit,excludes:['INFRA/network/bind9','INFRA/network/cluster-issuer',...(!c.externalDns?['INFRA/network/external-dns']:[])],esbTemplatePatch};
+  return {tag:lock.argoRevision,excludes:['INFRA/network/bind9','INFRA/network/cluster-issuer',...(!c.externalDns?['INFRA/network/external-dns']:[])],esbTemplatePatch};
 }
 async function adapt(dir) {
   // Check every adapted file before changing any. Only reviewed bootstrap source is executed.
@@ -118,7 +118,7 @@ async function adapt(dir) {
       if (!nameMatch) fail('UPSTREAM_CONTRACT','Unrecognized official Helm install.');
       let command = line;
       if(nameMatch[2]==='observability')command+=' -f "$ESB_OBSERVABILITY_VALUES"';
-      if (['storage','network','core','ocm-wstack'].includes(nameMatch[2])) command += ' --set-string tag='+lock.commit;
+      if (['storage','network','core','ocm-wstack'].includes(nameMatch[2])) command += ' --set-string tag='+lock.argoRevision;
       if (nameMatch[2] === 'network') command = command.replace('"${NETWORK_ARGS[@]}"','')+' -f "$ESB_NETWORK_VALUES"';
       if (nameMatch[2] === 'core') command += ' -f "$ESB_CORE_VALUES"';
       if (nameMatch[2] === 'ocm-wstack') command += ' -f "$ESB_OCM_VALUES"';
@@ -167,6 +167,8 @@ async function adapt(dir) {
   const query = '    kubectl get applications.argoproj.io \\\n      --namespace "$ARGOCD_NAMESPACE" \\\n      --output json';
   waitText=once(waitText, query, '    ESB_READ_TIMEOUT_SECONDS="$(( TIMEOUT_SECONDS - $(date +%s) + START_TIME > 0 ? TIMEOUT_SECONDS - $(date +%s) + START_TIME : 1 ))" node "${ESB_KUBE_READ:?ESB API reader is required}" \\\n      "/apis/argoproj.io/v1alpha1/namespaces/$ARGOCD_NAMESPACE/applications"', appWait);
   waitText=once(waitText, '  count="$(jq \'length\' <<< "$appset_applications")"', '  count="$(jq \'length\' <<< "$appset_applications")"\n  expected="$(jq -er --arg name "$APPSET_NAME" \'.[$name]\' <<< "${ESB_APPSET_COUNTS:?ESB chart plan is required}")"', appWait);
+  // On upgrade, old Healthy/Synced status must not satisfy a new main source.
+  waitText=once(waitText, '            or (.status.health.status // "Unknown") != "Healthy"', '            or (.status.health.status // "Unknown") != "Healthy"\n            or (.status.operationState.phase // "") == "Running"\n            or ((.spec.source.repoURL // "") == "https://github.com/eclipse-xfsc/deployment.git" and ((.spec.source.targetRevision // "") != "main" or (.status.sync.comparedTo.source.targetRevision // "") != "main"))', appWait);
   waitText=once(waitText, '    if [[ -z "$not_ready" ]]; then', '    if [[ -z "$not_ready" && "$count" -eq "$expected" ]]; then', appWait);
   waitText=once(waitText, '    echo "Noch nicht bereit:"', '    echo "Applications: ${count}/${expected}; waiting for the complete ApplicationSet."\n    echo "Noch nicht bereit:"', appWait);
   await fs.writeFile(path.join(dir,appWait),waitText);

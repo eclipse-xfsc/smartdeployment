@@ -3,10 +3,11 @@
 // Runs inside the existing OCM UI Pod and reads public configuration.
 // file; filter POST is the native read-only credential-list operation.
 const probe=String.raw`
+const credentialsPath=${require('../runtime/lib/storage-path.cjs').credentialsPath.toString()};
 const fs=require('node:fs'),http=require('node:http'),https=require('node:https');
 const c=JSON.parse(fs.readFileSync(process.env.OCM_RUNTIME_CONFIG||'/data/config.json','utf8'));
 const base=new URL(c.services.storage);
-const credentialPath='/v1/tenants/'+encodeURIComponent(c.tenant)+'/storage/'+encodeURIComponent(c.account)+'/credentials';
+const credentialPath=credentialsPath(c);
 async function read(path,method='GET'){
  return new Promise(resolve=>{
   const body=method==='POST'?'{}':undefined;
@@ -18,7 +19,7 @@ async function read(path,method='GET'){
     const result={path,method,httpStatus:res.statusCode};
     try{const data=JSON.parse(Buffer.concat(chunks));
      if(['Region Id Missing.','Country Id Missing.','Tenant Id Missing.','Account Id Missing.'].includes(data.message))result.nativeMessage=data.message;
-     if(path==='/swagger/doc.json')result.storagePaths=Object.keys(data.paths||{}).filter(p=>p.includes('/storage')).sort();
+     if(path==='/swagger/doc.json'){result.basePath=data.basePath;result.storagePaths=Object.keys(data.paths||{}).sort();}
     }catch{}
     resolve(result);
    });
@@ -33,7 +34,7 @@ async function read(path,method='GET'){
 async function diagnose(r){
  const pods=await r.json('kubectl',['-n','ocm-wstack','get','pods','-o','json']);
  const images=(pods.items||[]).filter(p=>p.metadata.name.startsWith('storage-service-')&&!p.metadata.deletionTimestamp).map(p=>({pod:p.metadata.name,containers:(p.status?.containerStatuses||[]).map(x=>({name:x.name,image:x.image,imageID:x.imageID,ready:x.ready}))}));
- const result=await r.run('kubectl',['-n','ocm-wstack','exec','-i','deployment/ocm-orce','--','node','-'],{input:probe,timeout:20000});
+ const result=await r.run('kubectl',['-n','ocm-wstack','exec','-i','deployment/ocm-orce','-c','orce','--','node','-'],{input:probe,timeout:20000});
  return {images,...JSON.parse(result.stdout)};
 }
 module.exports={diagnose,probe};

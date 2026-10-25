@@ -5,6 +5,8 @@ const {normalizeOffer,offerUrl}=require('./offers.cjs');
 const {fail,object,string,id}=require('./errors.cjs');
 class PcmAdapters extends Adapters {
  constructor(config,http){super({...config,tenant:config.pcm.tenant,publicOrigin:config.pcm.accountUrl?new URL(config.pcm.accountUrl).origin:config.publicOrigin,issuerDids:[],cryptoNamespace:config.pcm.cryptoNamespace},http);this.pcm=config.pcm;}
+ // Remote PCM is independently deployed; its optional native endpoint retains its existing contract.
+ storagePath(c){return '/v1/tenants/'+id(c.tenant)+'/storage/'+id(c.account)+'/credentials';}
  async statusConfiguration(c){
   if(!this.pcm.services?.status)return this.c;
   // Only a DID owned by the signed-in personal account can authorize a native

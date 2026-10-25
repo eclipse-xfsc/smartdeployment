@@ -47,7 +47,7 @@ function routingValues(){
   syncPolicy:
     syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]
 `;
-  return {tag:require('../upstream-lock.json').commit,esbTemplatePatch:common};
+  return {tag:require('../upstream-lock.json').argoRevision,esbTemplatePatch:common};
 }
 function values(c) {
   const common=routingValues().esbTemplatePatch;
@@ -56,7 +56,7 @@ function values(c) {
     helm:
       valuesObject: null
       values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`).join('\n')+'\n{{ end }}\n';
-  return {tag:require('../upstream-lock.json').commit,esbTemplatePatch:common+conditional};
+  return {tag:require('../upstream-lock.json').argoRevision,esbTemplatePatch:common+conditional};
 }
 
 function signingKey() {

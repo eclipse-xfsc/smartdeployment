@@ -134,7 +134,7 @@ async function inspect(r,c) {
   const certReady=tls.ready(certificates,c.tenantHost);
   const managedPods=pods.items.filter(x=>MANAGED_NS.includes(x.metadata.namespace)&&!x.metadata.deletionTimestamp);
   const podsReady=managedPods.some(x=>x.metadata.namespace==='ocm-wstack')&&managedPods.every(x=>x.status?.phase==='Succeeded'||(x.status?.phase==='Running'&&x.status?.containerStatuses?.length&&x.status.containerStatuses.every(s=>s.ready)));
-  return {upstreamCommit:lock.commit,argoRevision:lock.commit,tenantId:c.tenantId,tenantUrl:c.tenantUrl,provider:c.actualProvider,providerLocations:c.providerLocations,externalTrafficPolicy:c.externalTrafficPolicy,storageClass:c.actualStorageClass,ui:c.runtimeEnabled?{enabled:true,url:c.tenantUrl+'/orce/',editorUrl:c.tenantUrl+'/orce/editor/'}:{enabled:false},
+  return {upstreamCommit:lock.commit,argoRevision:lock.argoRevision,tenantId:c.tenantId,tenantUrl:c.tenantUrl,provider:c.actualProvider,providerLocations:c.providerLocations,externalTrafficPolicy:c.externalTrafficPolicy,storageClass:c.actualStorageClass,ui:c.runtimeEnabled?{enabled:true,url:c.tenantUrl+'/orce/',editorUrl:c.tenantUrl+'/orce/editor/'}:{enabled:false},
     applications,gatewayAddresses:addresses,pendingVolumes,certificateReady:certReady,gatewayConfigurationReady:Boolean(gatewayConfigurationReady),gatewayConfiguration:{tenantRouting:{mode:c.internalGatewayRouting?'internal':'public',hostname:c.tenantHost,clusterIP:publicServices[0]?.spec.clusterIP,certManagerMapped,runtimeMapped,ready:internalRoutingReady},expectedTrafficPolicy:c.externalTrafficPolicy,proxyTrafficPolicy:proxyConfig?.externalTrafficPolicy,foreignAnnotationKeys:foreignKeys(proxyConfig?.annotations),admissionPolicyReady:Boolean(policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')),services:publicServices.map(s=>({name:s.metadata.name,externalTrafficPolicy:s.spec.externalTrafficPolicy,ports:s.spec.ports.map(p=>p.port),foreignAnnotationKeys:foreignKeys(s.metadata.annotations)}))},
     clusterReady:names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
     pods:managedPods.map(x=>({name:x.metadata.name,namespace:x.metadata.namespace,phase:x.status?.phase,containers:(x.status?.containerStatuses||[]).map(s=>({name:s.name,image:s.image,imageID:s.imageID,ready:s.ready,restarts:s.restartCount}))})),
@@ -143,15 +143,16 @@ async function inspect(r,c) {
 async function validate(r,c) {
   const report=await inspect(r,c);
   const {metadataChecks,request}=require('./native');
-  report.native=await metadataChecks(c.tenantUrl,{signal:r.signal});
+  const publicRequest=(url,options={})=>request(url,{...options,addresses:c.publicDnsRecords?.find(x=>x.hostname===new URL(url).hostname&&x.ready)?.addresses});
+  report.native=await metadataChecks(c.tenantUrl,{signal:r.signal,requester:publicRequest});
   report.status=report.clusterReady&&report.certificateReady&&report.gatewayConfigurationReady&&report.native.every(x=>x.ok)?'ready':'action-required';
   if(c.runtimeEnabled){
     const realm='ocm-ui-'+c.tenantId;
-    const checks=await Promise.all([['ui-ready','/orce/ui-api/v1/health/ready',d=>d?.ready===true],['ui-auth','/orce/ui-api/v1/auth/config',d=>d?.data?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm&&d?.data?.clientId==='ocm-ui'],['ui-issuer','/orce/identity/realms/'+realm+'/.well-known/openid-configuration',d=>d?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm]].map(async([name,url,check])=>{try{const response=await request(c.tenantUrl+url,{signal:r.signal});return {name,httpStatus:response.status,ok:response.ok&&check(response.data),...(name==='ui-ready'?{nativeReady:response.data?.nativeReady===true,dependencies:response.data?.dependencies||[]}: {})};}catch{return {name,ok:false};}}));
+    const checks=await Promise.all([['ui-ready','/orce/ui-api/v1/health/ready',d=>d?.ready===true],['ui-auth','/orce/ui-api/v1/auth/config',d=>d?.data?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm&&d?.data?.clientId==='ocm-ui'],['ui-issuer','/orce/identity/realms/'+realm+'/.well-known/openid-configuration',d=>d?.issuer===c.tenantUrl+'/orce/identity/realms/'+realm]].map(async([name,url,check])=>{try{const response=await publicRequest(c.tenantUrl+url,{signal:r.signal});return {name,httpStatus:response.status,ok:response.ok&&check(response.data),...(name==='ui-ready'?{nativeReady:response.data?.nativeReady===true,dependencies:response.data?.dependencies||[]}: {})};}catch{return {name,ok:false};}}));
     report.ui={...report.ui,checks};if(checks.some(x=>!x.ok)||checks.find(x=>x.name==='ui-ready')?.nativeReady!==true)report.status='action-required';
   }
   if(c.publicDashboards){
-    const checks=await Promise.all([['argocd',`https://argocd.${c.domain}/api/version`,d=>typeof (d?.Version||d?.version)==='string'],['grafana',`https://grafana.${c.domain}/api/health`,d=>d?.database==='ok']].map(async([name,url,check])=>{try{const result=await request(url,{signal:r.signal});return {name,httpStatus:result.status,ok:result.ok&&check(result.data)};}catch{return {name,ok:false};}}));
+    const checks=await Promise.all([['argocd',`https://argocd.${c.domain}/api/version`,d=>typeof (d?.Version||d?.version)==='string'],['grafana',`https://grafana.${c.domain}/api/health`,d=>d?.database==='ok']].map(async([name,url,check])=>{try{const result=await publicRequest(url,{signal:r.signal});return {name,httpStatus:result.status,ok:result.ok&&check(result.data)};}catch{return {name,ok:false};}}));
     report.dashboards={public:true,checks};if(checks.some(x=>!x.ok))report.status='action-required';
   }
   report.credentialLifecycle='not-tested';
@@ -196,6 +197,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     if(action==='inspect'||action==='validate')return action==='validate'?await validate(r,c):await inspect(r,c);
     if(action==='test-credentials') {
       if(input.confirm!=='CREATE TEST CREDENTIAL')fail('CONFIRM','Native testing creates and accepts an Ada Lovelace credential. Set msg.confirm = "CREATE TEST CREDENTIAL".');
+      await require('./storage-scope').discover(r,c);
       const {tunnel}=require('./tunnel');
       const {exercise}=require('./native');
       let retrieval,storage;
@@ -266,7 +268,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
       await gatewayConfig.reconcile(r,c);
       if(action==='repair-network'){return await inspect(r,c);}
       for(const [name,file] of [['storage','03_storage'],['core','05_core']]){
-        await helmUpgrade(r,['upgrade','--install',name,path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,`XFSC/Applicationsets/values/${file}-values.yaml`),...(name==='core'?['-f',coreValues]:[]),'--set-string',`tag=${lock.commit}`,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','infrastructure','--timeout',`${c.timeoutSeconds}s`],{namespace:'infrastructure',release:name,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
+        await helmUpgrade(r,['upgrade','--install',name,path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,`XFSC/Applicationsets/values/${file}-values.yaml`),...(name==='core'?['-f',coreValues]:[]),'--set-string',`tag=${lock.argoRevision}`,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','infrastructure','--timeout',`${c.timeoutSeconds}s`],{namespace:'infrastructure',release:name,cwd:source,timeout:(c.timeoutSeconds+30)*1000});
         await r.run('bash',['check-applicationset.sh',name,'argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
       }
     }
@@ -298,7 +300,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     await gatewayConfig.waitTenantTls(r,c);
     const ui=await runtime.install(r,c,credentials,dir);
     const admin=await dashboards.install(r,c,credentials,certificate,dir);
-    await require('./connectivity').waitDns(r,c);
+    c.publicDnsRecords=await require('./connectivity').waitDns(r,c);
     emit({type:'phase',phase:'native-validation'});
     const report=await waitValidation(r,c);report.ui={...report.ui,...ui};report.dashboards={...report.dashboards,...admin};
     if(/STORAGE_(REGION|COUNTRY)_MISSING/.test(JSON.stringify(report))){

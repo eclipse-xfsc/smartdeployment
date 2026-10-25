@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/eclipse-xfsc/deployment.git",
-  "commit": "8485621574abdee08b8ca24c2f0f60136ba0dad7",
+  "commit": "d87b061990160fa6a34cf97c98d1e6e2a4289e9b",
   "reviewedAt": "2026-10-02",
-  "argoRevision": "8485621574abdee08b8ca24c2f0f60136ba0dad7",
+  "argoRevision": "main",
   "sha256": {
     "basic-cluster-init.sh": "af6918e713896585b8ae1c81c47e99cbd358439ef24890c186546ac486b11f82",
     "ocm-wstack-init.sh": "f07ca1c81aa49a99464d581892844d0681950f4d1c6b192ee68757b9cc358f18",
@@ -21,7 +21,8 @@
     "INFRA/observability/opentelemtry/templates/datasources.yaml": "a793a5f89efa60415cdf0ecce5f7a4838c1a1f3b6bc095d67fbc7a1b4e6f7e3c"
   },
   "compatibleBootstrapCommits": [
-    "739606691ecff72b3a40404a19fce44d9c22b0ee"
+    "739606691ecff72b3a40404a19fce44d9c22b0ee",
+    "8485621574abdee08b8ca24c2f0f60136ba0dad7"
   ],
   "argoCdCommit": "c9c369efcc5b2a0bd720803f8d14a1c3eaddf579",
   "helmPins": {

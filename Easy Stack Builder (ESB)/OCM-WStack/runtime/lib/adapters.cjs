@@ -9,7 +9,7 @@ class Adapters {
  async statusConfiguration(){return this.c;}
  headers(c){return {authorization:'Bearer '+c.token,'x-tenantid':c.tenant,'x-groupid':c.group,'x-group':this.c.cryptoGroup,'x-namespace':this.c.cryptoNamespace,'x-origin':this.c.publicOrigin};}
  call(c,name,path,method='GET',body){return this.http.call(name,path,{method,body,headers:this.headers(c),timeout:method==='GET'?5000:15000,responseType:name==='didcomm'&&path==='/admin/invitation'?'text':'json'});}
- storagePath(c){return '/v1/tenants/'+id(c.tenant)+'/storage/'+id(c.account)+'/credentials';}
+ storagePath(c){return require('./storage-path.cjs').credentialsPath({...c,storageRegion:this.c.storageRegion,storageCountry:this.c.storageCountry});}
  unpack(r){
   if(!r||typeof r!=='object')fail(502,'UPSTREAM_PROTOCOL_ERROR');
   const entries=Object.create(null),groups=Array.isArray(r)?r:r.groups;

@@ -1,7 +1,29 @@
 'use strict';
 const crypto = require('node:crypto');
 
-async function request(url, {method='GET',body,headers={},timeout=20000,signal} = {}) {
+// Use addresses established by DNS validation while preserving hostname/SNI and
+// normal certificate verification. This avoids reusing a stale local DNS answer.
+function resolvedRequest(url,{method='GET',body,headers={},timeout=20000,signal,addresses}){
+  const target=new URL(url),net=require('node:net');
+  const ips=addresses.filter(ip=>net.isIP(ip)).sort((a,b)=>net.isIP(a)-net.isIP(b));
+  if(!ips.length)throw new Error('No verified DNS addresses');
+  return new Promise((resolve,reject)=>{
+    const payload=body===undefined?undefined:JSON.stringify(body);
+    const req=(target.protocol==='https:'?require('node:https'):require('node:http')).request(target,{
+      method,signal,agent:false,headers:{...headers,...(payload===undefined?{}:{'content-type':'application/json','content-length':Buffer.byteLength(payload)})},
+      lookup:(hostname,options,done)=>options.all?done(null,ips.map(address=>({address,family:net.isIP(address)}))):done(null,ips[0],net.isIP(ips[0]))
+    },res=>{
+      const chunks=[];let size=0;
+      res.on('data',chunk=>{size+=chunk.length;if(size>4*1024*1024)req.destroy(new Error('Response exceeded 4 MiB.'));else chunks.push(chunk);});
+      res.on('error',reject);
+      res.on('end',()=>{let data=null;try{data=JSON.parse(Buffer.concat(chunks));}catch{}resolve({status:res.statusCode,data,ok:res.statusCode>=200&&res.statusCode<300});});
+    });
+    const timer=setTimeout(()=>req.destroy(new Error('HTTP timeout')),timeout);
+    req.on('close',()=>clearTimeout(timer));req.on('error',reject);req.end(payload);
+  });
+}
+async function request(url, {method='GET',body,headers={},timeout=20000,signal,addresses} = {}) {
+  if(addresses?.length)return resolvedRequest(url,{method,body,headers,timeout,signal,addresses});
   const controller=new AbortController();
   const abort=()=>controller.abort();
   if(signal?.aborted)controller.abort();
@@ -42,7 +64,7 @@ function credentialsIn(value,result=[]) {
 async function exercise(c,{retrieval,storage,requester=request,emit=()=>{},signal,pollSeconds=90}={}) {
   const checks=[];
   const group=`esb-check-${crypto.randomUUID()}`;
-  const paths={retrieval:`${retrieval}/v1/tenants/${encodeURIComponent(c.tenantId)}/offering`,storage:`${storage}/v1/tenants/${encodeURIComponent(c.tenantId)}/storage/${group}/credentials`};
+  const paths={retrieval:`${retrieval}/v1/tenants/${encodeURIComponent(c.tenantId)}/offering`,storage:storage+require('../runtime/lib/storage-path.cjs').credentialsPath({tenant:c.tenantId,account:group,storageRegion:c.storageRegion,storageCountry:c.storageCountry})};
   const report={status:'failed',tenantId:c.tenantId,tenantUrl:c.tenantUrl,testAccount:group,checks,credentialLifecycle:'not-tested',retainedTestData:true};
   const add=(check)=>{checks.push(check);emit({type:'check',...check});};
   const call=(url,options={})=>requester(url,{...options,signal});

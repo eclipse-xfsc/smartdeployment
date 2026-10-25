@@ -1,13 +1,13 @@
-# OCM W-Stack ESB 12.3.0
+# OCM W-Stack ESB 12.3.1
 
-This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. The inspected native Storage source has a route/middleware defect; see **Native acceptance limitation** below.
+This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. This version integrates official Storage 1.2.5, tracks deployment main in Argo CD, and improves DNS validation; live acceptance remains required.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.0.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.1.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.0.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.1.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
@@ -22,9 +22,9 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.0, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. Keep the existing cluster, ownership marker, Secrets and PVCs. Both dashboard Secret patch calls are corrected. Existing native services remain at the frozen upstream revision.
+Install 12.3.1, restart the deployer ORCE/Node-RED process, and run Deploy with the same configuration. Keep the existing cluster, ownership marker, Secrets and PVCs. The four Git ApplicationSets switch to `main`, adopting the official Storage 1.2.5 update. Existing users, roles, Secrets and PVCs are retained. No new editor fields are required.
 
-Storage `STORAGE_REGION_MISSING` is still unresolved. If it remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
+Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
 ```sh
 node scripts/diagnose-storage.js --kubeconfig /path/to/cluster.yaml
@@ -38,7 +38,7 @@ With **Manage DNS records** enabled, ExternalDNS maintains tenant and optional d
 
 With the toggle disabled, set the tenant's A/AAAA records to the gateway targets shown in progress. If public dashboards are enabled, set `argocd.<domain>` and `grafana.<domain>` too; a matching wildcard DNS record can cover all three. Remove stale A or AAAA targets. If the cloud assigns an address only during bootstrap, manual DNS mode necessarily needs that one DNS update after the address appears. DNS automation is the mode intended for unattended provisioning after configuration.
 
-The deployer waits for DNS to match the current LoadBalancer and verifies HTTPS with normal certificate validation. Public TCP 443 must reach the cluster's LoadBalancer; port 80 provides the tenant HTTPS redirect. It cannot reconfigure an unrelated upstream firewall without its credentials. This package does not claim to provision a Kubernetes cluster or cloud account from scratch.
+The deployer checks both A and AAAA records against the current LoadBalancer. If local DNS is stale or unavailable, matching complete answers from Cloudflare and Google DNS over HTTPS can establish readiness. Resolver answers/errors appear per hostname in progress and failures. HTTPS validation uses those verified addresses while preserving the original hostname, SNI and normal certificate verification. Conflicting public A/AAAA records still fail validation. Public TCP 443 must reach the cluster's LoadBalancer; port 80 provides the tenant HTTPS redirect. It cannot reconfigure an unrelated upstream firewall without its credentials. This package does not claim to provision a Kubernetes cluster or cloud account from scratch.
 
 The uploaded fullchain is installed as an owned Kubernetes TLS Secret. No Let's Encrypt account, Order, Challenge, ACME email, cert-manager self-check or certificate issuance wait is involved. Replace the two certificate uploads and rerun Deploy to renew. Cert-manager can remain installed for other upstream infrastructure.
 
@@ -62,22 +62,17 @@ Native OCM service implementations are not forked or replaced. Compatibility cha
 
 Optional dashboards initially use username `admin` and the configured initial editor password. Initialization is recorded and reruns do not reset changed passwords. Switching the public-dashboard toggle off removes only its routing release; it retains services, certificates and data. Fresh Grafana deployments use a PVC; upgrades retain the existing observability release and storage topology.
 
-## Source freeze
+## Upstream tracking
 
-The deployment repository and all Git ApplicationSet sources are pinned to main as reviewed on **2 October 2026**:
+Argo CD's storage, network, core and OCM Git ApplicationSets follow `main`, including their directory generators and generated Applications. Automated synchronization remains enabled. Future main changes therefore reconcile automatically as requested. The corrected direct ExternalDNS Helm chart remains versioned; it is not a Git source.
 
-- Deployment: `8485621574abdee08b8ca24c2f0f60136ba0dad7`.
-- Argo CD manifest: `c9c369efcc5b2a0bd720803f8d14a1c3eaddf579`.
-- ExternalDNS: chart `1.23.0`, using the same upstream provider contract with the corrected IONOS image.
-- Observability chart dependencies: exact reviewed versions in `upstream-lock.json`; Loki 6.53.0 and Tempo 1.24.4 retain the wrapper's existing value contracts.
+Bootstrap shell adaptations use reviewed commit `d87b061990160fa6a34cf97c98d1e6e2a4289e9b` with byte checks. This commit changes only the Storage wrapper version and image tag relative to 12.3.0. On every Deploy, chart preflight separately fetches current main and records the exact commit rendered. ApplicationSets still receive the branch `main`, not that recorded hash. A later upstream commit may arrive after preflight; future automatic syncs are not covered by that earlier render.
 
-No later deployment-main changes are followed automatically. Runtime preflight downloads the selected sources/charts and renders both install and upgrade branches **before cluster writes**. Bootstrap reuses those prepared dependencies. Existing installed bootstrap releases are retained on a completed-bootstrap rerun.
-
-This is a source-revision freeze, not a claim of a fully immutable supply chain: some official native charts still reference mutable image tags or a policy Git clone, and runtime npm transitive dependencies are resolved during seeding. Those limitations are recorded in VALIDATION. Running image digests are included in inspection/evidence output. No native service version was invented to conceal them.
+The Argo CD installation manifest and bootstrap observability dependency versions remain listed in `upstream-lock.json`. Completed bootstrap releases are retained during an upgrade. No source push or native service rebuild is performed.
 
 ## OCM context and PCM
 
-12.3.0 adds the supplied SVG branding, credential-type CRUD, dedicated Users/Roles/Permissions panels, audit actor identity, visible PCM test results and post-import lifecycle checks. See `docs/BACKLOG-12.3.0.md` for the exact scope and remaining Storage blocker.
+The retained 12.3.0 UI work adds the supplied SVG branding, credential-type CRUD, dedicated Users/Roles/Permissions panels, audit actor identity, visible PCM test results and post-import lifecycle checks. See `docs/BACKLOG-12.3.0.md` for its historical scope; this release adds the official Storage fix.
 
 The OCM context retains the FACIS branding, navigation, credential cards/detail dialog and EN/DE/FR controls from 11.1.0. It includes native credential browsing, verification, local deletion, supported issuer revocation, offers, issuance, relationships, roles/assignments, audit, health, provenance and **Connections**.
 
@@ -87,7 +82,9 @@ Clearing Houses are discovered from Gaia-X's published compliance registry throu
 
 ## Native acceptance limitation
 
-The inspected Credential Storage source (`567201e524967d5b9c0798a866f5fb587e912017`) requires `region` and `country` Gin route parameters but its registered credential routes do not supply them. This is not repaired by DNS, TLS, environment variables or request headers. The running `1.2.4` image must be checked: its digest/source correspondence was not verified here.
+Steffen confirmed the missing route parameters and released official Storage 1.2.5. The adapter, native test action and diagnostics now use its geography-aware route. The published source retains `/v1/tenants/`; the shorthand URL in the email omitted `/tenants/`. Listing/import/delete and lifecycle read-back share the updated path builder. External PCM Account Service integration retains its separate contract.
+
+Test the actual image through the Credentials page and the explicit native credential test after upgrading.
 
 The deployer checks native Storage, Retrieval, issuer bootstrap and NATS health and reports `action-required` if they fail. A native HTTP 400 is surfaced promptly instead of silently waiting or returning an empty OCM context. UI availability, internet connectivity and credential lifecycle acceptance are separate results. No Storage fork, database bypass or fake successful lifecycle was added.
 

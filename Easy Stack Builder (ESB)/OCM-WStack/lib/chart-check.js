@@ -52,7 +52,7 @@ async function plan(r, source, argoSource, c, directory) {
     const excluded=new Set(set.excludes||[]);
     if(name==='network'&&!c.externalDns)excluded.add('INFRA/network/external-dns');
     if(name==='network')excluded.add('INFRA/network/cluster-issuer');
-    const values={storageClass:c.actualStorageClass,tag:lock.commit};
+    const values={storageClass:c.actualStorageClass,tag:lock.argoRevision};
     if(name==='network')Object.assign(values,{profile:c.profile,domain:c.domain,email:c.email,excludes:[...excluded]},networkValues(c));
     if(name==='core')Object.assign(values,ocm.routingValues());
     if(name==='ocm-wstack')Object.assign(values,ocm.values(c));
@@ -84,12 +84,16 @@ async function plan(r, source, argoSource, c, directory) {
 async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   r.emit({type:'phase',phase:'chart-preflight'});
   if(!argoSource) {
-    argoRevision=lock.commit;
+    await r.run('git',['-C',source,'fetch','--depth=1','origin',lock.argoRevision],{timeout:300000});
+    argoRevision=(await r.run('git',['-C',source,'rev-parse','FETCH_HEAD'])).stdout.trim();
+    if(!/^[a-f0-9]{40}$/.test(argoRevision))fail('UPSTREAM_COMMIT','Cannot resolve the current deployment main commit.');
     argoSource=path.join(directory,'argo-source');
     await r.run('git',['-C',source,'worktree','add','--detach',argoSource,argoRevision]);
   }
   const validationDir=path.join(directory,'chart-preflight');await fs.mkdir(validationDir,{recursive:true});
-  const envoyDefaults=await readYaml(r,validationDir,{envoy:await fs.readFile(path.join(argoSource,'INFRA/network/envoy/values.yaml'),'utf8')});
+  const envoyDefaults=await readYaml(r,validationDir,{envoy:await fs.readFile(path.join(argoSource,'INFRA/network/envoy/values.yaml'),'utf8'),retrieval:await fs.readFile(path.join(argoSource,'OCM W-Stack/Credential Retrieval/values.yaml'),'utf8')});
+  const retrievalConfig=envoyDefaults.retrieval['credential-retrieval-service']?.config||{};
+  Object.assign(c,require('./storage-scope').scope(retrievalConfig.region,retrievalConfig.country));
   c.upstreamAnnotationKeys=Object.keys(envoyDefaults.envoy.envoyProxy?.service?.annotations||{});
   const jobs=await plan(r,source,argoSource,c,validationDir);
   if(c.externalDns){
@@ -151,7 +155,7 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   await fs.writeFile(argoManifest,manifest,{mode:0o600});
   if(!manifest.includes('kind: CustomResourceDefinition')||!manifest.includes('name: argocd-server'))fail('ARGO_MANIFEST','Downloaded Argo manifest does not contain the expected resources. No installation was started.');
   const applicationCounts=Object.fromEntries(SETS.map(set=>[set,jobs.filter(j=>j.applicationSet===set).length]));
-  const result={status:'charts-validated',argoRevision,kubeVersion,charts:results,applicationCounts,argoRedisRegistry:'docker.io/library/redis',argoManifestSha256:crypto.createHash('sha256').update(manifest).digest('hex'),liveDeploymentTested:false};
+  const result={status:'charts-validated',argoTrackingRevision:lock.argoRevision,argoRevision,kubeVersion,charts:results,applicationCounts,argoRedisRegistry:'docker.io/library/redis',argoManifestSha256:crypto.createHash('sha256').update(manifest).digest('hex'),liveDeploymentTested:false};
   r.env={...r.env,ESB_ARGO_MANIFEST:argoManifest,ESB_APPSET_COUNTS:JSON.stringify(applicationCounts)};
   r.emit({type:'chart-preflight-complete',argoRevision,chartCount:results.length});
   return result;
