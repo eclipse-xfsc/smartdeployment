@@ -1,5 +1,6 @@
 'use strict';
 module.exports=function(RED){
+ require('../lib/browser-routes.cjs').register(RED);
  function RuntimeNode(config){
   RED.nodes.createNode(this,config);const app=require('../lib/runtime.cjs').instance();
   app.start().then(()=>this.status({fill:'green',shape:'dot',text:'ready'})).catch(()=>this.status({fill:'red',shape:'ring',text:'startup failed'}));

@@ -147,8 +147,8 @@ for executable in test/runtime-health.sh test/bdd/run.sh test/evidence/collect-r
   [[ -x "$executable" ]] || { echo "Acceptance runner is not executable: $executable" >&2; exit 1; }
 done
 
-if ! grep -q '"version": "11.0.4"' package.json; then
-  echo 'Package version is not 11.0.4.' >&2
+if ! grep -q '"version": "11.0.5"' package.json; then
+  echo 'Package version is not 11.0.5.' >&2
   exit 1
 fi
 

@@ -9,7 +9,6 @@ module.exports={
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' "+new URL(config.issuer).origin+"; frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
   res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-  if(req.url.split('?')[0]==='/orce/auth/callback')req.url='/orce/';
   next();
  },
  apiMaxLength:'1mb',
