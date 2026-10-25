@@ -6,6 +6,9 @@ const {fail}=require('./config');
 const POLICY='OCM W-Stack/Policy Chart';
 const VERIFICATION='OCM W-Stack/Credential Verification Service Chart';
 const DIDCOMM='OCM W-Stack/Didcomm';
+const BRIDGE='OCM W-Stack/Pre Authorization Bridge Chart';
+const WELLKNOWN='OCM W-Stack/Well Known Chart';
+const NATS_CHART='INFRA/core/nats';
 const RESOLVER_CHART='INFRA/core/universal-resolver';
 const REGISTRY='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io';
 // The published dependency chart's image name is tsa/policy. The wrapper
@@ -15,6 +18,8 @@ const CASSANDRA_SECRET='esb-credential-verification-cassandra';
 const PUBLIC_REGISTRY_SECRET='esb-ocm-public-registry';
 function overrides(c) {
   return {
+    [BRIDGE]: {'pre-authorization-bridge':{podAnnotations:{'inject.xfsc.io/enabled':'true','inject.xfsc.io/needs':'nats,redis,signer','inject.xfsc.io/env-prefix':'PREAUTHBRIDGE'}}},
+    [WELLKNOWN]: {'well-known-service':{podAnnotations:{'inject.xfsc.io/enabled':'true','inject.xfsc.io/needs':'postgres,nats','inject.xfsc.io/env-prefix':'WELLKNOWN_SERVICE'}}},
     [POLICY]: {policy:{image:{repository:REGISTRY,name:'tsa/policy',tag:'1.0.0',sha:'',pullSecrets:''},
       podAnnotations:{'inject.xfsc.io/enabled':'true','inject.xfsc.io/needs':'nats',
         'inject.xfsc.io/env-replacements':JSON.stringify({NATS_URL:'NATS_ADDR'})},
@@ -45,7 +50,7 @@ function routingValues(){
   ignoreDifferences:
     - group: apps
       kind: Deployment
-      jsonPointers: [/spec/template/spec/hostAliases]
+      jsonPointers: [/spec/template/spec/hostAliases, /spec/template/metadata/annotations/esb.xfsc.io~1credentials, /spec/template/metadata/annotations/esb.xfsc.io~1nats-recovery]
     - group: apps
       kind: StatefulSet
       jsonPointers: [/spec/template/spec/hostAliases]
@@ -98,6 +103,7 @@ function validateKey(value) {
   } catch {fail('SIGNING_KEY','Existing signing/signing-key is incompatible with the verification service (EC PRIVATE KEY label, PKCS#8 EC contents required). It was retained; no key was replaced.');}
 }
 async function prerequisites(r,timeoutSeconds) {
+  await require('./ocm-guard').install(r);
   await require('./ocm-startup').resolver(r);
   await verificationPullSecret(r);
   const current=await r.json('kubectl',['-n','ocm-wstack','get','secret','signing','--ignore-not-found','-o','json']);
@@ -153,6 +159,25 @@ async function imagePreflight(r,directory) {
   r.emit({type:'image-preflight',image:POLICY_IMAGE,status:'resolvable',authentication:result.authentication});
 }
 function validateManifests(documents,chart) {
+  if(chart===NATS_CHART){
+    const server=Object.values(documents).find(d=>d?.kind==='StatefulSet'&&d.metadata?.name==='nats');
+    if(!server?.spec?.template?.spec?.containers?.some(c=>c.name==='nats'&&c.ports?.some(p=>p.containerPort===8222)))fail('NATS_MONITORING','The reviewed NATS monitoring port 8222 is required for actual listener checks.');
+    return;
+  }
+  if([BRIDGE,WELLKNOWN].includes(chart)){
+    const name=chart===BRIDGE?'pre-authorization-bridge':'well-known-service';
+    const d=Object.values(documents).find(x=>x?.kind==='Deployment'&&x.metadata?.name===name);
+    const prefix=chart===BRIDGE?'PREAUTHBRIDGE':'WELLKNOWN_SERVICE',a=d?.spec?.template?.metadata?.annotations||{};
+    if(a['inject.xfsc.io/enabled']!=='true'||a['inject.xfsc.io/env-prefix']!==prefix)fail('OCM_VALUES','Native credential/listener injection contract changed.');
+    if(chart===WELLKNOWN){const importer=d.spec.template.spec.containers.find(c=>c.name===name)?.env?.find(e=>e.name==='WELLKNOWN_SERVICE_CREDENTIAL_ISSUER_IMPORTER');if(importer&&!['BROADCAST',undefined].includes(importer.value))fail('OCM_VALUES','Required Well-Known registration listener needs the native BROADCAST importer.');}
+    if(chart===BRIDGE){
+      const e=Object.fromEntries((d.spec.template.spec.containers.find(c=>c.name===name)?.env||[]).map(x=>[x.name,x]));
+      const user=e.PREAUTHBRIDGE_REDIS_USERNAME?.valueFrom?.secretKeyRef,pw=e.PREAUTHBRIDGE_REDIS_PASSWORD?.valueFrom?.secretKeyRef;
+      const claim=Object.values(documents).find(x=>x?.kind==='ResourceClaim'&&x.spec?.type==='redis'&&x.spec.externalSecretRef?.name===user?.name);
+      if(!user||user.name!==pw?.name||user.key!=='username'||pw.key!=='password'||claim?.spec?.providerRef?.name!=='redis'||JSON.stringify(claim.spec.parameters?.acl)!==JSON.stringify({keys:['auth:*']}))fail('OCM_VALUES','Bridge Redis claim credentials or auth:* ACL scope changed.');
+    }
+    return;
+  }
   if(chart===RESOLVER_CHART) {
     const service=Object.values(documents).find(d=>d?.kind==='Service'&&d.metadata?.name==='universal-resolver-service');
     const port=service?.spec?.ports?.find(p=>p.port===8080);
@@ -200,4 +225,4 @@ async function inspect(r,root,directory,readYaml,chart) {
   }}
   await walk(root);validateManifests(await readYaml(r,directory,sources),chart);
 }
-module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,verificationPullSecret,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,PUBLIC_REGISTRY_SECRET,DIDCOMM,RESOLVER_CHART};
+module.exports={routingValues,overrides,values,applicationExcludes,prerequisites,verificationPullSecret,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET,PUBLIC_REGISTRY_SECRET,DIDCOMM,RESOLVER_CHART,BRIDGE,WELLKNOWN,NATS_CHART};

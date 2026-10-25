@@ -11,7 +11,7 @@
 .esb-ocm-form .esb-preview{padding:12px;border-left:3px solid var(--esb-accent);background:var(--red-ui-secondary-background,#f0f5f6);overflow-wrap:anywhere;margin:12px 0}.esb-ocm-form summary{cursor:pointer;font-weight:600;padding:10px 0}.esb-ocm-form details>div{padding-top:10px}
 </style>
 <div class="esb-ocm-form">
- <div class="esb-ocm-hero"><h3>OCM W-Stack</h3><p>Your OCM W-Stack UI, native services and infrastructure in one deployment.</p><small>ESB 12.3.9 · Automatic upstream updates</small></div>
+ <div class="esb-ocm-hero"><h3>OCM W-Stack</h3><p>Your OCM W-Stack UI, native services and infrastructure in one deployment.</p><small>ESB 12.3.11 · Automatic upstream updates</small></div>
  <ul id="esb-ocm-tabs"></ul><div id="esb-ocm-panels">
  <div id="esb-ocm-connect">
   <div class="esb-card"><h4>Connect your cluster</h4>
@@ -44,13 +44,13 @@
  </div>
  <div id="esb-ocm-domain" style="display:none">
   <div class="esb-card"><h4>Domain &amp; certificate</h4>
-   <div class="form-row"><label for="node-input-domainAddress">Base domain</label><input id="node-input-domainAddress" placeholder="leanea.com"></div>
+   <div class="form-row"><label for="node-input-domainAddress">Base domain</label><input id="node-input-domainAddress" placeholder="example.com"></div>
    <div class="form-row"><label for="node-input-tenantId">Tenant name</label><input id="node-input-tenantId" placeholder="demo-tenant"></div>
    <div id="esb-tenant-preview" class="esb-preview"></div>
    <div class="form-row esb-upload"><label for="esb-cert-file">Fullchain certificate</label><input id="esb-cert-file" type="file" accept=".pem,.crt,.cer,.txt"><span id="esb-cert-status" class="esb-file-status"></span></div>
    <div class="form-row esb-upload"><label for="esb-key-file">Private key</label><input id="esb-key-file" type="file" accept=".pem,.key,.txt"><span id="esb-key-status" class="esb-file-status"></span></div>
    <input type="password" style="display:none" id="node-input-tlsCertificate"><input type="password" style="display:none" id="node-input-tlsPrivateKey">
-   <p class="esb-note">Use a public trusted PEM fullchain and its matching unencrypted PEM private key. A wildcard certificate such as *.leanea.com covers the tenant and optional dashboard hostnames. Upload renewed files here and run Deploy to replace them.</p>
+   <p class="esb-note">Use a public trusted PEM fullchain and its matching unencrypted PEM private key. A wildcard certificate such as *.example.com covers the tenant and optional dashboard hostnames. Upload renewed files here and run Deploy to replace them.</p>
   </div>
  </div>
  <div id="esb-ocm-access" style="display:none">
@@ -85,7 +85,7 @@
   }
   upload('esb-kube-file','kubeconfig','esb-kube-status',2097152);upload('esb-cert-file','tlsCertificate','esb-cert-status',131072);upload('esb-key-file','tlsPrivateKey','esb-key-status',131072);
   function options(){var dns=$('#node-input-externalDns').prop('checked'),custom=$('#node-input-dnsProvider').val()==='custom';$('#esb-dns-fields').toggle(dns);$('#esb-manual-dns').toggle(!dns);$('#esb-dns-custom').toggle(custom);$('#esb-dns-token').toggle(!custom);$('#esb-mongo-uri').toggle($('#node-input-useExternalMongo').prop('checked'));$('#esb-hetzner').toggle(['auto','hetzner'].includes($('#node-input-provider').val()));}
-  function preview(){var domain=$('#node-input-domainAddress').val().replace(/^\*\./,'')||'leanea.com',tenant=(node.tenantSubdomain||$('#node-input-tenantId').val()||'demo-tenant').toLowerCase().replace(/_/g,'-');$('#esb-tenant-preview').text('OCM W-Stack UI: https://'+tenant+'.'+domain+'/orce/');}
+  function preview(){var domain=$('#node-input-domainAddress').val().replace(/^\*\./,'')||'example.com',tenant=(node.tenantSubdomain||$('#node-input-tenantId').val()||'demo-tenant').toLowerCase().replace(/_/g,'-');$('#esb-tenant-preview').text('OCM W-Stack UI: https://'+tenant+'.'+domain+'/orce/');}
   $('#node-input-externalDns,#node-input-dnsProvider,#node-input-provider,#node-input-useExternalMongo').on('change',options);options();$('#node-input-domainAddress,#node-input-tenantId').on('input',preview);preview();
  },
  oneditsave:function(){this.procedureVersion=12;this.runtimeEnabled=true;this.gatewayRouting='internal';this.externalTrafficPolicy='Cluster';this.pcm='{"enabled":false}';}

@@ -144,10 +144,10 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
       const rendered=await r.run('helm',args,{timeout:180000});
       if(/cannot overwrite table with non table|destination for .* is a table/.test(rendered.stderr))throw new Error(rendered.stderr);
       if(job.release==='observability')await require('./grafana').inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml);
-      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM,ocm.RESOLVER_CHART].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
+      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM,ocm.RESOLVER_CHART,ocm.BRIDGE,ocm.WELLKNOWN,ocm.NATS_CHART].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       // Exercise upgrade branches as well as first-install branches in Helm templates.
       await r.run('helm',[...args,'--is-upgrade'],{timeout:180000});
-      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM,ocm.RESOLVER_CHART].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
+      if([ocm.POLICY,ocm.VERIFICATION,ocm.DIDCOMM,ocm.RESOLVER_CHART,ocm.BRIDGE,ocm.WELLKNOWN,ocm.NATS_CHART].includes(job.chart))await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       const lockfile=path.join(location,'Chart.lock');
       results.push({chart:job.chart,release:job.release,namespace:job.namespace,applicationSet:job.applicationSet||null,
         dependencyLockSha256:await exists(lockfile)?crypto.createHash('sha256').update(await fs.readFile(lockfile)).digest('hex'):null});

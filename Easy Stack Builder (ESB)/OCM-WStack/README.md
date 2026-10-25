@@ -1,19 +1,19 @@
-# OCM W-Stack ESB 12.3.9
+# OCM W-Stack ESB 12.3.11
 
-Version 12.3.9 adds a bounded authorization recheck for Forbidden Argo list reads after an allowed access review. It retries only while the uploaded identity is unchanged and a fresh exact review allows access. Persistent discrepancies remain explicit failures. It includes the 12.3.8 upstream compatibility and Crypto integration update. See docs/REPAIR-12.3.9.md and docs/REPAIR-12.3.8.md.
+Version 12.3.11 removes the separate DNS test/wait step. It retains persistent Redis credential reconciliation, consumer reloads after Secret rotation, Well-Known NATS startup recovery, and completion checks for the bridge and its required NATS listeners. It retains the 12.3.9 authorization recovery and earlier native integration. See docs/REPAIR-12.3.10.md and VALIDATION.md.
 
 ## Install and configure
 
-Install `orce-esb-ocmwstack-12.3.9.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
+Install `orce-esb-ocmwstack-12.3.11.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
 ```sh
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.9.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.3.11.tgz
 ```
 
 Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
 
 1. **Cluster:** upload a self-contained cluster-admin kubeconfig. Choose whether the deployer manages DNS and whether Argo CD/Grafana should be public. If DNS automation is enabled, provide credentials for the account hosting the domain.
-2. **Domain & certificate:** base domain (`leanea.com` or `*.leanea.com`), tenant name (`demo-tenant`), public-trusted PEM fullchain certificate and matching unencrypted PEM private key. A `*.leanea.com` certificate covers `demo-tenant.leanea.com`, `argocd.leanea.com` and `grafana.leanea.com`.
+2. **Domain & certificate:** base domain (`example.com` or `*.example.com`), tenant name (`demo-tenant`), public-trusted PEM fullchain certificate and matching unencrypted PEM private key. A `*.example.com` certificate covers `demo-tenant.example.com`, `argocd.example.com` and `grafana.example.com`.
 3. **Access:** initial OCM context administrator and editor administrator passwords, each at least 12 characters. These are separate accounts. Their stored credentials and existing roles are retained on reruns. The OCM context requires a password change at first login.
 
 Provider, StorageClass, image, PVC sizes and timeout overrides are under Advanced. ORCE defaults to `ecofacis/xfsc-orce:2.0.15`; `2.0.13` is selectable. There are no PCM, ACME, internal-routing, service endpoint or annotation JSON fields in the normal deployment flow.
@@ -22,7 +22,7 @@ Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS t
 
 ## Upgrade and dashboard recovery
 
-Install 12.3.9, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known remains an open upstream issue. See docs/REPAIR-12.3.8.md and VALIDATION.md.
+Install 12.3.11, restart the deployer ORCE/Node-RED process, and run Deploy with the existing configuration to resume or upgrade the matching installation. No re-acceptance or cleanup is needed for the package upgrade. Retest LDP and SD-JWT acceptance and Verify after native services are ready. Well-Known subscription startup recovery is included; this does not claim to repair unrelated metadata/database bugs. See docs/REPAIR-12.3.8.md and VALIDATION.md.
 
 Organizational Storage requests now use `/v1/tenants/<tenant>/storage/<region>/<country>/<account>/credentials`, as registered by the published 1.2.5 source. Region/country follow the installed Retrieval deployment (upstream defaults EU/DE). If a region/country error remains during final validation, output 2 emits `storage-diagnostics` automatically. A standalone read-only diagnostic is also available from this source directory:
 
@@ -44,7 +44,7 @@ With **Manage DNS records** enabled, ExternalDNS maintains tenant and optional d
 
 With the toggle disabled, set the tenant's A/AAAA records to the gateway targets shown in progress. If public dashboards are enabled, set `argocd.<domain>` and `grafana.<domain>` too; a matching wildcard DNS record can cover all three. Remove stale A or AAAA targets. If the cloud assigns an address only during bootstrap, manual DNS mode necessarily needs that one DNS update after the address appears. DNS automation is the mode intended for unattended provisioning after configuration.
 
-The deployer checks both A and AAAA records against the current LoadBalancer. If local DNS is stale or unavailable, matching complete answers from Cloudflare and Google DNS over HTTPS can establish readiness. Resolver answers/errors appear per hostname in progress and failures. HTTPS validation uses those verified addresses while preserving the original hostname, SNI and normal certificate verification. Conflicting public A/AAAA records still fail validation. Public TCP 443 must reach the cluster's LoadBalancer; port 80 provides the tenant HTTPS redirect. It cannot reconfigure an unrelated upstream firewall without its credentials. This package does not claim to provision a Kubernetes cluster or cloud account from scratch.
+The deployer does not run a separate DNS test or wait gate. After tenant, UI and dashboard installation, it proceeds directly to native HTTPS validation using normal system DNS and certificate verification. DNS records must still resolve correctly for those HTTPS requests to succeed. Public TCP 443 must reach the cluster's LoadBalancer; port 80 provides the tenant HTTPS redirect. It cannot reconfigure an unrelated upstream firewall without its credentials. This package does not claim to provision a Kubernetes cluster or cloud account from scratch.
 
 The uploaded fullchain is installed as an owned Kubernetes TLS Secret. No Let's Encrypt account, Order, Challenge, ACME email, cert-manager self-check or certificate issuance wait is involved. Replace the two certificate uploads and rerun Deploy to renew. Cert-manager can remain installed for other upstream infrastructure.
 
@@ -58,13 +58,13 @@ Native OCM service implementations are not forked or replaced. Compatibility cha
 
 | URL | Purpose |
 |---|---|
-| `https://demo-tenant.leanea.com/` | Redirect to OCM context |
-| `https://demo-tenant.leanea.com/orce/` | OCM W-Stack UI |
-| `https://demo-tenant.leanea.com/orce/editor/` | Authenticated ORCE editor |
-| `https://demo-tenant.leanea.com/.well-known/did.json` | Native tenant DID |
-| `https://demo-tenant.leanea.com/.well-known/openid-credential-issuer` | Native issuer metadata |
-| `https://argocd.leanea.com/` | Optional authenticated Argo CD |
-| `https://grafana.leanea.com/` | Optional authenticated Grafana |
+| `https://demo-tenant.example.com/` | Redirect to OCM context |
+| `https://demo-tenant.example.com/orce/` | OCM W-Stack UI |
+| `https://demo-tenant.example.com/orce/editor/` | Authenticated ORCE editor |
+| `https://demo-tenant.example.com/.well-known/did.json` | Native tenant DID |
+| `https://demo-tenant.example.com/.well-known/openid-credential-issuer` | Native issuer metadata |
+| `https://argocd.example.com/` | Optional authenticated Argo CD |
+| `https://grafana.example.com/` | Optional authenticated Grafana |
 
 Optional dashboards initially use username `admin` and the configured initial editor password. Initialization is recorded and reruns do not reset changed passwords. Switching the public-dashboard toggle off removes only its routing release; it retains services, certificates and data. Fresh Grafana deployments use a PVC; upgrades retain the existing observability release and storage topology.
 

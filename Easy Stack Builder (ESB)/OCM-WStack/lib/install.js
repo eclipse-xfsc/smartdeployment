@@ -104,6 +104,7 @@ async function ensureMarker(r,c) {
   return r.json('kubectl',['-n','kube-system','create','-f','-','-o','json'],{input:JSON.stringify(marker)});
 }
 async function inspect(r,c) {
+  const ocmOperational=await require('./ocm-guard').status(r);
   const [apps,pods,pvcs,gateway,certificates,proxy,proxyServices,policy] = await Promise.all([
     r.json('kubectl',['-n','argocd','get','applications.argoproj.io','-o','json']),
     r.json('kubectl',['get','pods','-A','-o','json']),
@@ -133,14 +134,14 @@ async function inspect(r,c) {
   const podsReady=managedPods.some(x=>x.metadata.namespace==='ocm-wstack')&&managedPods.every(x=>x.status?.phase==='Succeeded'||(x.status?.phase==='Running'&&x.status?.containerStatuses?.length&&x.status.containerStatuses.every(s=>s.ready)));
   return {upstreamCommit:lock.commit,argoRevision:lock.argoRevision,tenantId:c.tenantId,tenantUrl:c.tenantUrl,provider:c.actualProvider,providerLocations:c.providerLocations,externalTrafficPolicy:c.externalTrafficPolicy,storageClass:c.actualStorageClass,ui:c.runtimeEnabled?{enabled:true,url:c.tenantUrl+'/orce/',editorUrl:c.tenantUrl+'/orce/editor/'}:{enabled:false},
     applications,gatewayAddresses:addresses,pendingVolumes,certificateReady:certReady,gatewayConfigurationReady:Boolean(gatewayConfigurationReady),gatewayConfiguration:{tenantRouting:{mode:c.internalGatewayRouting?'internal':'public',hostname:c.tenantHost,clusterIP:publicServices[0]?.spec.clusterIP,certManagerMapped,runtimeMapped,ready:internalRoutingReady},expectedTrafficPolicy:c.externalTrafficPolicy,proxyTrafficPolicy:proxyConfig?.externalTrafficPolicy,foreignAnnotationKeys:foreignKeys(proxyConfig?.annotations),admissionPolicyReady:Boolean(policy?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True')),services:publicServices.map(s=>({name:s.metadata.name,externalTrafficPolicy:s.spec.externalTrafficPolicy,ports:s.spec.ports.map(p=>p.port),foreignAnnotationKeys:foreignKeys(s.metadata.annotations)}))},
-    clusterReady:names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
+    ocmOperational,clusterReady:ocmOperational.ready&&names.size===4&&unhealthy.length===0&&pendingVolumes.length===0&&podsReady&&(!c.runtimeEnabled||['ocm-orce','ocm-ui-keycloak','ocm-ui-postgres'].every(app=>managedPods.some(p=>p.metadata.labels?.app===app))),
     pods:managedPods.map(x=>({name:x.metadata.name,namespace:x.metadata.namespace,phase:x.status?.phase,containers:(x.status?.containerStatuses||[]).map(s=>({name:s.name,image:s.image,imageID:s.imageID,ready:s.ready,restarts:s.restartCount}))})),
     dns:{automatic:c.externalDns,hostname:c.tenantHost,targets:addresses.map(x=>x.value),instructions:c.externalDns?'ExternalDNS manages the tenant record.':'Point the tenant hostname'+(c.publicDashboards?', argocd.'+c.domain+' and grafana.'+c.domain:'')+' to these gateway addresses. Public TCP 443 must reach Envoy. Remove stale A/AAAA records.'}};
 }
 async function validate(r,c) {
   const report=await inspect(r,c);
   const {metadataChecks,request}=require('./native');
-  const publicRequest=(url,options={})=>request(url,{...options,addresses:c.publicDnsRecords?.find(x=>x.hostname===new URL(url).hostname&&x.ready)?.addresses});
+  const publicRequest=request;
   report.native=await metadataChecks(c.tenantUrl,{signal:r.signal,requester:publicRequest});
   report.status=report.clusterReady&&report.certificateReady&&report.gatewayConfigurationReady&&report.native.every(x=>x.ok)?'ready':'action-required';
   if(c.runtimeEnabled){
@@ -245,7 +246,7 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const ocmValues=await privateFile(dir,'ocm-values.json',JSON.stringify(ocm.values(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));
-    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_STORAGE_VALUES:coreValues,ESB_NATIVE_COMPAT:path.join(__dirname,'../scripts/native-compatibility.js'),ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile,ESB_OCM_STARTUP:path.join(__dirname,'../scripts/ocm-startup.js'),ESB_NATIVE_DIDCOMM:String(!!(c.runtimeEnabled&&!c.runtimeServices?.didcomm))};
+    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_GUARD_IMAGE:c.runtimeImage,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_CORE_VALUES:coreValues,ESB_STORAGE_VALUES:coreValues,ESB_NATIVE_COMPAT:path.join(__dirname,'../scripts/native-compatibility.js'),ESB_NETWORK_VALUES:network,ESB_OBSERVABILITY_VALUES:observability,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile,ESB_OCM_STARTUP:path.join(__dirname,'../scripts/ocm-startup.js'),ESB_NATIVE_DIDCOMM:String(!!(c.runtimeEnabled&&!c.runtimeServices?.didcomm))};
     if(action==='install-ui'){await tls.install(r,c,certificate);if(marker.data.bootstrapComplete!=='true')fail('OWNERSHIP','Complete the native bootstrap before install-ui.');if(!c.runtimeEnabled)fail('CONFIG','Enable the ORCE runtime before install-ui.');await gatewayConfig.internalRouting(r,c);await gatewayConfig.waitTenantTls(r,c);const ui=await runtime.install(r,c,credentials,dir);const report=await validate(r,c);return {...report,ui:{...report.ui,...ui}};}
     let lastAddresses='',observing=false;
     dnsTimer=setInterval(async()=>{
@@ -301,7 +302,6 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     await gatewayConfig.waitTenantTls(r,c);
     const ui=await runtime.install(r,c,credentials,dir);
     const admin=await dashboards.install(r,c,credentials,certificate,dir);
-    c.publicDnsRecords=await require('./connectivity').waitDns(r,c);
     emit({type:'phase',phase:'native-validation'});
     const report=await waitValidation(r,c);report.ui={...report.ui,...ui};report.dashboards={...report.dashboards,...admin};
     if(report.ui?.checks?.find(x=>x.name==='ui-ready')?.dependencies?.some(x=>x.name==='storage'&&!x.ok)){

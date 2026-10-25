@@ -82,9 +82,9 @@ async function repair(r,d,pods) {
  r.emit({type:'migration-recovery',service:'credential-retrieval',state:result.state,version:1,checksum:CHECKSUM,evidence:'ocm-wstack/'+AUDIT});
  return result;
 }
-async function stabilize(r,{timeoutSeconds=900,runtimeEnabled=true,runtimeServices={}}={}, {now=Date.now,sleep=delay}={}) {
+async function stabilize(r,{timeoutSeconds=900,runtimeEnabled=true,runtimeServices={}}={}, {now=Date.now,sleep=delay,guardStatus=require('./ocm-guard').status}={}) {
  const targets=['credential-retrieval-service',...(runtimeEnabled&&!runtimeServices.didcomm?['didcomm-connector']:[])];
- const start=now();let last='',repaired=false;
+ const start=now();let last='',repaired=false,lastOperational;
  while(now()-start<timeoutSeconds*1000) {
   if(r.signal?.aborted)fail('CANCELLED','OCM startup cancelled; installed resources retained.');
   const workloads=await r.json('kubectl',['-n','ocm-wstack','get','deployments','-o','json']);
@@ -98,7 +98,11 @@ async function stabilize(r,{timeoutSeconds=900,runtimeEnabled=true,runtimeServic
    r.emit({type:'ocm-startup',service:'credential-retrieval',state:'serialized-rollouts'});
    await sleep(1000,undefined,{signal:r.signal});continue;
   }
-  if(deployments.every(ready))return;
+  if(deployments.every(ready)){
+   const operational=await guardStatus(r);lastOperational=operational;
+   if(operational.ready)return;
+   r.emit({type:'ocm-guard',phase:'ocm-startup',...operational});
+  }
   const statuses=targets.map((name,i)=>({name,ready:ready(deployments[i]),available:deployments[i]?.status?.availableReplicas||0}));
   const list=await r.json('kubectl',['-n','ocm-wstack','get','pods','-o','json']);
   const pods=(list.items||[]).filter(p=>targets.includes(p.metadata?.labels?.['app.kubernetes.io/name']));
@@ -122,6 +126,6 @@ async function stabilize(r,{timeoutSeconds=900,runtimeEnabled=true,runtimeServic
   }
   await sleep(10000,undefined,{signal:r.signal});
  }
- fail('OCM_STARTUP',`Native OCM services did not become ready: ${last}. Existing services, credentials and volumes were retained.`);
+ fail('OCM_STARTUP',`Native OCM services did not become ready: ${last}. Credential/listener check: ${JSON.stringify(lastOperational||{ready:false,code:'WORKLOADS_PENDING'})}. Existing services, credentials and volumes were retained.`);
 }
 module.exports={resolver,ready,recoveryContract,repair,stabilize,RESOLVER,IMAGE,DIGEST,CHECKSUM};

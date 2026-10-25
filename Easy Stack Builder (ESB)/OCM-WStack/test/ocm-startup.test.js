@@ -45,8 +45,8 @@ test('a conflicting evidence owner blocks the database write',async()=>{
 });
 test('startup serializes an existing rollout, then requires current generation ready',async()=>{
  const d=deployment();d.spec.strategy={type:'RollingUpdate'};let clock=0,writes=0;
- const r={emit(){},json:async()=>({items:[d]}),run:async(cmd,a)=>{assert.equal(JSON.parse(a.at(-1))[1].value.type,'Recreate');writes++;d.spec.strategy={type:'Recreate'};d.status={observedGeneration:1,replicas:1,updatedReplicas:1,availableReplicas:1,readyReplicas:1};}};
- await startup.stabilize(r,{timeoutSeconds:10,runtimeEnabled:false},{now:()=>clock,sleep:async n=>{clock+=n;}});assert.equal(writes,1);
+ const r={emit(){},json:async()=>({items:[d]}),run:async(cmd,a)=>{if(a.includes('--raw'))return {code:0,stdout:JSON.stringify({ready:true,credentials:{synchronized:true},redis:{authenticated:true},services:Object.entries(require('../lib/ocm-guard-core').SUBJECTS).map(([name,subjects])=>({name,subjects,ready:true})),checkedAt:new Date().toISOString()})};assert.equal(JSON.parse(a.at(-1))[1].value.type,'Recreate');writes++;d.spec.strategy={type:'Recreate'};d.status={observedGeneration:1,replicas:1,updatedReplicas:1,availableReplicas:1,readyReplicas:1};}};
+ await startup.stabilize(r,{timeoutSeconds:10,runtimeEnabled:false},{now:()=>clock,sleep:async n=>{clock+=n;},guardStatus:async()=>({ready:true})});assert.equal(writes,1);
  d.metadata.generation=2;assert.equal(startup.ready(d),false);d.spec.replicas=0;assert.equal(startup.ready(d),false);
 });
 test('startup timeout retains resources and reports the failing services',async()=>{

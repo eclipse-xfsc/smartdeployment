@@ -50,7 +50,7 @@ test('matching IPv6 formats do not fail equality and local success needs no fall
 });
 test('DNS timeout reports the hostname, resolver errors and retains installed resources',async()=>{
  const r={emit(){},json:async()=>({items:[{metadata:{name:'envoy'},spec:{type:'LoadBalancer',clusterIP:'100.64.1.4',ports:[{port:80},{port:443}]},status:{loadBalancer:{ingress:[{ip:'85.215.138.83'}]}}}]})};
- await assert.rejects(waitDns(r,{tenantHost:'demo-tenant.leanea.com',timeoutSeconds:0},{check:async hostname=>({hostname,ready:false,addresses:[],views:[{source:'system',complete:false,addresses:[],errors:[{type:'A',code:'ECONNREFUSED'}]}]})}),e=>e.code==='DNS_RESOLUTION_FAILED'&&e.message.includes('demo-tenant.leanea.com')&&e.message.includes('ECONNREFUSED')&&e.message.includes('retained'));
+ await assert.rejects(waitDns(r,{tenantHost:'demo-tenant.example.com',timeoutSeconds:0},{check:async hostname=>({hostname,ready:false,addresses:[],views:[{source:'system',complete:false,addresses:[],errors:[{type:'A',code:'ECONNREFUSED'}]}]})}),e=>e.code==='DNS_RESOLUTION_FAILED'&&e.message.includes('demo-tenant.example.com')&&e.message.includes('ECONNREFUSED')&&e.message.includes('retained'));
 });
 test('Public validation transport can use verified DNS answers without losing the original Host',async t=>{
  const http=require('node:http'),{request}=require('../lib/native');
