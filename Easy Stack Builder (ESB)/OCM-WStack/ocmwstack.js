@@ -44,7 +44,8 @@ module.exports = function(RED) {
         uiAdminUsername: config.uiAdminUsername, uiAdminEmail: config.uiAdminEmail,
         uiAdminPassword: runtimeSecrets.uiAdminPassword, uiAdminFirstName:config.uiAdminFirstName||'', uiAdminLastName:config.uiAdminLastName||'',
         useExternalMongo: config.useExternalMongo === true || config.useExternalMongo === 'true', mongoUri:runtimeSecrets.mongoUri||'',
-        offerIssuerHosts:config.offerIssuerHosts||'clearing.gaia-x.eu', relationshipHosts:config.relationshipHosts||'',
+        pcmEnabled:config.pcmEnabled===true||config.pcmEnabled==='true',pcmNamespace:config.pcmNamespace||'pcm',pcmRealm:config.pcmRealm||'master',pcmTenant:config.pcmTenant||'tenant_space',
+        offerIssuerHosts:config.offerIssuerHosts||'compliance.lab.gaia-x.eu,registration.lab.gaia-x.eu,wizard.lab.gaia-x.eu', relationshipHosts:config.relationshipHosts||'',
         orceStorageSize:config.orceStorageSize||'3Gi', mongoStorageSize:config.mongoStorageSize||'5Gi', storageClass:config.orceStorageClass||''
       };
       fs.writeFileSync(runtimeTmp.name, JSON.stringify(runtimeConfig), {mode:0o600});
@@ -227,8 +228,9 @@ module.exports = function(RED) {
           return;
         }
 
-        node.status({ fill: 'green', shape: 'dot', text: 'implemented' });
-        node.context().set('ocmStatus', { phase: 'complete', status: 'done', detail: 'Implemented' });
+        const degraded=outputContract?.status==='degraded';
+        node.status({fill:degraded?'yellow':'green',shape:'dot',text:degraded?'deployed: Storage blocked':'deployed'});
+        node.context().set('ocmStatus',{phase:'complete',status:degraded?'warning':'done',detail:degraded?'Storage API blocked; see diagnostics':'Deployed'});
         msg.payload = outputContract;
         msg.deploymentOutput = maskSecrets(stdout.trim() || 'Deployment succeeded.');
         if (stderr && stderr.trim()) msg.deploymentStderr = maskSecrets(stderr.trim());

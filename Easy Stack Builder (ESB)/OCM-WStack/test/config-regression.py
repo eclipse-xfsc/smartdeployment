@@ -20,12 +20,12 @@ class Configuration(unittest.TestCase):
   self.assertEqual(e['secretEnv']['VAULT_ADRESS'],{'name':'vault','key':'address'})
   self.assertEqual(e['secretEnv']['VAULT_TOKEN'],{'name':'vault','key':'token'})
   self.assertNotIn('openbao-connection',json.dumps(e))
- def test_only_requested_image_fallbacks(self):
-  self.assertEqual(read('Credential Issuance/values.yaml')['issuance-service']['image']['tag'],'v1.4.3')
+ def test_official_deployment_image_versions(self):
+  self.assertEqual(read('Credential Issuance/values.yaml')['issuance-service']['image']['tag'],'1.9.2')
   self.assertEqual(read('Well Known Chart/values.yaml')['well-known-service']['image']['tag'],'v1.2.1')
-  self.assertEqual(read('Credential Retrieval/values.yaml')['credential-retrieval-service']['image']['tag'],'1.1.0')
+  self.assertEqual(read('Credential Retrieval/values.yaml')['credential-retrieval-service']['image']['tag'],'1.1.5')
   self.assertEqual(read('Storage Service/values.yaml')['storage-service']['image']['tag'],'1.2.4')
-  self.assertEqual(read('signer/values.yaml')['signer']['image']['tag'],'2.3.4')
+  self.assertEqual(read('signer/values.yaml')['signer']['image']['tag'],'2.3.5')
  def test_dummy_signer_uses_current_chart_key(self):
   config=read('Dummy Content Signer/values.yaml')['dummycontentsigner']['config']
   self.assertEqual(config['signerCredentialUrl'],'http://signer.NAMESPACE.svc.cluster.local:8080/v1/credential')

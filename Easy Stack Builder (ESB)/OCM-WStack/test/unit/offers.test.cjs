@@ -32,9 +32,9 @@ test('reference links normalize once and reject unsafe reference URLs',()=>{
  assert.equal(offerUrl({credential_offer_uri:uri}),uri);
  assert.throws(()=>offerUrl({credential_offer_uri:'http://issuer.example/offer'}),{code:'OFFER_ISSUER_NOT_ALLOWED'});
 });
-test('image report reports image identity and excludes secret environment values',()=>{
- const image='registry.example/ocm/storage-service:1.2.4';
+test('image report identifies official release images and excludes secret environment values',()=>{
+ const image='node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack/storage-service:1.2.4';
  const c={name:'storage-service',image,env:[{name:'STORAGESERVICE_REGION',value:'EU'},{name:'PASSWORD',value:'never-print'}]};
  const r=summarize({items:[{metadata:{name:'storage-service'},spec:{template:{spec:{containers:[c]}}}}]},{items:[{metadata:{name:'storage-1'},spec:{containers:[c],nodeName:'worker'},status:{containerStatuses:[{name:c.name,imageID:'sha256:test',ready:true}]}}]});
- assert.equal(r[0].configuredImage,image);assert.equal(r[0].pods[0].imageID,'sha256:test');assert.equal(r[1].configuredImage,null);assert.ok(!JSON.stringify(r).includes('never-print'));
+ assert.equal(r[0].officialImageSelected,true);assert.equal(r[0].pods[0].imageID,'sha256:test');assert.equal(r[1].officialImageSelected,false);assert.ok(!JSON.stringify(r).includes('never-print'));
 });

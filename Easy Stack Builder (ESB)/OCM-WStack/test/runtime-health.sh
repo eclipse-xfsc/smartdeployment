@@ -203,7 +203,7 @@ check_output_contract() {
     (.keycloakUrl | type == "string" and length > 0 and contains("auth-cloud-wallet." + $domain)) and
     (.clientSecret | type == "string" and length > 0) and
     (.externalIp | type == "string" and length > 0) and
-    (.status == "Implemented" or .status == "Deployed")
+    (.status == "ready" or .status == "degraded")
   ' "$OUTPUT_JSON" >/dev/null
 }
 

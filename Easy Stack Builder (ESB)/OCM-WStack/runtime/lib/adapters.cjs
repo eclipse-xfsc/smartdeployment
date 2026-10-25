@@ -9,46 +9,75 @@ class Adapters {
  headers(c){return {authorization:'Bearer '+c.token,'x-tenantid':c.tenant,'x-groupid':c.group,'x-group':this.c.cryptoGroup,'x-namespace':this.c.cryptoNamespace,'x-origin':this.c.publicOrigin};}
  call(c,name,path,method='GET',body){return this.http.call(name,path,{method,body,headers:this.headers(c),timeout:method==='GET'?5000:15000,responseType:name==='didcomm'&&path==='/admin/invitation'?'text':'json'});}
  storagePath(c){return '/v1/tenants/'+id(c.tenant)+'/storage/'+id(c.account)+'/credentials';}
- async records(c){
-  const r=await this.call(c,'storage',this.storagePath(c),'POST',{id:'ocm-ui-all',input_descriptors:[{id:'all',constraints:{fields:[]}}]});
+ unpack(r){
   if(!r||typeof r!=='object')fail(502,'UPSTREAM_PROTOCOL_ERROR');
-  const entries={...(r.credentials||{})};
-  if(r.groups!==undefined&&!Array.isArray(r.groups))fail(502,'UPSTREAM_PROTOCOL_ERROR');
-  for(const group of r.groups||[])Object.assign(entries,group.credentials||{});
+  const entries=Object.create(null),groups=Array.isArray(r)?r:r.groups;
+  if(groups!==undefined&&!Array.isArray(groups))fail(502,'UPSTREAM_PROTOCOL_ERROR');
+  const add=map=>{if(map===undefined)return;if(!map||typeof map!=='object'||Array.isArray(map))fail(502,'UPSTREAM_PROTOCOL_ERROR');
+   for(const [key,value]of Object.entries(map)){const raw=value&&typeof value==='object'&&Object.hasOwn(value,'data')&&typeof value.type==='string'?value.data:value;if(Object.hasOwn(entries,key)&&JSON.stringify(entries[key])!==JSON.stringify(raw))fail(502,'UPSTREAM_PROTOCOL_ERROR');entries[key]=raw;}
+  };
+  if(!Array.isArray(r))add(r.credentials);
+  for(const group of groups||[])add(group.credentials);
   if(Object.keys(entries).length>5000)fail(502,'UPSTREAM_RESULT_TOO_LARGE');
   return entries;
+ }
+ async records(c){
+  // Native Filter with zero descriptors returns all records. A descriptor
+  // with zero fields returns false for every record in the upstream library.
+  return this.unpack(await this.call(c,'storage',this.storagePath(c),'POST',{}));
  }
  async list(c,q={}){
   const records=await this.records(c),pageSize=Math.min(100,Math.max(1,Number(q.pageSize)||25));
   let items=Object.entries(records).map(([key,raw])=>{try{return summarize(key,raw);}catch{return {id:key,format:'unknown',types:[],issuer:{id:null},subject:{id:null},status:{state:'not_checked'}};}});
   if(q.q){const search=string(q.q,0,200).toLowerCase();items=items.filter(x=>[x.id,x.issuer.id,x.subject.id,...x.types].some(v=>String(v||'').toLowerCase().includes(search)));}
   if(q.type)items=items.filter(x=>x.types.includes(q.type));
+  // Check status lists managed by this OCM instance. A list read is shared
+  // across credentials; remote/unsupported status remains explicitly unchecked.
+  const statusCache=new Map(),pending=[];
+  for(const item of items){if(item.status.state==='expired')continue;try{const ref=statusRef(records[item.id],this.c);pending.push({item,ref});}catch{}}
+  const worker=async()=>{while(pending.length){const {item,ref}=pending.shift();if(!statusCache.has(ref.listId)&&statusCache.size>=16)continue;try{item.status={state:await this.readStatus(c,ref,statusCache),checkedAt:new Date().toISOString()};}catch{}}};
+  await Promise.all(Array.from({length:Math.min(4,pending.length)},worker));
   const sort=q.sort||'id';if(!['id','issuedAt','expiresAt'].includes(sort))fail(400,'VALIDATION_ERROR');
-  items.sort((a,b)=>String(a[sort]||'').localeCompare(String(b[sort]||'')));
+  if(q.direction&&!['asc','desc'].includes(q.direction))fail(400,'VALIDATION_ERROR');
+  items.sort((a,b)=>(q.direction==='desc'?-1:1)*String(a[sort]||'').localeCompare(String(b[sort]||'')));
+  const counts={total:items.length,expired:items.filter(x=>x.status.state==='expired').length,active:items.filter(x=>x.status.state==='active').length,revoked:items.filter(x=>x.status.state==='revoked').length,notChecked:items.filter(x=>x.status.state==='not_checked').length};
+  if(q.status){if(!['expired','active','revoked','not_checked'].includes(q.status))fail(400,'VALIDATION_ERROR');items=items.filter(x=>x.status.state===q.status);}
   let offset=0;if(q.cursor){try{offset=Number(Buffer.from(q.cursor,'base64url').toString());}catch{fail(400,'VALIDATION_ERROR');}if(!Number.isSafeInteger(offset)||offset<0||offset>5000)fail(400,'VALIDATION_ERROR');}
-  return {items:items.slice(offset,offset+pageSize),total:items.length,nextCursor:offset+pageSize<items.length?Buffer.from(String(offset+pageSize)).toString('base64url'):null,refreshedAt:new Date().toISOString()};
+  return {items:items.slice(offset,offset+pageSize),counts,total:items.length,nextCursor:offset+pageSize<items.length?Buffer.from(String(offset+pageSize)).toString('base64url'):null,refreshedAt:new Date().toISOString()};
  }
  async raw(c,key){const all=await this.records(c);if(!Object.hasOwn(all,key))fail(404,'RESOURCE_NOT_FOUND');return all[key];}
- async detail(c,key){const raw=await this.raw(c,key);return {...summarize(key,raw),claims:decode(raw).claims,raw,provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).subject,verifier:null,source:'credential-declarations',verified:false}};}
+ async detail(c,key){const raw=await this.raw(c,key);let revocable=true,revocationReason=null;try{statusRef(raw,this.c);}catch(e){revocable=false;revocationReason=e.code;}return {...summarize(key,raw),claims:decode(raw).claims,raw,capabilities:{verify:true,delete:true,revoke:revocable,revocationReason},provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).subject,verifier:null,source:'credential-declarations',verified:false}};}
+ async provenance(c,key){return require('./provenance.cjs').graph(await this.records(c),key);}
+
+ async importCredential(c,body,requestId){
+  object(body,['credential']);const raw=body.credential;decode(raw);
+  if(Buffer.byteLength(typeof raw==='string'?raw:JSON.stringify(raw))>1048576)fail(413,'CREDENTIAL_TOO_LARGE');
+  await this.call(c,'storage',this.storagePath(c)+'/'+id(requestId),'PUT',raw);
+  return {state:'succeeded',credentialId:requestId,storageConfirmation:'refresh-required'};
+ }
  async remove(c,key){await this.call(c,'storage',this.storagePath(c)+'/'+id(key),'DELETE');return {state:'succeeded',credentialId:key};}
  async absent(c,key){try{await this.raw(c,key);return null;}catch(e){if(e.status===404)return {state:'succeeded',credentialId:key};throw e;}}
- async readStatus(c,ref){
-  const r=await this.call(c,'status','/v1/tenants/'+id(c.tenant)+'/status/'+id(ref.listId));
-  if(typeof r?.list!=='string'||r.tenantId!==c.tenant||String(r.listId)!==ref.listId)fail(502,'UPSTREAM_PROTOCOL_ERROR');
-  let bytes;try{bytes=gunzipSync(Buffer.from(r.list,'base64url'),{maxOutputLength:2097152});}catch{fail(502,'UPSTREAM_PROTOCOL_ERROR');}
+ async readStatus(c,ref,cache){
+  const fetchList=async()=>{const r=await this.call(c,'status','/v1/tenants/'+id(c.tenant)+'/status/'+id(ref.listId));
+   if(typeof r?.list!=='string'||r.tenantId!==c.tenant||String(r.listId)!==ref.listId)fail(502,'UPSTREAM_PROTOCOL_ERROR');
+   try{return gunzipSync(Buffer.from(r.list,'base64url'),{maxOutputLength:2097152});}catch{fail(502,'UPSTREAM_PROTOCOL_ERROR');}
+  };
+  if(cache&&!cache.has(ref.listId))cache.set(ref.listId,fetchList());
+  const bytes=await(cache?cache.get(ref.listId):fetchList());
   if(ref.index>=bytes.length*8)fail(502,'UPSTREAM_PROTOCOL_ERROR');
   return (bytes[Math.floor(ref.index/8)]&(1<<(7-(ref.index%8))))?'revoked':'active';
  }
  async verify(c,key){
   const raw=await this.raw(c,key),parsed=decode(raw),summary=summarize(key,raw);
   if(!['ldp_vc','dc+sd-jwt'].includes(parsed.format))return {credentialId:key,cryptographic:{state:'unsupported'},status:{state:'unknown'},overall:'unsupported'};
-  let cryptographic='unknown',status=parsed.claims.credentialStatus||parsed.tokenClaims.status?'unknown':'not_required';
+  let disclosedClaims,cryptographic='unknown',status=parsed.claims.credentialStatus||parsed.tokenClaims.status?'unknown':'not_required';
   try{
-   const r=await this.http.call('signer','/v1/credential/verify',{method:'POST',headers:{...this.headers(c),'x-format':parsed.format},body:{credential:Buffer.from(typeof raw==='string'?raw:JSON.stringify(raw)).toString('base64')},timeout:10000});
+   const r=await this.http.call('signer','/v1/credential/verify',{method:'POST',headers:{...this.headers(c),'x-format':parsed.format},body:{credential:Buffer.from(typeof raw==='string'?raw:JSON.stringify(raw)).toString('base64'),...(parsed.format==='dc+sd-jwt'?{disclosureFrame:[]}: {})},timeout:10000});
    if(typeof r?.valid!=='boolean')fail(502,'UPSTREAM_PROTOCOL_ERROR');cryptographic=r.valid?'valid':'invalid';
+   if(r.valid&&r.disclosedCredential&&typeof r.disclosedCredential==='object')disclosedClaims=r.disclosedCredential;
   }catch(e){if(e.status<500)throw e;}
   if(status==='unknown'){try{status=await this.readStatus(c,statusRef(raw,this.c));}catch{/* Missing or remote status is truthfully indeterminate. */}}
-  return {credentialId:key,format:parsed.format,cryptographic:{state:cryptographic},status:{state:status,checkedAt:new Date().toISOString()},overall:overall(cryptographic,status,Boolean(summary.expiresAt&&Date.parse(summary.expiresAt)<Date.now()))};
+  return {credentialId:key,format:parsed.format,cryptographic:{state:cryptographic},status:{state:status,checkedAt:new Date().toISOString()},...(disclosedClaims?{disclosedClaims}:{}),overall:overall(cryptographic,status,Boolean(summary.expiresAt&&Date.parse(summary.expiresAt)<Date.now()))};
  }
  async revoke(c,key){
   const ref=statusRef(await this.raw(c,key),this.c);

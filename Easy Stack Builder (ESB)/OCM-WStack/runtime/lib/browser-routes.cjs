@@ -17,6 +17,12 @@ function register(RED){
   res.statusCode=200;
   res.end(html);
  });
+ if(RED.settings.ocmPcmEnabled){
+  RED.httpNode.get('/orce/pcm/callback',middleware,(req,res)=>{
+   res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');
+   res.end('<!doctype html><html lang="en"><meta charset="utf-8"><title>PCM sign in</title><p>Completing PCM sign in…</p><script type="module" src="/orce/pcm-auth.js"></script></html>');
+  });
+ }
  registered.add(RED.httpNode);
 }
 module.exports={register};

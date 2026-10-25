@@ -15,7 +15,7 @@ function decode(raw){
 function summarize(id,raw){
  const {claims:v,tokenClaims:p,format}=decode(raw);
  const timestamp=(s,n)=>s||(Number.isFinite(n)?new Date(n*1000).toISOString():null);
- return {id,format,types:Array.isArray(v.type)?v.type:typeof v.type==='string'?[v.type]:v.vct?[v.vct]:[],issuer:{id:typeof v.issuer==='string'?v.issuer:v.issuer?.id||p.iss||null},subject:{id:v.credentialSubject?.id||p.sub||null},issuedAt:timestamp(v.issuanceDate||v.validFrom,p.iat||p.nbf),expiresAt:timestamp(v.expirationDate||v.validUntil,p.exp),status:{state:'not_checked',checkedAt:null}};
+ return {id,format,types:Array.isArray(v.type)?v.type:typeof v.type==='string'?[v.type]:v.vct?[v.vct]:[],issuer:{id:typeof v.issuer==='string'?v.issuer:v.issuer?.id||p.iss||null},subject:{id:v.credentialSubject?.id||p.sub||null},issuedAt:timestamp(v.issuanceDate||v.validFrom,p.iat||p.nbf),expiresAt:timestamp(v.expirationDate||v.validUntil,p.exp),status:{state:timestamp(v.expirationDate||v.validUntil,p.exp)&&Date.parse(timestamp(v.expirationDate||v.validUntil,p.exp))<Date.now()?'expired':'not_checked',checkedAt:null}};
 }
 function overall(cryptoState,statusState,expired=false){if(cryptoState==='invalid'||statusState==='revoked'||statusState==='suspended'||expired)return 'invalid';if(cryptoState==='valid'&&['active','not_required'].includes(statusState))return 'valid';return 'indeterminate';}
 function statusRef(raw,config){

@@ -4,18 +4,23 @@ const {Auth}=require('./auth.cjs'),{Client}=require('./http.cjs'),{Adapters}=req
 const {fail,object}=require('./errors.cjs');
 const {IssuerBootstrap}=require('./issuer-bootstrap.cjs');
 const {offerUrl}=require('./offers.cjs');
-const routes=[
+const {PcmAdapters,PcmIdentity}=require('./pcm.cjs');
+const {Clearing}=require('./clearing.cjs');
+const definitions=[
+ ['GET','/clearing/providers','credentials.receive','clearingProviders'],['POST','/clearing/requests','credentials.receive','clearingRequest',true],
  ['GET','/metrics','system.health.read','metrics'],['GET','/auth/me',null,'me'],['GET','/health/dependencies','system.health.read','health'],
  ['GET','/preferences',null,'preferences'],['PATCH','/preferences',null,'setPreferences'],['GET','/audit','audit.read','audit'],
- ['GET','/credentials','credentials.read','credentials'],['GET','/credentials/:id','credentials.read','credential'],['DELETE','/credentials/:id','credentials.delete','deleteCredential',true],
+ ['POST','/credentials/import','credentials.receive','importCredential',true],['GET','/credentials/:id/provenance','credentials.read','provenance'],['GET','/credentials','credentials.read','credentials'],['GET','/credentials/:id','credentials.read','credential'],['DELETE','/credentials/:id','credentials.delete','deleteCredential',true],
  ['POST','/credentials/:id/verify','credentials.verify','verify'],['POST','/credentials/:id/revoke','credentials.revoke','revoke',true],['POST','/credential-chains/resolve','credentials.read','chain'],
  ['GET','/offers','credentials.receive','offers'],['POST','/offers/import','credentials.receive','import',true],['POST','/offers/:id/accept','credentials.receive','accept',true],['POST','/offers/:id/reject','credentials.receive','reject',true],
  ['GET','/credential-types','credentials.issue','types'],['POST','/issuance','credentials.issue','issue',true],['GET','/issuance/:id','credentials.issue','job'],
  ['GET','/relationships','relationships.read','relationships'],['POST','/relationships/invitations','relationships.manage','invite',true],['POST','/relationships/accept','relationships.manage','acceptRelationship',true],['GET','/relationships/:id','relationships.read','relationship'],['PATCH','/relationships/:id','relationships.manage','updateRelationship',true],['DELETE','/relationships/:id','relationships.manage','deleteRelationship',true],['POST','/relationships/:id/block','relationships.manage','block',true],['POST','/relationships/:id/unblock','relationships.manage','unblock',true],
  ['GET','/roles','roles.read','roles'],['POST','/roles','roles.manage','createRole',true],['PATCH','/roles/:id','roles.manage','updateRole',true],['DELETE','/roles/:id','roles.manage','deleteRole',true],['GET','/role-assignments','roles.read','assignments'],['PUT','/role-assignments/:id','roles.manage','assign',true],['GET','/role-assignments/:id/effective','roles.read','effective']
-].map(([method,path,permission,action,mutate])=>({method,path,permission,action,mutate,pattern:new RegExp('^'+path.replace(':id','([^/]+)')+'/?$')}));
+];
+const personal=definitions.filter(r=>['credentials','credential','deleteCredential','verify','revoke','importCredential','provenance','offers','import','accept','reject','types','issue','job'].includes(r[3])).map(r=>[r[0],'/pcm'+r[1],r[2],r[3],r[4],true]);
+const routes=definitions.concat(personal,[['GET','/pcm/keys','credentials.receive','pcmKeys',false,true],['GET','/pcm/me','credentials.read','me',false,true]]).map(([method,path,permission,action,mutate,pcm])=>({method,path,permission,action,mutate,pcm,pattern:new RegExp('^'+path.replace(':id','([^/]+)')+'/?$')}));
 class Runtime {
- constructor(config){this.c=config;this.auth=new Auth(config);this.http=new Client({...config.services,iam:config.keycloakInternal,issuerBootstrap:config.issuerBootstrapUrl||'http://dummycontentsigner:8080'});this.adapters=new Adapters(config,this.http);this.issuerBootstrap=new IssuerBootstrap(config,this.http);this.events=new Events(config,this.issuerBootstrap);this.ready=false;this.rates=new Map();this.counts=new Map();}
+ constructor(config){this.c=config;this.clearing=new Clearing();this.auth=new Auth(config);this.http=new Client({...config.services,iam:config.keycloakInternal,issuerBootstrap:config.issuerBootstrapUrl||'http://dummycontentsigner:8080',...(config.pcm?.enabled?{pcm:config.pcm.accountUrl}:{})});this.adapters=new Adapters(config,this.http);this.pcmIdentity=new PcmIdentity(config);this.pcm=config.pcm?.enabled?new PcmAdapters(config,this.http):null;this.issuerBootstrap=new IssuerBootstrap(config,this.http);this.events=new Events(config,this.issuerBootstrap);this.ready=false;this.rates=new Map();this.counts=new Map();}
  async start(){
   if(this.ready)return; if(this.starting)return this.starting;
   this.starting=this.connect();return this.starting;
@@ -27,16 +32,21 @@ class Runtime {
  }
  limit(key){const now=Date.now();let r=this.rates.get(key);if(!r||now-r.start>=60000){r={start:now,count:0};this.rates.set(key,r);}if(++r.count>180)fail(429,'RATE_LIMITED');if(this.rates.size>10000){for(const[k,v]of this.rates)if(now-v.start>60000)this.rates.delete(k);if(this.rates.size>10000)fail(503,'SERVER_BUSY');}}
  async execute(action,c,key,body,q,requestId){
-  const a=this.adapters,scope={tenant:c.tenant,subject:c.subject};
+  const a=c.pcm?this.pcm:this.adapters,scope={tenant:c.tenant,subject:c.subject};
   switch(action){
    case 'me':return {subject:c.subject,username:c.username,tenant:c.tenant,account:c.account,group:c.group,permissions:c.permissions,expiresAt:c.expiresAt};
    case 'metrics':return {requests:Object.fromEntries(this.counts),natsConnected:this.events.connected,mongoReady:this.ready};
-   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'11.0.8'};
+   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'11.1.0',pcmConfigured:Boolean(this.c.pcm?.enabled)};
    case 'preferences':return await this.db.collection('ui_preferences').findOne(scope,{projection:{_id:0}})||{locale:'en',pageSize:25};
    case 'setPreferences':object(body,['locale','pageSize']);if(body.locale&&!['en','de','fr'].includes(body.locale))fail(400,'VALIDATION_ERROR');if(body.pageSize!==undefined&&![10,25,50,100].includes(body.pageSize))fail(400,'VALIDATION_ERROR');await this.db.collection('ui_preferences').updateOne(scope,{$set:{...body,updatedAt:new Date()}},{upsert:true});return body;
    case 'audit':return {items:await this.db.collection('audit_events').find({tenant:c.tenant},{projection:{_id:0}}).sort({timestamp:-1}).limit(100).toArray()};
+   case 'clearingProviders':return this.clearing.list();
+   case 'clearingRequest':return this.clearing.acquire(body);
    case 'credentials':return a.list(c,q);
    case 'credential':return a.detail(c,key);
+   case 'provenance':return a.provenance(c,key);
+   case 'importCredential':return a.importCredential(c,body,requestId);
+   case 'pcmKeys':return this.pcm.keys(c);
    case 'deleteCredential':return a.remove(c,key);
    case 'verify':return a.verify(c,key);
    case 'revoke':return a.revoke(c,key);
@@ -45,7 +55,7 @@ class Runtime {
    case 'import':object(body,['offer','source']);return a.importOffer(c,body.offer);
    case 'accept':return a.accept(c,key,true,body);
    case 'reject':return a.accept(c,key,false,body);
-   case 'types':return {items:this.c.credentialTypes.map(({subject,...t})=>({...t,demo:true}))};
+   case 'types':return this.events.types(c);
    case 'issue':return this.events.issue(c,body,requestId);
    case 'job':{const job=await this.db.collection('operation_jobs').findOne({...this.coordination.scope(c),requestId:key},{projection:{_id:0,key:0,requestHash:0}});if(!job)fail(404,'RESOURCE_NOT_FOUND');return this.coordination.publicJob(job);}
    case 'relationships':return a.relationships(c);
@@ -70,7 +80,7 @@ class Runtime {
   let ctx,route;
   try{
    const url=new URL(req.originalUrl||req.url,'http://local');const path=url.pathname.replace(/^\/orce\/ui-api\/v1/,'');
-   if(req.method==='GET'&&path==='/auth/config')return res.json({data:{issuer:this.c.issuer,clientId:this.c.clientId,redirectUri:this.c.publicOrigin+'/orce/auth/callback',postLogoutRedirectUri:this.c.publicOrigin+'/orce/',features:{issuance:true,relationships:true,roleManagement:true}}});
+   if(req.method==='GET'&&path==='/auth/config')return res.json({data:{issuer:this.c.issuer,clientId:this.c.clientId,redirectUri:this.c.publicOrigin+'/orce/auth/callback',postLogoutRedirectUri:this.c.publicOrigin+'/orce/',pcm:this.c.pcm?.enabled?{enabled:true,issuer:this.c.pcm.issuer,clientId:this.c.pcm.clientId,redirectUri:this.c.publicOrigin+'/orce/pcm/callback'}:{enabled:false},features:{issuance:true,relationships:true,roleManagement:true}}});
    if(req.method==='GET'&&path==='/health/live')return res.json({alive:true});
    if(req.method==='GET'&&path==='/health/ready'){
     try{if(!this.ready)throw Error();await this.db.command({ping:1});return res.json({ready:true,degraded:!this.events.connected});}catch{return res.status(503).json({ready:false});}
@@ -78,6 +88,7 @@ class Runtime {
    route=routes.find(r=>r.method===req.method&&r.pattern.test(path));if(!route)fail(404,'RESOURCE_NOT_FOUND');
    if(req.headers.origin&&req.headers.origin!==this.c.publicOrigin)fail(403,'ORIGIN_FORBIDDEN');
    ctx=await this.auth.fromRequest(req);this.auth.require(ctx,route.permission);this.limit(ctx.subject);
+   if(route.pcm)ctx=await this.pcmIdentity.context(ctx,req.headers['x-pcm-authorization']);
    if(!this.ready)fail(503,'COORDINATION_UNAVAILABLE');
    const body=req.body||{};object(body);
    if(['tenant','tenantId','account','accountId','group','groupId','permissions','auth'].some(k=>Object.hasOwn(body,k)))fail(403,'SCOPE_FORBIDDEN');
@@ -86,8 +97,8 @@ class Runtime {
    const fn=id=>this.execute(route.action,ctx,key,body,query,id||requestId);
    let data;
    if(route.mutate){
-    let reconcile;if(route.action==='deleteCredential')reconcile=()=>this.adapters.absent(ctx,key);if(route.action==='revoke')reconcile=()=>this.adapters.revoked(ctx,key);
-    data=await this.coordination.run(ctx,route.action,req.headers['x-idempotency-key'],{key,body},fn,reconcile);
+    let reconcile;if(route.action==='deleteCredential')reconcile=()=>(ctx.pcm?this.pcm:this.adapters).absent(ctx,key);if(route.action==='revoke')reconcile=()=>(ctx.pcm?this.pcm:this.adapters).revoked(ctx,key);
+    data=await this.coordination.run(ctx,(route.pcm?'pcm.':'')+route.action,req.headers['x-idempotency-key'],{key,body},fn,reconcile);
     this.events.emit('hint',{type:'resync',requiresRefresh:true});
    }else data=await fn();
    if(data?.offer){

@@ -1,6 +1,7 @@
 'use strict';
 const config=require('./lib/config.cjs').load();
 module.exports={
+ ocmPcmEnabled:Boolean(config.pcm?.enabled),
  uiPort:1880,flowFile:'flows.json',userDir:'/data',credentialSecret:config.credentialSecret,
  httpAdminRoot:'/_orce-editor',httpNodeRoot:'/',
  adminAuth:{type:'credentials',users:[{username:config.editorUsername,password:config.editorHash,permissions:'*'}]},

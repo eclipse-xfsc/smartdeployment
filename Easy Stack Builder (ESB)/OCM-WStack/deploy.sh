@@ -257,7 +257,6 @@ for cmd in kubectl helm jq openssl curl node; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
 done
 
-
 record_phase "preflight" "running" "Validating kubeconfig, domain, namespace, and TLS material"
 bash "$SCRIPT_DIR/preflight.sh" \
   "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE" \
@@ -820,7 +819,20 @@ bash "$SCRIPT_DIR/scripts/wait-deployments.sh" "$NAMESPACE"
 record_phase "ocm-readiness" "done" "All OCM Deployments passed readiness"
 record_phase "orce-runtime" "running" "Provisioning ORCE, UI identity, persistent data and MongoDB"
 node "$SCRIPT_DIR/scripts/runtime-install.cjs" install "$NAMESPACE" "$DOMAIN" "$RUNTIME_INPUT" "$KC_POD" "$KCADM_CFG"
-node "$SCRIPT_DIR/scripts/diagnose-runtime.cjs" "$NAMESPACE" --strict
+# A known Storage API failure must not prevent using and testing Retrieval.
+# Failed Retrieval/IAM/DIDComm checks remain deployment failures.
+DEPENDENCY_STATUS=ready
+if node "$SCRIPT_DIR/scripts/diagnose-runtime.cjs" "$NAMESPACE" --allow-storage-blocker; then
+  :
+else
+  DIAGNOSTIC_EXIT=$?
+  if [[ "$DIAGNOSTIC_EXIT" == 2 ]]; then
+    DEPENDENCY_STATUS=degraded
+    emit_warning "Storage API remains blocked by upstream geography routing. Retrieval and the UI are available for independent testing."
+  else
+    exit "$DIAGNOSTIC_EXIT"
+  fi
+fi
 record_phase "orce-runtime" "done" "ORCE/UI Deployment passed readiness"
 
 record_phase "smoke-tests" "running" "Verifying ingress, Keycloak connectivity, and stored secrets"
@@ -844,5 +856,5 @@ jq -cn \
   --arg namespace "$NAMESPACE" \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
-  --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.8",runtimeVersion:"11.0.8",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  --arg status "$DEPENDENCY_STATUS" \
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.1.0",runtimeVersion:"11.1.0",referenceRef:"main",referenceSha:"739606691ecff72b3a40404a19fce44d9c22b0ee",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'

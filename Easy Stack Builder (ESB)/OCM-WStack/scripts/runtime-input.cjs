@@ -14,6 +14,11 @@ function validate(c){
   if(hosts.some(x=>!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(x)))throw Error('Approved hosts must be bare DNS names');
   c[name]=hosts;
  }
+ c.pcmEnabled=c.pcmEnabled===true;
+ if(c.pcmEnabled){
+  for(const key of ['pcmNamespace','pcmRealm','pcmTenant'])if(typeof c[key]!=='string'||!c[key]||c[key].length>128||!/^[A-Za-z0-9_.-]+$/.test(c[key]))throw Error('Invalid '+key);
+  if(!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(c.pcmNamespace))throw Error('Invalid PCM namespace');
+ }
  return c;
 }
 if(require.main===module){try{validate(JSON.parse(fs.readFileSync(process.argv[2],'utf8')));}catch(e){console.error(e.message);process.exit(1);}}

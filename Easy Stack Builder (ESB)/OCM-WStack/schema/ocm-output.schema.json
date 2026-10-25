@@ -31,7 +31,8 @@
     "status": {
       "type": "string",
       "enum": [
-        "Implemented"
+        "ready",
+        "degraded"
       ]
     },
     "clientSecretRef": {
@@ -65,16 +66,16 @@
       "pattern": "^https://[^/]+/orce/$"
     },
     "releaseVersion": {
-      "const": "11.0.8"
+      "const": "11.1.0"
     },
     "runtimeVersion": {
-      "const": "11.0.8"
+      "const": "11.1.0"
     },
     "referenceRef": {
       "const": "main"
     },
     "referenceSha": {
-      "const": "a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069"
+      "const": "739606691ecff72b3a40404a19fce44d9c22b0ee"
     }
   }
 }

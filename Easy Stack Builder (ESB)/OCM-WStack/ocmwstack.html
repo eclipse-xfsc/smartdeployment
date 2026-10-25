@@ -26,6 +26,7 @@
     <button type="button" class="red-ui-button ocm-tab-button" data-target="k8s">Kubernetes &amp; Domain</button>
     <button type="button" class="red-ui-button ocm-tab-button" data-target="keycloak">Keycloak &amp; Credentials</button>
     <button type="button" class="red-ui-button ocm-tab-button" data-target="orce">ORCE Initial Credentials</button>
+    <button type="button" class="red-ui-button ocm-tab-button" data-target="pcm">PCM Cloud</button>
   </div>
 
   <div class="ocm-hint" id="ocm-domain-hint">Use a bare FQDN such as apps.example.com. The node deploys cloud-wallet.&lt;domain&gt; and auth-cloud-wallet.&lt;domain&gt;.</div>
@@ -109,6 +110,14 @@
     <div class="form-row"><label for="node-input-useExternalMongo">Use external MongoDB</label><input type="checkbox" id="node-input-useExternalMongo"></div>
     <div class="form-row" id="ocm-mongo-uri"><label for="node-input-mongoUri">MongoDB connection string</label><input type="password" id="node-input-mongoUri" autocomplete="new-password"></div>
   </div>
+  <div class="ocm-tab-panel" data-panel="pcm">
+    <p>Connect an XFSC PCM Cloud installed separately using ESB PCM in this cluster. Each user signs into their own PCM account. Existing PCM users and credentials are preserved.</p>
+    <div class="form-row"><label for="node-input-pcmEnabled">Enable PCM Cloud integration</label><input type="checkbox" id="node-input-pcmEnabled"></div>
+    <div class="form-row"><label for="node-input-pcmNamespace">PCM namespace</label><input type="text" id="node-input-pcmNamespace"></div>
+    <div class="form-row"><label for="node-input-pcmRealm">PCM Keycloak realm</label><input type="text" id="node-input-pcmRealm"></div>
+    <div class="form-row"><label for="node-input-pcmTenant">PCM OCM tenant</label><input type="text" id="node-input-pcmTenant"></div>
+    <p>The deployer registers a PKCE client in the selected realm. PCM Account Service must use the same Keycloak server and the Storage instance of this OCM installation.</p>
+  </div>
 </script>
 
 <script type="text/javascript">
@@ -169,7 +178,11 @@
       mongoStorageSize: {value:"5Gi"},
       orceStorageClass: {value:""},
       useExternalMongo: {value:false},
-      offerIssuerHosts: {value:"clearing.gaia-x.eu"},
+      pcmEnabled: {value:false},
+      pcmNamespace: {value:"pcm"},
+      pcmRealm: {value:"master"},
+      pcmTenant: {value:"tenant_space"},
+      offerIssuerHosts: {value:"compliance.lab.gaia-x.eu,registration.lab.gaia-x.eu,wizard.lab.gaia-x.eu"},
       relationshipHosts: {value:""},
 
       name:               { value: "" },

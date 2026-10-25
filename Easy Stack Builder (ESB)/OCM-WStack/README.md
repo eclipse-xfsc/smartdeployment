@@ -1,71 +1,66 @@
-# OCM-WStack ESB 11.0.8
+# OCM-WStack ESB 11.1.0
 
-This package extends the original `orce-esb-ocmwstack` Node-RED node in `Easy Stack Builder (ESB)/OCM-WStack`. It includes the deployer, runtime flows, BFF, Vue UI, translations, Helm chart, tests and source provenance. 
+Source-only deployment candidate based on the approved **11.0.7** upload. Fresh deployments only. This integrates the official September Retrieval updates and the requested OCM/PCM UI work. It contains no compiled executables, OCI image archives, or upstream service patches. The uploaded FACIS logo is included as a UI asset.
 
-**For the login callback fix and runtime-only update, read `docs/CALLBACK-FIX-11.0.5.md`.**
+**Storage 1.2.4 requires an upstream route correction.** The deployer reports `deployed: Storage blocked` for that exact defect and leaves Retrieval available for testing. Other dependency failures stop deployment. See [readiness](docs/READINESS.md), [meeting brief](docs/MEETING-BRIEF.md), and the [CR coverage matrix](docs/CR-COVERAGE.md).
 
-**Upgrading after the Vault mount failure? Read `docs/VAULT-FIX-11.0.1.md`.**
+## Install and deploy
 
-Read `docs/READINESS.md` for deployment prerequisites and acceptance checks. Installation requires network access to the declared registries.
-
-## Install on the existing ORCE deployer
-
-1. Download `orce-esb-ocmwstack-11.0.8.tgz` and install it through the ORCE/Node-RED palette upload option. Alternatively copy it into the existing ORCE container and run:
+1. Install `orce-esb-ocmwstack-11.1.0.tgz` using the existing ORCE/Node-RED palette upload. Alternatively, inside the existing deployer container:
 
    ```sh
    cd /data
-   npm install /path/to/orce-esb-ocmwstack-11.0.8.tgz
+   npm install /path/to/orce-esb-ocmwstack-11.1.0.tgz
    ```
 
-2. Restart that ORCE instance, then add or reopen the **OCM-W-Stack** node. Node.js 18+ is required; Node 20+ is recommended by the runtime dependencies. The deployer needs bash, kubectl, Helm, jq, openssl and curl, as before.
-3. Complete the existing Instance, Kubernetes/Domain and Keycloak/TLS inputs. Use an isolated test namespace for the first run. Leave the existing cluster-wide ingress management options disabled when using the shared controller.
-4. In **ORCE Initial Credentials**, enter separate editor and OCM UI administrator credentials. Passwords must be 12–72 bytes. Supply UI email and optional names. Initial UI password change is required at first login. Existing passwords and role customizations are preserved on redeployment.
-5. Embedded MongoDB is the default, with a **5Gi** PVC; ORCE uses **3Gi**. To use an external database, select **Use external MongoDB** and provide its connection string. The runtime uses database `ocm_ui`; the account needs CRUD and index creation there. The embedded test instance uses its own generated root credential; use a database account scoped to the UI database for persistent installations.
-6. Add approved external issuer/offer hosts and remote OCM invitation hosts as comma-separated bare DNS names if needed. The local OCM context is always allowed. Clearing Center offer import defaults to `clearing.gaia-x.eu`; adjust to the actual issuer returned by your environment.
-7. Deploy the flow and trigger the OCM-W-Stack node. It provisions the stack, Keycloak client/roles/user, ORCE runtime and MongoDB. It idempotently creates `nginx-orce-cluster` for the existing compatible ingress-nginx controller. Failure retains resources for inspection.
-8. Open **`https://cloud-wallet.<domain>/orce/`**. No `ocm-ui.<domain>` DNS record is used. The internal Keycloak client ID remains `ocm-ui`.
+2. Restart that deployer, reopen/add **OCM-W-Stack**, and enter the existing Kubernetes, domain, email and TLS inputs. The **domain is the bare parent domain**, for example `leanea.com`; the OCM context becomes `https://cloud-wallet.leanea.com/orce/`. Supply separate editor and UI administrator credentials under **ORCE Initial Credentials**. Passwords must be 12–72 bytes. The UI administrator changes its initial password on first login.
+3. Use a fresh namespace. The existing shared ingress controller must already be compatible; cluster-wide management options remain opt-in. The deployer needs Node.js 18+, bash, kubectl, Helm, jq, curl and openssl; runtime dependency installation needs online registry access.
+4. If using ESB PCM Cloud in the same cluster, enable **PCM Cloud**, set its namespace, Keycloak realm and OCM tenant. Defaults are `pcm`, `master`, `tenant_space`. PCM must use this installation's Keycloak server and Storage. Install PCM separately; this package does not deploy a second PCM or migrate its data. Each UI user connects with their own PCM login.
+5. Configure approved external issuer/offer hosts and remote OCM hosts. Use the actual bare DNS names returned by the selected provider; the OCM context's own host is included automatically. Lab defaults are `compliance.lab.gaia-x.eu`, `registration.lab.gaia-x.eu`, and `wizard.lab.gaia-x.eu`.
+6. Trigger the ESB node. It installs official service versions, bootstraps Vault/issuer/Keycloak, and seeds the UI on the approved ORCE image `ecofacis/xfsc-orce:2.0.13`. No service image is rebuilt or substituted. MongoDB defaults to its own 5Gi PVC, ORCE to 3Gi.
+7. Open `https://cloud-wallet.<domain>/orce/`. The UI follows the FAP DCM navigation/card style, uses the supplied FACIS logo, and supports English, German and French.
 
-The runtime editor is private and uses its separate initial credential. Access it when needed with:
+`ready` means the deployment's native diagnostics passed; it is not CR sign-off. `degraded` with Storage HTTP 400 is the known blocked condition. The output includes `clientSecretRef`, never a plaintext client secret. Deleting the ESB node retains its original namespace-uninstall behavior; do not delete the node merely to restart it.
+
+## Test immediately after deployment
+
+Extract the full-source ZIP and open a terminal in `Easy Stack Builder (ESB)/OCM-WStack` on a machine with kubectl access and Node.js:
 
 ```sh
-kubectl -n <namespace> port-forward service/ocm-orce 1880:80
+# Read-only: image digests, pod state, native responses, geography-header comparison.
+node scripts/collect-meeting-evidence.cjs ocm-wstack
+
+# Creates one DEMO SD-JWT offer, imports it and accepts it.
+node scripts/retrieval-smoke.cjs ocm-wstack --accept > retrieval-smoke.json
 ```
 
-Then open `http://127.0.0.1:1880/_orce-editor/`. Protect the deployer editor itself using your existing ORCE administration settings. Deleting the ESB node retains its original uninstall behavior and can remove the deployed namespace; do not delete it merely to restart it.
+The second command prints only stage metadata and request IDs. It never prints the offering link, credential or token. Exit **0** means the checks run succeeded, **2** means Retrieval passed but Storage could not be read, **1** means another failure. A Storage read count does not establish that the new credential was persisted; correlate it in the UI. Do not repeatedly rerun an interrupted mutation: first inspect pending offers.
 
-## Runtime and UI
+UI alternative: **Issue credential → SDJWTCredential → enter demo names → create/copy the offer → Receive credential → Import offer → Accept**. Record the request ID. Then refresh **Local credentials**. Offer import, acceptance, and persistence are distinct steps. Use a newly issued offer once; an already-redeemed pre-authorized code is not a valid test. Read [cluster acceptance](docs/CLUSTER-ACCEPTANCE.md) for PCM, roles, relationships and cross-instance checks.
 
-- Shared organizational OCM context; identity scope is taken from validated Keycloak claims.
-- Credential search, details, decoded/raw view, native Signer verification, local StatusList2021 revocation, delete and declared chain resolution.
-- Offer import (inline, deep link or approved HTTPS reference), pending offer acceptance/rejection, demo issuance through the configured NATS content plugin, offer copy and QR.
-- DIDComm invitation creation, acceptance, listing, labels, block/unblock and removal.
-- Atomic permissions and managed composite roles, assignments, last human manager protection, audit, preferences, health and counters.
-- English, German and French; PKCE sign-in; browser tokens only in memory.
-- Polling resynchronization; authenticated socket hints for local changes. Native upstream event observer mapping is not yet enabled.
+## What is included
 
-The BFF API is `/orce/ui-api/v1`. Existing native OCM route configurations remain as in ESB 10.1.8. Credentials stay in native Storage. Mongo contains preferences, 72-hour operation metadata, encrypted offers/invitations, and 90-day audit metadata; it does not copy the credential inventory.
+- Official Retrieval 1.1.5, Issuance 1.9.2, Signer 2.3.5 and matching reference chart updates; unchanged official Storage 1.2.4. The Cassandra `HOSTS` compatibility alias remains explicit.
+- Native Storage empty-filter request and credential-envelope fixes, exact raw import, Signer SD-JWT disclosure-frame handling, list sorting/filtering/pagination and managed status counts.
+- Separate OCM and PCM identities; PCM reads through Account Service, native lifecycle actions scoped to the authenticated PCM subject, and owned holder-key selection. PCM's no-op delete/revoke handlers are not used.
+- Offer import/list/accept/reject, transaction codes, issuance/QR, native credential import/download/verify/delete, owned local revocation, dynamic issuer catalog, refresh-through-new-offer, relationship administration, role/assignment management, audit and health export.
+- Read-side declared provenance graph, native Retrieval event hints and polling, Gaia-X lab request adapter and provider onboarding links.
 
-## Output change
+Support depends on the native service and credential format. Remote issuer revocation, arbitrary renewal, production issuer templates and business trust decisions cannot be manufactured by the UI. [PCM internals](docs/PCM-INTEGRATION.md), [API/DB architecture](docs/ARCHITECTURE.md), [Clearing Houses](docs/CLEARING-HOUSES.md), [helper-service effort report](docs/HELPER-CANDIDATES.md).
 
-Version 11 replaces plaintext `clientSecret` with `clientSecretRef: {namespace, name, key}` and adds `uiUrl`, `namespace`, runtime/release versions and the frozen reference SHA. Existing `ocmUrl`, `keycloakUrl`, `externalIp` and `status` remain. Update downstream flows using the old plaintext field. Do not connect credential retrieval commands to Debug nodes.
-
-## Validation and packaging
+## Build and validation
 
 ```sh
 npm test
 npm run test:legacy
-python3 test/config-regression.py # requires PyYAML
+python3 test/config-regression.py
 python3 scripts/build-runtime.py
+helm lint 'ORCE Runtime' --set host=cloud-wallet.example.test
 npm pack --ignore-scripts
+# Optional real Vue DOM checks (no browser layout assertions):
+cd test/ui && npm install --ignore-scripts && npm test
 ```
 
-The build script embeds the exact runtime source into the seed ConfigMap. Init installs pinned direct npm dependencies on the ORCE PVC and copies Vue's runtime browser build; it requires outbound npm registry access. Helm dependencies and service images also require registry access. Record resolved dependency versions and image digests for the installation.
+The runtime archive contains source and assets only; Helm's `binaryData` transports the compressed source. Native images and charts are downloaded at deployment. No full offline bundle is supplied. Exact local results are in `docs/validation-report.txt`.
 
-After deployment:
-
-```sh
-bash test/runtime-ui-health.sh <namespace> <domain>
-# Optional third argument: path to a short-lived UI access-token file, mode 0600.
-```
-
-Use `docs/CLUSTER-ACCEPTANCE.md` for the live acceptance sequence. Source decisions, compatibility boundaries and exact upstream commits are recorded under `docs/`.
+The private runtime editor is available through `kubectl -n <namespace> port-forward service/ocm-orce 1880:80`, then `http://127.0.0.1:1880/_orce-editor/`. Keep the existing deployer editor protected by its normal administration settings.
