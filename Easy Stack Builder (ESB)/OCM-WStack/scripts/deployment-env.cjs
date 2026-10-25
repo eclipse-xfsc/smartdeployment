@@ -1,5 +1,6 @@
 'use strict';
 const {spawnSync}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 
 // JSON Patch avoids strategic-merge failures on unrelated chart list entries.
 // Guard the complete read against concurrent Deployment changes.
@@ -21,8 +22,8 @@ function plan(deployment,containerName,updates){
  return [{op:'test',path:'/metadata/resourceVersion',value:version},
   {op:'add',path:`/spec/template/spec/containers/${i}/env`,value:env}];
 }
-function kubectl(args,input){
- const r=spawnSync('kubectl',args,{input,encoding:'utf8',maxBuffer:8*1024*1024});
+function kubectl(args){
+ const r=spawnSync('kubectl',args,{stdio:['ignore','pipe','pipe'],encoding:'utf8',maxBuffer:8*1024*1024});
  if(r.error)throw r.error;
  if(r.status!==0)throw new Error(r.stderr.trim()||'kubectl failed');
  return r.stdout;
@@ -31,8 +32,16 @@ function apply(namespace,deployment,container,updates,run=kubectl){
  const obj=JSON.parse(run(['-n',namespace,'get','deployment',deployment,'-o','json']));
  const patch=plan(obj,container,updates);
  if(!patch.length)return false;
- run(['-n',namespace,'patch','deployment',deployment,'--type=json','--patch-file=/dev/stdin'],JSON.stringify(patch));
- return true;
+ // Node child-process stdin can be a socket: reopening /dev/stdin may fail
+ // with ENXIO. Give kubectl a real, private file instead.
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ocm-env-patch-'));
+ try{
+  fs.chmodSync(directory,0o700);
+  const file=path.join(directory,'patch.json');
+  fs.writeFileSync(file,JSON.stringify(patch),{mode:0o600,flag:'wx'});
+  run(['-n',namespace,'patch','deployment',deployment,'--type=json','--patch-file',file]);
+  return true;
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
 }
 module.exports={plan,apply};
 if(require.main===module){
