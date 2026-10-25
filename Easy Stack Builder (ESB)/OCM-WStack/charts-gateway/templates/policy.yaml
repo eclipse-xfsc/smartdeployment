@@ -1,0 +1,25 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: esb-ocm-envoy-traffic
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  background: false
+  failurePolicy: Fail
+  rules:
+    - name: configure-ocm-envoy
+      match:
+        any:
+          - resources:
+              kinds: [gateway.envoyproxy.io/v1alpha1/EnvoyProxy]
+              names: [envoy]
+              namespaces: [infrastructure]
+              operations: [CREATE, UPDATE]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            provider:
+              kubernetes:
+                envoyService:
+                  externalTrafficPolicy: {{ .Values.externalTrafficPolicy | quote }}

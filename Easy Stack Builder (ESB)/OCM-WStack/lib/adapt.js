@@ -9,24 +9,40 @@ function once(text, from, to, filename) {
   if (text.split(from).length !== 2) fail('UPSTREAM_CONTRACT', `Expected one adaptation point in ${filename}. No deployment was started.`);
   return text.replace(from, to);
 }
+const HETZNER_KEYS=['network-zone','location','use-private-ip','protocol','type','health-check-protocol','uses-proxyprotocol','disable-private-ingress'];
 function networkOverrides(c) {
-  const annotations = {};
-  if (c.actualProvider !== 'hetzner') for (const key of ['network-zone','use-private-ip','protocol','type','health-check-protocol','uses-proxyprotocol','disable-private-ingress']) annotations[`load-balancer.hetzner.cloud/${key}`] = null;
-  Object.assign(annotations, c.lbAnnotations);
-  const overrides = {'INFRA/network/envoy': {envoyProxy:{service:{annotations}}}};
-  if (c.externalDns) {
-    // Public LBs may expose IPv4, IPv6 or a hostname; the upstream A-only
-    // restriction prevents automatic DNS for common non-Hetzner controllers.
-    const dns = {extraArgs:['--txt-prefix=reg-%{record_type}.','--managed-record-types=A','--managed-record-types=AAAA','--managed-record-types=CNAME']};
+  const annotations={};
+  for(const key of c.upstreamAnnotationKeys || HETZNER_KEYS.map(k=>'load-balancer.hetzner.cloud/'+k))annotations[key]=null;
+  Object.assign(annotations,c.resolvedLbAnnotations || require('./providers').annotations(c));
+  const overrides={'INFRA/network/envoy':{envoyProxy:{service:{annotations}}}};
+  if(c.externalDns){
+    const dns={extraArgs:['--txt-prefix=reg-%{record_type}.','--managed-record-types=A','--managed-record-types=AAAA','--managed-record-types=CNAME']};
     if(c.actualDns==='custom')Object.assign(dns,c.dnsValues);
-    overrides['INFRA/network/external-dns'] = {'external-dns': dns};
+    overrides['INFRA/network/external-dns']={'external-dns':dns};
   }
   return overrides;
 }
 function networkValues(c) {
-  const overrides = networkOverrides(c);
-  // The JSON is a Go-template string literal; embedded {{...}} in values remains data.
-  const esbTemplatePatch = Object.entries(overrides).map(([p,v],i) => `{{ ${i ? 'else if' : 'if'} eq .path.path ${JSON.stringify(p)} }}\nspec:\n  source:\n    helm:\n      valuesObject: {{ ${JSON.stringify(JSON.stringify(v))} }}`).join('\n') + '\n{{ end }}\n';
+  // A string preserves intentional Helm nulls through ApplicationSet RFC7396
+  // merge-patching. valuesObject would consume these nulls before Helm.
+  const esbTemplatePatch=Object.entries(networkOverrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}
+spec:
+  source:
+    helm:
+      valuesObject: null
+      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`+(p==='INFRA/network/envoy'?`
+  ignoreDifferences:
+    - group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: envoy
+      namespace: infrastructure
+      jsonPointers:
+        - /spec/provider/kubernetes/envoyService/externalTrafficPolicy
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true`:'' )).join('\n')+'\n{{ end }}\n';
   return {esbTemplatePatch};
 }
 async function adapt(dir) {
@@ -97,6 +113,7 @@ async function adapt(dir) {
       return `echo "[ESB_PHASE] ${nameMatch[2]}"\n${prerequisites}${command}${waits[nameMatch[2]] ? '\n'+waits[nameMatch[2]] : ''}`;
     }).join('\n');
     if (name === 'basic-cluster-init.sh') {
+      text=once(text,'./check-applicationset.sh network argocd','./check-applicationset.sh network argocd\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" policy\nnode "${ESB_GATEWAY_CONFIG:?ESB gateway compatibility runner is required}" reconcile',name);
       text = once(text, 'DNSTOKEN=""', 'DNSTOKEN="${ESB_DNS_SECRET_FILE:+provided-through-file}"', name);
       for (const ns of ['observability','security']) text = once(text, `kubectl create namespace ${ns}\n`, `kubectl create namespace ${ns} --dry-run=client -o yaml | kubectl apply -f -\n`, name);
       text = once(text, 'kubectl create secret generic external-dns \\\n    -n infrastructure \\\n    --from-literal=token="$DNSTOKEN"', 'kubectl apply -f "$ESB_DNS_SECRET_FILE"', name);

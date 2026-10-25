@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/eclipse-xfsc/deployment.git",
-  "commit": "739606691ecff72b3a40404a19fce44d9c22b0ee",
+  "commit": "8485621574abdee08b8ca24c2f0f60136ba0dad7",
   "reviewedAt": "2026-10-01",
   "argoRevision": "main",
   "sha256": {
@@ -14,6 +14,11 @@
     "INFRA/observability/opentelemtry/values.yaml": "698d445a1cd65113c3b18deac84aefa30f41d2ae1c102928cf9f2a949c1864f7",
     "INFRA/observability/opentelemtry/crds/telemetryconfig.yaml": "afbcb0f16e0498a0901a3d5dd5615b25b269c82c16661cd8a46320b585794d1a",
     "XFSC/Applicationsets/chart/templates/approject.yaml": "91bf21e8a9751a058d16eaa92b0454bd4c69661ea35a282417563652be733529",
-    "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f743eb0646883ad4085415a2c394b10ce55d359f3cbc6a0bf75f7b93b41b6fac"
-  }
+    "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f743eb0646883ad4085415a2c394b10ce55d359f3cbc6a0bf75f7b93b41b6fac",
+    "INFRA/network/envoy/values.yaml": "09543ec6ee0d2ad27af22cebdc1108e679783d601a7213ddd58b440b36b136e3",
+    "INFRA/network/envoy/templates/envoyproxy.yaml": "39cc26b68f68622436078a5d940a63a3f68489ea781e792a12820611607417c5"
+  },
+  "compatibleBootstrapCommits": [
+    "739606691ecff72b3a40404a19fce44d9c22b0ee"
+  ]
 }

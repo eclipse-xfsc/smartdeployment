@@ -69,6 +69,8 @@ async function plan(r, source, argoSource, c, directory) {
       jobs.push({release,chart,namespace:set.namespace,root:argoSource,files,values:overrides[chart]||{},parameters,applicationSet:name});
     }
   }
+  jobs.push({release:'esb-ocm-gateway',chart:'charts-gateway',namespace:'security',root:path.join(__dirname,'..'),files:[],parameters:[],values:{externalTrafficPolicy:c.externalTrafficPolicy}});
+  if(c.runtimeEnabled)jobs.push({release:'ocm-orce-ui',chart:'charts-runtime',namespace:'ocm-wstack',root:path.join(__dirname,'..'),files:[],parameters:[],values:{host:c.tenantHost,listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,storage:{class:c.actualStorageClass,orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize},mongo:{embedded:!c.useExternalMongo,externalPorts:[27017]},runtimeConfig:require('./runtime-install').runtimeConfig(c)}});
   jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:{tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}});
   return jobs;
 }
@@ -83,6 +85,8 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
     await r.run('git',['-C',source,'worktree','add','--detach',argoSource,argoRevision]);
   }
   const validationDir=path.join(directory,'chart-preflight');await fs.mkdir(validationDir,{recursive:true});
+  const envoyDefaults=await readYaml(r,validationDir,{envoy:await fs.readFile(path.join(argoSource,'INFRA/network/envoy/values.yaml'),'utf8')});
+  c.upstreamAnnotationKeys=Object.keys(envoyDefaults.envoy.envoyProxy?.service?.annotations||{});
   const jobs=await plan(r,source,argoSource,c,validationDir);
   const documents={};
   for(const job of jobs)documents[path.join(job.root,job.chart)]=await fs.readFile(path.join(job.root,job.chart,'Chart.yaml'),'utf8');

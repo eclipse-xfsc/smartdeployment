@@ -36,7 +36,7 @@ function overrides(c) {
   };
 }
 function values(c) {
-  const patch=Object.entries(overrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}\nspec:\n  source:\n    helm:\n      valuesObject: {{ ${JSON.stringify(JSON.stringify(v))} }}`).join('\n')+'\n{{ end }}\n';
+  const patch=Object.entries(overrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}\nspec:\n  source:\n    helm:\n      valuesObject: null\n      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`).join('\n')+'\n{{ end }}\n';
   return {esbTemplatePatch:patch};
 }
 function signingKey() {

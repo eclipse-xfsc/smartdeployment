@@ -39,5 +39,5 @@ module.exports=function(RED) {
       if(active)active.finally(done);else done();
     });
   }
-  RED.nodes.registerType('OCM-W-Stack',OCMWStack,{credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'}}});
+  RED.nodes.registerType('OCM-W-Stack',OCMWStack,{credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'},editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}}});
 };

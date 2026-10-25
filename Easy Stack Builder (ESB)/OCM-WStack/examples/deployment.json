@@ -12,5 +12,21 @@
   "tenantId": "demo-tenant",
   "tenantSubdomain": "",
   "tenantRelease": "demotenant",
-  "timeoutSeconds": 1800
+  "timeoutSeconds": 1800,
+  "externalTrafficPolicy": "Cluster",
+  "runtimeEnabled": true,
+  "editorUsername": "admin",
+  "uiAdminUsername": "admin",
+  "runtimeImage": "ecofacis/xfsc-orce:2.0.15",
+  "orceStorageSize": "3Gi",
+  "mongoStorageSize": "5Gi",
+  "useExternalMongo": false,
+  "lbLocation": "",
+  "lbNetworkZone": "",
+  "lbType": "",
+  "lbPrivate": false,
+  "runtimeServices": {},
+  "pcm": {
+    "enabled": false
+  }
 }

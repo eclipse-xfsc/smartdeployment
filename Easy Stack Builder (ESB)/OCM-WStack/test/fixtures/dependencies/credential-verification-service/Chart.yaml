@@ -1,9 +1,0 @@
-apiVersion: v2
-appVersion: v1.0.0
-dependencies:
-- name: library
-  repository: oci://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/dev-ops
-  version: 1.1.1
-description: Credential Verification Service
-name: credential-verification-service
-version: 1.0.2

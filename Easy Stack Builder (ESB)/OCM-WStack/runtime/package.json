@@ -1,0 +1,21 @@
+{
+  "name": "ocm-orce-runtime",
+  "version": "12.1.0",
+  "private": true,
+  "dependencies": {
+    "bcryptjs": "2.4.3",
+    "mongodb": "6.13.0",
+    "nats": "2.29.2",
+    "node-red-contrib-uibuilder": "7.5.0",
+    "vue": "3.5.13",
+    "qrcode": "1.5.4"
+  },
+  "node-red": {
+    "nodes": {
+      "ocm-ui-runtime": "nodes/runtime.js"
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

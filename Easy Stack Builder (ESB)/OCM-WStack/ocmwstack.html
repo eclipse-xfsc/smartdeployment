@@ -8,7 +8,8 @@
   </style>
   <div class="esb-ocm-form">
     <p>OCM W-Stack · official XFSC deployment procedure</p>
-    <p class="esb-note">A fresh Kubernetes cluster is required. Deploy runs the upstream bootstrap and creates the tenant. Removing this node retains the deployment.</p>
+    <p class="esb-note">A fresh Kubernetes cluster is required for the first bootstrap. Existing matching version-12 installs can be updated. Deploy runs the upstream bootstrap and creates the tenant. Removing this node retains the deployment.</p>
+    <ul id="esb-ocm-tabs"></ul><div id="esb-ocm-panels"><div id="esb-ocm-deployment">
     <input type="hidden" id="node-input-procedureVersion">
     <div class="form-row"><label for="node-input-name">Label</label><input type="text" id="node-input-name"></div>
     <div class="form-row"><label for="node-input-instanceName">Instance name</label><input type="text" id="node-input-instanceName"></div>
@@ -18,10 +19,18 @@
     <div class="form-row"><label for="esb-ocm-kube-file">Upload kubeconfig</label><input type="file" id="esb-ocm-kube-file" accept=".yaml,.yml,.conf,.txt"></div>
     <p class="esb-note">Use a self-contained kubeconfig. Exec-based cloud authentication also requires its provider CLI and credentials in ORCE.</p>
     <h4>Cluster and networking</h4>
-    <div class="form-row"><label for="node-input-provider">Cluster provider</label><select id="node-input-provider"><option value="auto">Detect automatically</option value="generic">Generic Kubernetes / bare metal</option value="hetzner">Hetzner</option><option value="aws">AWS</option><option value="azure">Azure</option><option value="gcp">Google Cloud</option><option value="openstack">OpenStack</option><option value="digitalocean">DigitalOcean</option><option value="oci">Oracle Cloud</option><option value="scaleway">Scaleway</option><option value="alibaba">Alibaba Cloud</option></select></div>
+    <div class="form-row"><label for="node-input-provider">Cluster provider</label><select id="node-input-provider"><option value="auto">Detect automatically</option value="generic">Generic Kubernetes / bare metal</option value="hetzner">Hetzner</option><option value="ionos">IONOS Cloud</option><option value="aws">AWS</option><option value="azure">Azure</option><option value="gcp">Google Cloud</option><option value="openstack">OpenStack</option><option value="digitalocean">DigitalOcean</option><option value="oci">Oracle Cloud</option><option value="scaleway">Scaleway</option><option value="alibaba">Alibaba Cloud</option></select></div>
+    <div class="form-row"><label for="node-input-externalTrafficPolicy">Traffic policy</label><select id="node-input-externalTrafficPolicy"><option value="Cluster">Cluster (IONOS / portable default)</option><option value="Local">Local (explicit provider design)</option></select></div>
+    <div id="esb-ocm-hetzner">
+      <div class="form-row"><label for="node-input-lbLocation">LB location</label><input id="node-input-lbLocation" list="esb-ocm-locations" placeholder="Infer from node topology"><datalist id="esb-ocm-locations"><option value="fsn1"><option value="nbg1"><option value="hel1"><option value="ash"><option value="hil"><option value="sin"></datalist></div>
+      <div class="form-row"><label for="node-input-lbNetworkZone">Hetzner network zone</label><input id="node-input-lbNetworkZone" placeholder="Infer from location / topology"></div>
+      <div class="form-row"><label for="node-input-lbType">Hetzner LB type</label><input id="node-input-lbType" placeholder="Cloud controller default"></div>
+      <div class="form-row"><label for="node-input-lbPrivate">Use Hetzner private IP</label><input type="checkbox" id="node-input-lbPrivate" style="width:auto"></div>
+      <p class="esb-note">Private IP requires an already configured Hetzner private network. Auto detection reports the cluster regions and zones on output 2. Mixed or unknown topology requires an explicit LB location/zone.</p>
+    </div>
     <div class="form-row"><label for="node-input-storageClass">StorageClass</label><input type="text" id="node-input-storageClass" placeholder="Detect the cluster default"></div>
     <div class="form-row"><label for="node-input-lbAnnotations">Load-balancer annotations</label><textarea id="node-input-lbAnnotations" placeholder='{}'></textarea></div>
-    <p class="esb-note">Uses the cluster's existing LoadBalancer and storage provisioners. On bare metal, configure a load-balancer implementation first. Hetzner defaults apply only to Hetzner; other providers receive a generic service plus these optional annotations.</p>
+    <p class="esb-note">Uses the cluster's existing LoadBalancer and storage provisioners. On bare metal, configure a load-balancer implementation first. Hetzner annotations are generated from topology and these fields; other providers receive a generic service plus these optional annotations.</p>
     <div class="form-row"><label for="node-input-externalDns">Manage DNS records</label><input type="checkbox" id="node-input-externalDns" style="width:auto"></div>
     <div id="esb-ocm-dns-fields">
       <div class="form-row"><label for="node-input-dnsProvider">DNS provider</label><select id="node-input-dnsProvider"><option value="auto">Infer Hetzner from cluster</option><option value="hetzner">Hetzner (upstream profile)</option><option value="ionos">IONOS (upstream profile)</option><option value="custom">Other ExternalDNS provider</option></select></div>
@@ -39,7 +48,28 @@
     <div class="form-row"><label for="node-input-tenantRelease">Tenant Helm release</label><input type="text" id="node-input-tenantRelease"></div>
     <p id="esb-ocm-tenant-preview" class="esb-note"></p>
     <div class="form-row"><label for="node-input-timeoutSeconds">Stage timeout (seconds)</label><input type="number" id="node-input-timeoutSeconds" min="60" max="7200"></div>
-    <p class="esb-note">Argo CD tracks upstream main with autosync, prune and self-healing enabled. The first output returns the result; the second streams progress. Use an Inject node with msg.action = preflight, diagnose-api, diagnose-auth, deploy, repair-ocm, inspect, validate or test-credentials.</p>
+    <p class="esb-note">Argo CD tracks upstream main with autosync, prune and self-healing enabled. The first output returns the result; the second streams progress. Use an Inject node with msg.action = preflight, diagnose-api, diagnose-auth, deploy, repair-ocm, repair-network, install-ui, inspect, validate or test-credentials.</p>
+    </div><div id="esb-ocm-credentials" style="display:none">
+    <div class="form-row"><label for="node-input-runtimeEnabled">Deploy ORCE UI</label><input type="checkbox" id="node-input-runtimeEnabled" style="width:auto"></div>
+    <p class="esb-note">Deploys the recovered OCM-CR UI at the tenant hostname under /orce, with persistent ORCE, MongoDB and Keycloak state. Existing initial users, roles and keys survive reruns.</p>
+    <div id="esb-ocm-runtime-fields">
+      <h4>Initial administrator credentials</h4>
+      <div class="form-row"><label for="node-input-editorUsername">Editor administrator</label><input id="node-input-editorUsername"></div>
+      <div class="form-row"><label for="node-input-editorPassword">Editor initial password</label><input type="password" id="node-input-editorPassword" autocomplete="new-password"></div>
+      <div class="form-row"><label for="node-input-uiAdminUsername">UI administrator</label><input id="node-input-uiAdminUsername"></div>
+      <div class="form-row"><label for="node-input-uiAdminEmail">UI administrator email</label><input type="email" id="node-input-uiAdminEmail"></div>
+      <div class="form-row"><label for="node-input-uiAdminPassword">UI initial password</label><input type="password" id="node-input-uiAdminPassword" autocomplete="new-password"></div>
+      <p class="esb-note">Passwords are encrypted Node-RED credentials, require at least 12 characters and only seed a new installation. UI login requires a password change on first use.</p>
+      <h4>Runtime storage and connection settings</h4>
+      <div class="form-row"><label for="node-input-runtimeImage">ORCE image</label><input id="node-input-runtimeImage"></div>
+      <div class="form-row"><label for="node-input-orceStorageSize">ORCE PVC size</label><input id="node-input-orceStorageSize"></div>
+      <div class="form-row"><label for="node-input-mongoStorageSize">MongoDB PVC size</label><input id="node-input-mongoStorageSize"></div>
+      <div class="form-row"><label for="node-input-useExternalMongo">External MongoDB</label><input type="checkbox" id="node-input-useExternalMongo" style="width:auto"></div>
+      <div id="esb-ocm-mongo-uri" class="form-row"><label for="node-input-mongoUri">MongoDB connection URI</label><input type="password" id="node-input-mongoUri" autocomplete="new-password"></div>
+      <div class="form-row"><label for="node-input-runtimeServices">Service URL overrides</label><textarea id="node-input-runtimeServices" placeholder="{}"></textarea></div>
+      <div class="form-row"><label for="node-input-pcm">PCM configuration JSON</label><textarea id="node-input-pcm" placeholder='{"enabled":false}'></textarea></div>
+      <p class="esb-note">PCM remains opt-in. Connect it to its existing issuer/client and Account Service using the documented configuration. It is not installed or modified by this node.</p>
+    </div></div></div>
   </div>
 </script>
 <script type="text/javascript">
@@ -48,9 +78,15 @@
   RED.nodes.registerType('OCM-W-Stack',{
     category:'Easy Stack Builder',color:'#d9eaf2',icon:'font-awesome/fa-cubes',inputs:1,outputs:2,
     outputLabels:['Result','Progress'],label:function(){return this.name||'OCM W-Stack';},
-    defaults:{name:{value:''},procedureVersion:{value:12},instanceName:{value:'ocm-wstack',required:true},domainAddress:{value:'',required:true},emailAddress:{value:'',required:true},provider:{value:'auto'},storageClass:{value:''},lbAnnotations:{value:'{}',validate:jsonObject},externalDns:{value:false},dnsProvider:{value:'auto'},dnsValues:{value:'{}',validate:jsonObject},tenantId:{value:'demo-tenant',required:true},tenantSubdomain:{value:''},tenantRelease:{value:'demotenant',required:true},timeoutSeconds:{value:1800,validate:function(v){return Number.isInteger(Number(v))&&v>=60&&v<=7200;}}},
-    credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'}},
+    defaults:{externalTrafficPolicy:{value:'Cluster'},lbLocation:{value:''},lbNetworkZone:{value:''},lbType:{value:''},lbPrivate:{value:false},runtimeEnabled:{value:true},editorUsername:{value:'admin'},uiAdminUsername:{value:'admin'},uiAdminEmail:{value:''},runtimeImage:{value:'ecofacis/xfsc-orce:2.0.15'},orceStorageSize:{value:'3Gi'},mongoStorageSize:{value:'5Gi'},useExternalMongo:{value:false},runtimeServices:{value:'{}',validate:jsonObject},pcm:{value:'{"enabled":false}',validate:jsonObject},name:{value:''},procedureVersion:{value:12},instanceName:{value:'ocm-wstack',required:true},domainAddress:{value:'',required:true},emailAddress:{value:'',required:true},provider:{value:'auto'},storageClass:{value:''},lbAnnotations:{value:'{}',validate:jsonObject},externalDns:{value:false},dnsProvider:{value:'auto'},dnsValues:{value:'{}',validate:jsonObject},tenantId:{value:'demo-tenant',required:true},tenantSubdomain:{value:''},tenantRelease:{value:'demotenant',required:true},timeoutSeconds:{value:1800,validate:function(v){return Number.isInteger(Number(v))&&v>=60&&v<=7200;}}},
+    credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'},editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}},
     oneditprepare:function(){
+      var tabs=RED.tabs.create({id:'esb-ocm-tabs',onchange:function(tab){$('#esb-ocm-panels').children().hide();$('#'+tab.id).show();}});
+      tabs.addTab({id:'esb-ocm-deployment',label:'Deployment'});tabs.addTab({id:'esb-ocm-credentials',label:'ORCE credentials'});tabs.activateTab('esb-ocm-deployment');
+      function runtime(){ $('#esb-ocm-runtime-fields').toggle($('#node-input-runtimeEnabled').prop('checked'));$('#esb-ocm-mongo-uri').toggle($('#node-input-useExternalMongo').prop('checked'));}
+      function provider(){var p=$('#node-input-provider').val();$('#esb-ocm-hetzner').toggle(p==='hetzner'||p==='auto');if(p==='ionos')$('#node-input-externalTrafficPolicy').val('Cluster');}
+      $('#node-input-runtimeEnabled, #node-input-useExternalMongo').on('change',runtime);runtime();$('#node-input-provider').on('change',provider);provider();
+
       function dns(){var enabled=$('#node-input-externalDns').prop('checked');var custom=$('#node-input-dnsProvider').val()==='custom';$('#esb-ocm-dns-fields').toggle(enabled);$('#esb-ocm-manual-dns').toggle(!enabled);$('#esb-ocm-dns-token').toggle(!custom);$('#esb-ocm-dns-custom').toggle(custom);}
       function preview(){var sub=($('#node-input-tenantSubdomain').val()||$('#node-input-tenantId').val()||'demo-tenant').toLowerCase().replace(/_/g,'-');$('#esb-ocm-tenant-preview').text('Tenant endpoint: https://'+sub+'.'+($('#node-input-domainAddress').val()||'example.com'));}
       $('#node-input-externalDns, #node-input-dnsProvider').on('change',dns);dns();

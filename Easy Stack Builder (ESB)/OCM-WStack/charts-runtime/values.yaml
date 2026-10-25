@@ -1,0 +1,20 @@
+host: ""
+tlsSecret: xfsc-wildcard
+ingressClass: nginx-orce-cluster
+controllerNamespace: ingress-nginx
+image: ecofacis/xfsc-orce:2.0.15
+secretChecksum: ""
+storage:
+  orceSize: 3Gi
+  mongoSize: 5Gi
+  class: ""
+mongo:
+  embedded: true
+  image: mongo:6.0.20
+runtimeConfig: {}
+
+listenerSetName: demotenant-xfsc-tenant-gateway
+identity:
+  image: quay.io/keycloak/keycloak:26.8.0
+  postgresImage: postgres:17.6
+  storageSize: 3Gi
