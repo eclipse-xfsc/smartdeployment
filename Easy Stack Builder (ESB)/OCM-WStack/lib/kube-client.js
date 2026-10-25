@@ -59,8 +59,8 @@ async function bind(r,directory,kubeconfig,bytes) {
   const report={source:'editor-upload',...selected,kubeconfigSha256:crypto.createHash('sha256').update(bytes).digest('hex')};
   r.emit({type:'kubeconfig-selection',...report});return report;
 }
-async function identity(r) {
-  const doc=await r.json('kubectl',['auth','whoami','-o','json'],{timeout:15000});
+async function identity(r,{timeout=15000}={}) {
+  const doc=await r.json('kubectl',['auth','whoami','-o','json'],{timeout});
   const info=doc.status?.userInfo;
   if(!info?.username)fail('KUBE_IDENTITY','API did not return the authenticated user identity.');
   const report={username:info.username,groups:info.groups||[]};r.emit({type:'kubeconfig-identity',...report});return report;

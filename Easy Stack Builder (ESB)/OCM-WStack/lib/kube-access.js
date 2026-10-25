@@ -11,9 +11,11 @@ const ARGO_ACCESS=[
 
 // Submit exact authorization attributes without RESTMapper/discovery. This also
 // works before Argo's CRDs or namespace exist; reviews do not persist resources.
-async function review(r,attributes,{phase='preflight',username=r.env?.ESB_KUBE_USERNAME}={}) {
+async function review(r,attributes,{phase='preflight',username=r.env?.ESB_KUBE_USERNAME,timeout=20000}={}) {
+  if(!Number.isFinite(timeout)||timeout<=0)fail('RBAC_TIMEOUT','Authorization review timeout must be positive.');
   const request={apiVersion:'authorization.k8s.io/v1',kind:'SelfSubjectAccessReview',spec:{resourceAttributes:attributes}};
-  const result=await r.json('kubectl',['create','--raw=/apis/authorization.k8s.io/v1/selfsubjectaccessreviews','-f','-','--request-timeout=15s'],{input:JSON.stringify(request),timeout:20000,processGroup:false});
+  const seconds=Math.max(1,Math.min(15,Math.ceil(timeout/1000)));
+  const result=await r.json('kubectl',['create','--raw=/apis/authorization.k8s.io/v1/selfsubjectaccessreviews','-f','-',`--request-timeout=${seconds}s`],{input:JSON.stringify(request),timeout,processGroup:false});
   if(typeof result?.status?.allowed!=='boolean')fail('RBAC_RESPONSE','Kubernetes returned no authorization decision; deployment access cannot be confirmed.');
   const allowed=result.status.allowed&&!result.status.denied;
   r.emit({type:'kube-access',phase,username,attributes,allowed});
