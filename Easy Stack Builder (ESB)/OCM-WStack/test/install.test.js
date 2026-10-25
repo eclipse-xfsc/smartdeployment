@@ -27,6 +27,9 @@ test('executes real official entrypoint once, in order, and installs upstream te
   const names=upgrades.map(x=>x.args[2]==='--timeout'?x.args[x.args.indexOf('-n')+2]:x.args[2]);
   assert.deepEqual(names,['observability','openbao','eso','kyverno','infrastructure-namespace','kubernetes-operator','storage','network','core','ocm-wstack-namespace','ocm-wstack','demotenant']);
   assert.ok(upgrades.every(x=>x.cwd.endsWith('/deployment')));
+  const readyIndex=calls.findIndex(x=>x.command==='kubectl'&&x.args.includes('wait')&&x.args.includes('pod/openbao-0'));
+  assert.ok(readyIndex>0);assert.ok(calls[readyIndex].args.includes('--for=condition=Ready'));
+  assert.ok(readyIndex<calls.findIndex(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('eso')));
   const network=upgrades[names.indexOf('network')];assert.ok(network.args.includes('excludes[1]=INFRA/network/external-dns'));assert.match(network.network.esbTemplatePatch,/valuesObject/);
   assert.equal(calls.filter(x=>x.args.some(a=>a.includes('install.yaml'))).length,1);
   assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.bootstrapComplete,'true');
@@ -66,4 +69,15 @@ test('a live cluster lease prevents a second owner from running installation',as
   await assert.rejects(lease(r,'owner-two'),{code:'BUSY'});
   await first.release();
   const next=await lease(r,'owner-two');await next.release();
+});
+test('an unready OnDelete OpenBao pod stops bootstrap; retry succeeds when the pod is Ready',async t=>{
+  const h=await setup(t);
+  const normal=h.options.runnerFactory;
+  h.options.runnerFactory=opts=>{const r=normal(opts);r.env.ESB_TEST_OPENBAO_UNREADY='true';return r;};
+  await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.code==='COMMAND_FAILED'&&e.message.includes('pods/openbao-0'));
+  const calls=await h.readCalls();
+  assert.ok(!calls.some(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('eso')));
+  assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.state,'failed');
+  h.options.runnerFactory=normal;
+  assert.equal((await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options)).status,'ready');
 });

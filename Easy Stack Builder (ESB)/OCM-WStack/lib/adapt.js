@@ -38,7 +38,9 @@ async function adapt(dir) {
     text = text.replace(/^helm install /gm, 'helm upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" ');
     // Kubernetes operators need running admission endpoints before downstream charts.
     const waits = {
-      openbao: 'kubectl -n security rollout status statefulset/openbao --timeout="${ESB_TIMEOUT_SECONDS}s"',
+      // Upstream OpenBao uses OnDelete, which rollout status cannot handle.
+      // Its bootstrap hook already waits for and unseals this named pod.
+      openbao: 'kubectl -n security wait --for=condition=Ready pod/openbao-0 --timeout="${ESB_TIMEOUT_SECONDS}s"',
       eso: 'kubectl -n security rollout status deployment -l app.kubernetes.io/instance=eso --timeout="${ESB_TIMEOUT_SECONDS}s"',
       kyverno: 'kubectl -n security rollout status deployment -l app.kubernetes.io/instance=kyverno --timeout="${ESB_TIMEOUT_SECONDS}s"',
       'kubernetes-operator': 'kubectl -n security rollout status deployment -l app.kubernetes.io/instance=kubernetes-operator --timeout="${ESB_TIMEOUT_SECONDS}s"'

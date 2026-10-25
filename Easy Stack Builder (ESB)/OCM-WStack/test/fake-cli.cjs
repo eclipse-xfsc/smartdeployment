@@ -31,6 +31,12 @@ const n=a.indexOf('-n');if(n>=0){ns=a[n+1];a.splice(n,2);}
 const nn=a.indexOf('--namespace');if(nn>=0){ns=a[nn+1];a.splice(nn,2);}
 const [verb,kind,name]=a;
 if(verb==='auth'){out('yes');process.exit(0);}
+if(verb==='rollout'&&a.includes('statefulset/openbao'))fail('error: rollout status is only available for RollingUpdate strategy type');
+if(verb==='wait'){
+  if(ns!=='security'||!a.includes('pod/openbao-0')||!a.includes('--for=condition=Ready'))fail('Unexpected wait target');
+  if(process.env.ESB_TEST_OPENBAO_UNREADY==='true')fail('error: timed out waiting for the condition on pods/openbao-0');
+  out('pod/openbao-0 condition met');process.exit(0);
+}
 if(verb==='cluster-info'||verb==='rollout'){out('ready');process.exit(0);}
 if(verb==='get'){
   if(kind==='nodes')out({items:[{spec:{providerID:'aws:///eu/test'},status:{conditions:[{type:'Ready',status:'True'}]}}]});
