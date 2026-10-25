@@ -168,6 +168,18 @@ plan(r,process.argv[1],process.argv[2],c,process.argv[3]).then(x=>console.log(JS
     tempo = yaml.safe_load((source / 'INFRA/observability/opentelemtry/values.yaml').read_text())['tempo']['tempo']
     assert tempo['receivers']['otlp']['protocols'] == {'grpc': {'endpoint': '0.0.0.0:4317'}, 'http': {'endpoint': '0.0.0.0:4318'}}
     print('PASS TelemetryConfig CRD field placement and Tempo receiver types')
+    monitoring = yaml.safe_load((source / 'INFRA/observability/opentelemtry/values.yaml').read_text())['monitoring']['grafana']
+    assert monitoring['sidecar']['datasources']['enabled'] is True
+    assert monitoring['sidecar']['datasources']['defaultDatasourceEnabled'] is False
+    assert monitoring['sidecar']['datasources']['alertmanager']['enabled'] is False
+    assert monitoring['additionalDataSources'] == []
+    data = [yaml.safe_load(value) for doc in all_docs if doc.get('kind') == 'ConfigMap' and doc.get('metadata', {}).get('labels', {}).get('grafana_datasource') == '1' for name, value in doc.get('data', {}).items() if name.endswith('.yaml')]
+    definitions = [ds for item in data for ds in item.get('datasources', [])]
+    assert len(definitions) == 5
+    assert len({ds['uid'] for ds in definitions}) == 5
+    assert [ds['uid'] for ds in definitions if ds.get('isDefault')] == ['prometheus']
+    print('PASS Grafana canonical datasource definitions and subchart duplicate suppression')
+
 
     # Evaluate the actual AppProject template for absent, owned and foreign
     # project states. Only lookup is replaced; the rest is the real template.

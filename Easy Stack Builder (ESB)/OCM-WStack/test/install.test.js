@@ -36,6 +36,9 @@ test('executes real official entrypoint once, in order, and installs upstream te
   assert.ok(readyIndex<calls.findIndex(x=>x.command==='helm'&&x.args[0]==='upgrade'&&x.args.includes('eso')));
   const network=upgrades[names.indexOf('network')];assert.ok(network.args.includes('excludes[1]=INFRA/network/external-dns'));assert.match(network.network.esbTemplatePatch,/valuesObject/);
   assert.equal(calls.filter(x=>x.command==='kubectl'&&x.args.some(a=>a.includes('argo-install.yaml'))).length,1);
+  assert.equal(calls.find(x=>x.argoRedisImage)?.argoRedisImage,'docker.io/library/redis:8.2.3-alpine');
+  assert.ok(calls.some(x=>x.args.includes('deployment/argocd-dex-server')));
+  assert.ok(calls.some(x=>x.args.includes('deployment/argocd-redis')));
   assert.equal((await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12'].data.bootstrapComplete,'true');
   const before=upgrades.length;
   await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
@@ -139,4 +142,17 @@ test('real bootstrap recovers an Argo Application read EOF without replaying Sto
   const storageIndex=calls.findIndex(c=>c.command==='helm'&&c.args[0]==='upgrade'&&c.args.includes('storage'));
   assert.ok(crdIndex>0&&crdIndex<storageIndex);
   assert.ok(h.events.some(e=>e.type==='log'&&e.message.includes('api-read-retry')));
+});
+
+test('unready Argo Redis stops before infrastructure and reports ImagePullBackOff',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_REDIS_UNREADY='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.message.includes('ImagePullBackOff'));
+ assert.equal((await h.readState()).attempts['security/infrastructure-namespace'],undefined);
+});
+test('duplicate Grafana defaults are rejected before any cluster mutation',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_BAD_DATASOURCES='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),e=>e.code==='CHART_PREFLIGHT'&&e.message.includes('More than one'));
+ assert.deepEqual((await h.readState()).objects,{});
 });

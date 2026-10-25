@@ -8,6 +8,7 @@ const statePath=process.env.ESB_TEST_STATE,logPath=process.env.ESB_TEST_CALLS;
 const state=JSON.parse(fs.readFileSync(statePath,'utf8'));
 const record={command:cmd,args,cwd:process.cwd(),qps:process.env.HELM_QPS,burst:process.env.HELM_BURST_LIMIT};
 for(const [key,file] of [['network',process.env.ESB_NETWORK_VALUES],['dns',process.env.ESB_DNS_SECRET_FILE]])if(file&&fs.existsSync(file))record[key]=JSON.parse(fs.readFileSync(file,'utf8'));
+if(cmd==='kubectl'&&args.includes('apply')&&args.some(a=>a.endsWith('argo-install.yaml')))record.argoRedisImage=fs.readFileSync(args[args.indexOf('-f')+1],'utf8').match(/image: (.*redis:.*)/)?.[1];
 fs.appendFileSync(logPath,JSON.stringify(record)+'\n');
 const out=x=>process.stdout.write(typeof x==='string'?x+'\n':JSON.stringify(x)+'\n');
 const save=()=>fs.writeFileSync(statePath,JSON.stringify(state));
@@ -19,7 +20,7 @@ if(cmd==='git') {
   process.exit(0);
 }
 if(cmd==='curl') {
-  fs.writeFileSync(args[args.indexOf('--output')+1],'kind: CustomResourceDefinition\n---\nkind: Deployment\nmetadata:\n  name: argocd-server\n');
+  fs.writeFileSync(args[args.indexOf('--output')+1],'kind: CustomResourceDefinition\n---\nkind: Deployment\nmetadata:\n  name: argocd-server\nspec:\n  template:\n    spec:\n      containers:\n        - name: redis\n          image: public.ecr.aws/docker/library/redis:8.2.3-alpine\n');
   process.exit(0);
 }
 if(cmd==='helm'){
@@ -34,6 +35,11 @@ if(cmd==='helm'){
     if(args[1]==='esb-yaml-reader') {
       const input=fs.readFileSync(args[args.indexOf('-f')+1],'utf8');
       out(require('node:child_process').execFileSync('python3',['-c','import sys,json,yaml; print(json.dumps({k:yaml.safe_load(v) for k,v in json.load(sys.stdin)["documents"].items()}))'],{input,encoding:'utf8'}).trim());
+    } else if(args[1]==='observability'&&args.includes('--output-dir')) {
+      const root=args[args.indexOf('--output-dir')+1];fs.mkdirSync(root,{recursive:true});
+      const ds=[{name:'Prometheus',uid:'prometheus',isDefault:true}];
+      if(process.env.ESB_TEST_BAD_DATASOURCES==='true')ds.push({name:'Other',uid:'other',isDefault:true});
+      fs.writeFileSync(path.join(root,'datasources.yaml'),JSON.stringify({kind:'ConfigMap',metadata:{labels:{grafana_datasource:'1'}},data:{'datasources.yaml':JSON.stringify({apiVersion:1,datasources:ds})}}));
     } else if(args[1]===process.env.ESB_TEST_BAD_CHART)fail('Simulated real-template rejection');
   }
   if(args[0]==='upgrade'){
@@ -68,8 +74,10 @@ if(verb==='wait'){
   if(process.env.ESB_TEST_OPENBAO_UNREADY==='true')fail('error: timed out waiting for the condition on pods/openbao-0');
   out('pod/openbao-0 condition met');process.exit(0);
 }
+if(verb==='rollout'&&a.includes('deployment/argocd-redis')&&process.env.ESB_TEST_REDIS_UNREADY==='true')fail('redis rollout timed out');
 if(verb==='cluster-info'||verb==='rollout'){out('ready');process.exit(0);}
 if(verb==='get'&&kind==='--raw=/readyz'){out('ok');process.exit(0);}
+if(verb==='get'&&kind==='--raw=/api/v1/namespaces/argocd/pods'){out({items:[{metadata:{name:'argocd-redis-test'},status:{phase:'Running',containerStatuses:[{name:'redis',ready:process.env.ESB_TEST_REDIS_UNREADY!=='true',state:{waiting:{reason:'ImagePullBackOff'}},image:'docker.io/library/redis:8.2.3-alpine'}]}}]});process.exit(0);}
 if(verb==='get'&&kind.startsWith('--raw=/apis/')) {
   if(!state.argoInstalled)fail('Error from server (NotFound): the server could not find the requested resource');
   if(kind.includes('/customresourcedefinitions/')){out({status:{conditions:[{type:'Established',status:'True'}]}});process.exit(0);}

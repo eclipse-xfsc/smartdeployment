@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {networkOverrides, networkValues} = require('./adapt');
 const {fail} = require('./config');
+const {redisMirror}=require('./argo');
 
 const SETS = ['storage','network','core','ocm-wstack'];
 const SET_FILES = ['03_storage','04_network','05_core','06_ocm_wstack'];
@@ -109,6 +110,7 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
       args.push('--output-dir',path.join(validationDir,`render-${i}`));
       const rendered=await r.run('helm',args,{timeout:180000});
       if(/cannot overwrite table with non table|destination for .* is a table/.test(rendered.stderr))throw new Error(rendered.stderr);
+      if(job.release==='observability')await require('./grafana').inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml);
       // Exercise upgrade branches as well as first-install branches in Helm templates.
       await r.run('helm',[...args,'--is-upgrade'],{timeout:180000});
       const lockfile=path.join(location,'Chart.lock');
@@ -125,10 +127,12 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   if(current!==argoRevision)fail('UPSTREAM_MOVED','Upstream main changed during chart validation. Retry to validate its new revision. No installation was started.');
   const argoManifest=path.join(validationDir,'argo-install.yaml');
   await r.run('curl',['--fail','--silent','--show-error','--location','--max-time','120','--output',argoManifest,'https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml'],{timeout:130000});
-  const manifest=await fs.readFile(argoManifest,'utf8');
+  const originalManifest=await fs.readFile(argoManifest,'utf8');
+  const manifest=redisMirror(originalManifest);
+  await fs.writeFile(argoManifest,manifest,{mode:0o600});
   if(!manifest.includes('kind: CustomResourceDefinition')||!manifest.includes('name: argocd-server'))fail('ARGO_MANIFEST','Downloaded Argo manifest does not contain the expected resources. No installation was started.');
   const applicationCounts=Object.fromEntries(SETS.map(set=>[set,jobs.filter(j=>j.applicationSet===set).length]));
-  const result={status:'charts-validated',argoRevision,kubeVersion,charts:results,applicationCounts,argoManifestSha256:crypto.createHash('sha256').update(manifest).digest('hex'),liveDeploymentTested:false};
+  const result={status:'charts-validated',argoRevision,kubeVersion,charts:results,applicationCounts,argoRedisRegistry:'docker.io/library/redis',argoManifestSha256:crypto.createHash('sha256').update(manifest).digest('hex'),liveDeploymentTested:false};
   r.env={...r.env,ESB_ARGO_MANIFEST:argoManifest,ESB_APPSET_COUNTS:JSON.stringify(applicationCounts)};
   r.emit({type:'chart-preflight-complete',argoRevision,chartCount:results.length});
   return result;

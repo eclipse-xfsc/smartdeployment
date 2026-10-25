@@ -42,6 +42,13 @@ async function adapt(dir) {
   let values = await fs.readFile(path.join(dir,tempo),'utf8');
   values = once(values, '          grpc:\n          http:', '          grpc:\n            endpoint: 0.0.0.0:4317\n          http:\n            endpoint: 0.0.0.0:4318', tempo);
   values = once(values, '\nmonitoring:\n', '\nmonitoring:\n  enabled: true\n  prometheus:\n    enabled: true\n', tempo);
+  // One canonical datasource ConfigMap: the wrapper owns all five definitions.
+  // Disable the monitoring subchart's builtin and additional duplicates.
+  values = once(values, '        labelValue: "1"', '        labelValue: "1"\n        defaultDatasourceEnabled: false\n        alertmanager:\n          enabled: false', tempo);
+  const dataStart = values.indexOf('    additionalDataSources:\n');
+  const dataEnd = values.indexOf('\nloki:\n', dataStart);
+  if(dataStart < 0 || dataEnd < 0)fail('UPSTREAM_CONTRACT','Grafana datasource values changed.');
+  values = values.slice(0,dataStart) + '    additionalDataSources: []\n' + values.slice(dataEnd);
   await fs.writeFile(path.join(dir,tempo),values);
   const telemetry = 'INFRA/observability/opentelemtry/crds/telemetryconfig.yaml';
   let crd = await fs.readFile(path.join(dir,telemetry),'utf8');
@@ -72,6 +79,7 @@ async function adapt(dir) {
     const waits = {
       // Upstream OpenBao uses OnDelete, which rollout status cannot handle.
       // Its bootstrap hook already waits for and unseals this named pod.
+      observability: 'kubectl -n observability rollout status deployment -l app.kubernetes.io/name=grafana,app.kubernetes.io/instance=observability --timeout="${ESB_TIMEOUT_SECONDS}s"',
       openbao: 'kubectl -n security wait --for=condition=Ready pod/openbao-0 --timeout="${ESB_TIMEOUT_SECONDS}s"',
       eso: 'kubectl -n security rollout status deployment -l app.kubernetes.io/instance=eso --timeout="${ESB_TIMEOUT_SECONDS}s"',
       kyverno: 'kubectl -n security rollout status deployment -l app.kubernetes.io/instance=kyverno --timeout="${ESB_TIMEOUT_SECONDS}s"',
@@ -100,6 +108,12 @@ async function adapt(dir) {
   text = once(text, 'readonly ARGO_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"', 'readonly ARGO_MANIFEST="${ESB_ARGO_MANIFEST:?ESB Argo manifest preflight is required}"', argo);
   const crdWait = ['applications','applicationsets','appprojects'].map(kind => `node "\${ESB_KUBE_READ:?ESB API reader is required}" /apis/apiextensions.k8s.io/v1/customresourcedefinitions/${kind}.argoproj.io established >/dev/null`).join('\n');
   text = once(text, 'components=(', crdWait + '\n\ncomponents=(', argo);
+  text = once(text, '  "deployment/argocd-server"', '  "deployment/argocd-redis"\n  "deployment/argocd-dex-server"\n  "deployment/argocd-server"', argo);
+  text = once(text, '      kubectl get pods -n "$NAMESPACE" -o wide', '      node "${ESB_ARGO_HEALTH:?ESB Argo health checker is required}" --diagnose >&2 || true', argo);
+  const healthStart=text.indexOf('not_ready=$(\n');
+  const healthEnd=text.indexOf('\n# =========================\n# Verify Initial Secret Exists',healthStart);
+  if(healthStart<0||healthEnd<0)fail('UPSTREAM_CONTRACT','Argo pod health check changed.');
+  text=text.slice(0,healthStart)+'node "${ESB_ARGO_HEALTH:?ESB Argo health checker is required}" || exit "$EXIT_POD_FAILED"\n'+text.slice(healthEnd);
   text = once(text, 'echo "Admin Password: $password"', 'echo "Admin password remains in the argocd-initial-admin-secret Secret."', argo);
   // Do not read the password at all; leave the official existence check intact.
   const start = text.indexOf('password=$(\n');

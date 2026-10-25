@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.5
+# OCM W-Stack ESB 12.0.6
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -16,7 +16,7 @@ No service image is rebuilt, patched or bundled. Both distribution archives cont
 
 Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. A failed partial bootstrap can resume when settings match and the affected Helm release is absent, failed or deployed. A pending Helm operation requires inspection; ESB never clears it automatically.
 
-Version 12.0.5 adds Argo CRD establishment checks and direct Application API reads with bounded recovery. Helm transport recovery from 12.0.4 remains enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
+Version 12.0.6 fixes duplicate Grafana datasource provisioning, checks the rendered datasource definitions before installation, and pulls the upstream Argo Redis tag from Docker Hub. Argo readiness now includes Redis, Dex and container readiness diagnostics. Earlier API read and Helm recovery remain enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
 
 ## Kubernetes API EOF recovery
 
@@ -59,10 +59,10 @@ node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.5.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.6.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.5.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.6.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.

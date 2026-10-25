@@ -1,1 +1,0 @@
-54 automated tests passed; 0 failed. Full suite exit code 0. Tests use explicit cluster and Helm doubles.

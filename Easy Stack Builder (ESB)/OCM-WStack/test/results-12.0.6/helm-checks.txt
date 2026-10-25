@@ -38,6 +38,7 @@ PASS wrapper install + upgrade: storage-service (OCM W-Stack/Storage Service)
 PASS wrapper install + upgrade: well-known-chart (OCM W-Stack/Well Known Chart)
 PASS wrapper install + upgrade: demotenant (XFSC/tenant/chart)
 PASS TelemetryConfig CRD field placement and Tempo receiver types
+PASS Grafana canonical datasource definitions and subchart duplicate suppression
 PASS AppProject upgrade ownership: absent
 PASS AppProject upgrade ownership: owned
 PASS AppProject upgrade ownership: foreign

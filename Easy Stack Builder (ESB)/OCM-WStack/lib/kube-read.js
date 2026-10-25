@@ -2,7 +2,7 @@
 const {transportFailure,delay}=require('./api-recovery');
 const {fail}=require('./config');
 async function read(r,endpoint,{established=false,timeoutSeconds=120,sleep=delay,now=Date.now}={}) {
-  if(!/^\/apis\/(?:argoproj\.io\/v1alpha1\/namespaces\/[a-z0-9-]+\/(?:applications|applicationsets)|apiextensions\.k8s\.io\/v1\/customresourcedefinitions\/(?:applications|applicationsets|appprojects)\.argoproj\.io)$/.test(endpoint||''))fail('API_READ_PATH','Unsupported Argo readiness API path.');
+  if(endpoint!=='/api/v1/namespaces/argocd/pods'&&!/^\/apis\/(?:argoproj\.io\/v1alpha1\/namespaces\/[a-z0-9-]+\/(?:applications|applicationsets)|apiextensions\.k8s\.io\/v1\/customresourcedefinitions\/(?:applications|applicationsets|appprojects)\.argoproj\.io)$/.test(endpoint||''))fail('API_READ_PATH','Unsupported Argo readiness API path.');
   if(!Number.isFinite(timeoutSeconds)||timeoutSeconds<=0)fail('API_READ_TIMEOUT','Read timeout must be positive.');
   const deadline=now()+timeoutSeconds*1000;let attempt=0,last='';
   while(now()<deadline) {
