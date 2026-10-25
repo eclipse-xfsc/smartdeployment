@@ -11,6 +11,10 @@ const MARKER = 'esb-ocmwstack-v12';
 const LEASE = 'esb-ocmwstack-v12';
 const MANAGED_NS = ['observability','security','argocd','infrastructure','ocm-wstack'];
 
+// Lease times are Kubernetes metav1.MicroTime, whose JSON parser requires
+// exactly six fractional digits. Date.toISOString() supplies only three.
+function leaseTime() {return new Date().toISOString().replace(/\.(\d{3})Z$/,(_,ms)=>`.${ms}000Z`);}
+
 async function privateFile(dir,name,content) {const p=path.join(dir,name);await fs.writeFile(p,content,{mode:0o600});return p;}
 async function optional(r,kind,name,ns) {return r.json('kubectl',['-n',ns,'get',kind,name,'--ignore-not-found','-o','json'],{timeout:30000});}
 async function updateMarker(r,marker,data) {
@@ -21,17 +25,17 @@ async function lease(r,id,onLost=()=>{}) {
   let doc = await optional(r,'lease',LEASE,'kube-system');
   const now=Date.now();
   if (doc?.spec?.holderIdentity && Date.parse(doc.spec.renewTime || doc.spec.acquireTime) + (doc.spec.leaseDurationSeconds||180)*1000 > now) fail('BUSY','Another ESB operation holds this cluster lease.');
-  const fresh={apiVersion:'coordination.k8s.io/v1',kind:'Lease',metadata:{name:LEASE,namespace:'kube-system',...(doc?{resourceVersion:doc.metadata.resourceVersion}:{})},spec:{holderIdentity:id,leaseDurationSeconds:180,acquireTime:new Date().toISOString(),renewTime:new Date().toISOString()}};
+  const fresh={apiVersion:'coordination.k8s.io/v1',kind:'Lease',metadata:{name:LEASE,namespace:'kube-system',...(doc?{resourceVersion:doc.metadata.resourceVersion}:{})},spec:{holderIdentity:id,leaseDurationSeconds:180,acquireTime:leaseTime(),renewTime:leaseTime()}};
   doc=await r.json('kubectl',['-n','kube-system',doc?'replace':'create','-f','-','-o','json'],{input:JSON.stringify(fresh)});
   let pending=Promise.resolve(), lost;
   const timer=setInterval(()=>{
     pending=pending.then(async()=>{
       if(lost)return;
-      doc.spec.renewTime=new Date().toISOString();
+      doc.spec.renewTime=leaseTime();
       doc=await r.json('kubectl',['-n','kube-system','replace','-f','-','-o','json'],{input:JSON.stringify(doc),timeout:30000});
     }).catch(e=>{lost=e;onLost();});
   },45000);timer.unref();
-  return {check(){if(lost)fail('LEASE_LOST','Lost the cluster lease; stop and inspect before resuming.');}, async release(){clearInterval(timer);await pending;if(!lost){doc.spec.holderIdentity='';doc.spec.renewTime=new Date().toISOString();await r.run('kubectl',['-n','kube-system','replace','-f','-'],{input:JSON.stringify(doc),allowFailure:true,timeout:30000});}}};
+  return {check(){if(lost)fail('LEASE_LOST','Lost the cluster lease; stop and inspect before resuming.');}, async release(){clearInterval(timer);await pending;if(!lost){doc.spec.holderIdentity='';doc.spec.renewTime=leaseTime();await r.run('kubectl',['-n','kube-system','replace','-f','-'],{input:JSON.stringify(doc),allowFailure:true,timeout:30000});}}};
 }
 async function preflight(r,c,credentials) {
   await Promise.all(['bash','git','helm','kubectl','jq','curl','base64'].map(cmd => r.run('bash',['-c','command -v "$1" >/dev/null','esb-prerequisite',cmd])));

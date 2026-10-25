@@ -52,6 +52,9 @@ if(['create','replace','apply'].includes(verb)){
   const f=a[a.indexOf('-f')+1];
   if(!f||f.startsWith('https://')){out('applied');process.exit(0);}
   const doc=JSON.parse(fs.readFileSync(f==='-'?0:f,'utf8'));
+  if(doc.kind==='Lease')for(const field of ['acquireTime','renewTime']){
+    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(doc.spec[field]))fail('BadRequest: Lease '+field+' must use Kubernetes RFC3339Micro');
+  }
   if(doc.kind==='Namespace') {if(!state.namespaces.includes(doc.metadata.name))state.namespaces.push(doc.metadata.name);}
   else {
     const key=`${doc.metadata.namespace||ns}/${doc.kind.toLowerCase()}/${doc.metadata.name}`;

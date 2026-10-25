@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.0
+# OCM W-Stack ESB 12.0.1
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -12,14 +12,18 @@ The wrapper fetches that checkout at deployment time and executes `bash ocm-wsta
 
 No service image is rebuilt, patched or bundled. Both distribution archives contain source text only. The upstream scripts and charts download their normal dependencies when you deploy.
 
+## Updating from 12.0.0
+
+Version 12.0.1 fixes the rejected Kubernetes Lease timestamp. Install the new TGZ, restart ORCE, and trigger the existing node again. Keep `procedureVersion: 12`, the uploaded credentials and all node settings. For the reported Lease creation rejection, no bootstrap resources were installed and no cluster cleanup is needed.
+
 ## Installation in ORCE
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.0.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.1.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.0.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.1.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.
