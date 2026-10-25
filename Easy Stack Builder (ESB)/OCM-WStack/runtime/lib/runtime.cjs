@@ -2,6 +2,7 @@
 const {randomUUID}=require('node:crypto');
 const {Auth}=require('./auth.cjs'),{Client}=require('./http.cjs'),{Adapters}=require('./adapters.cjs'),{Coordination}=require('./coordination.cjs'),{Roles}=require('./roles.cjs'),{Events}=require('./events.cjs');
 const {fail,object}=require('./errors.cjs');
+const {IssuerBootstrap}=require('./issuer-bootstrap.cjs');
 const routes=[
  ['GET','/metrics','system.health.read','metrics'],['GET','/auth/me',null,'me'],['GET','/health/dependencies','system.health.read','health'],
  ['GET','/preferences',null,'preferences'],['PATCH','/preferences',null,'setPreferences'],['GET','/audit','audit.read','audit'],
@@ -13,14 +14,14 @@ const routes=[
  ['GET','/roles','roles.read','roles'],['POST','/roles','roles.manage','createRole',true],['PATCH','/roles/:id','roles.manage','updateRole',true],['DELETE','/roles/:id','roles.manage','deleteRole',true],['GET','/role-assignments','roles.read','assignments'],['PUT','/role-assignments/:id','roles.manage','assign',true],['GET','/role-assignments/:id/effective','roles.read','effective']
 ].map(([method,path,permission,action,mutate])=>({method,path,permission,action,mutate,pattern:new RegExp('^'+path.replace(':id','([^/]+)')+'/?$')}));
 class Runtime {
- constructor(config){this.c=config;this.auth=new Auth(config);this.http=new Client(config.services);this.adapters=new Adapters(config,this.http);this.events=new Events(config);this.ready=false;this.rates=new Map();this.counts=new Map();}
+ constructor(config){this.c=config;this.auth=new Auth(config);this.http=new Client({...config.services,iam:config.keycloakInternal,issuerBootstrap:config.issuerBootstrapUrl||'http://dummycontentsigner:8080'});this.adapters=new Adapters(config,this.http);this.issuerBootstrap=new IssuerBootstrap(config,this.http);this.events=new Events(config,this.issuerBootstrap);this.ready=false;this.rates=new Map();this.counts=new Map();}
  async start(){
   if(this.ready)return; if(this.starting)return this.starting;
   this.starting=this.connect();return this.starting;
  }
  async connect(){
   const {MongoClient}=require('mongodb');while(!this.closing){try{this.mongo=new MongoClient(this.c.mongoUri,{serverSelectionTimeoutMS:3000,maxPoolSize:10});await this.mongo.connect();this.db=this.mongo.db('ocm_ui');
-  this.coordination=new Coordination(this.db,this.c.offerKey);await this.coordination.init();this.roles=new Roles(this.c,this.db);if(this.closing){await this.mongo.close();return;}this.ready=true;this.events.start();return;
+  this.coordination=new Coordination(this.db,this.c.offerKey);await this.coordination.init();this.roles=new Roles(this.c,this.db,this.http);if(this.closing){await this.mongo.close();return;}this.ready=true;this.events.start();this.issuerBootstrap.start();return;
   }catch{if(this.mongo)await this.mongo.close().catch(()=>{});if(!this.closing)await new Promise(resolve=>setTimeout(resolve,5000));}}
  }
  limit(key){const now=Date.now();let r=this.rates.get(key);if(!r||now-r.start>=60000){r={start:now,count:0};this.rates.set(key,r);}if(++r.count>180)fail(429,'RATE_LIMITED');if(this.rates.size>10000){for(const[k,v]of this.rates)if(now-v.start>60000)this.rates.delete(k);if(this.rates.size>10000)fail(503,'SERVER_BUSY');}}
@@ -29,7 +30,7 @@ class Runtime {
   switch(action){
    case 'me':return {subject:c.subject,username:c.username,tenant:c.tenant,account:c.account,group:c.group,permissions:c.permissions,expiresAt:c.expiresAt};
    case 'metrics':return {requests:Object.fromEntries(this.counts),natsConnected:this.events.connected,mongoReady:this.ready};
-   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),version:'11.0.5'};
+   case 'health':return {nats:{connected:this.events.connected,mode:(this.c.eventSubjects||[]).length?'events-and-polling':'polling'},upstreams:this.http.health(),issuerTenant:this.issuerBootstrap.state,version:'11.0.6'};
    case 'preferences':return await this.db.collection('ui_preferences').findOne(scope,{projection:{_id:0}})||{locale:'en',pageSize:25};
    case 'setPreferences':object(body,['locale','pageSize']);if(body.locale&&!['en','de','fr'].includes(body.locale))fail(400,'VALIDATION_ERROR');if(body.pageSize!==undefined&&![10,25,50,100].includes(body.pageSize))fail(400,'VALIDATION_ERROR');await this.db.collection('ui_preferences').updateOne(scope,{$set:{...body,updatedAt:new Date()}},{upsert:true});return body;
    case 'audit':return {items:await this.db.collection('audit_events').find({tenant:c.tenant},{projection:{_id:0}}).sort({timestamp:-1}).limit(100).toArray()};
@@ -98,10 +99,10 @@ class Runtime {
   }catch(e){
    const status=e.status||500,code=e.code||'INTERNAL_ERROR';
    if(ctx&&[401,403].includes(status)&&this.ready)await this.coordination.audit(ctx,route?.action||'request','denied',requestId,code).catch(()=>{});
-   return res.status(status).json({error:{code,requestId},requestId});
+   return res.status(status).json({error:{code,requestId,...(e.operationId?{operationId:e.operationId,operationState:e.operationState}:{}),...(e.upstream?{upstream:e.upstream}:{}),...(e.upstreamStatus?{upstreamStatus:e.upstreamStatus}:{}),...(e.reason?{reason:e.reason}:{})},requestId});
   }
  }
- async close(){this.closing=true;this.ready=false;if(singleton===this)singleton=null;await this.events.close();if(this.mongo)await this.mongo.close();}
+ async close(){this.closing=true;this.ready=false;if(singleton===this)singleton=null;this.issuerBootstrap.close();await this.events.close();if(this.mongo)await this.mongo.close();}
 }
 let singleton;
 function instance(){if(!singleton)singleton=new Runtime(require('./config.cjs').load());return singleton;}

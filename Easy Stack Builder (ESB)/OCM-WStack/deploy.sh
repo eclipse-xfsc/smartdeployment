@@ -819,6 +819,7 @@ bash "$SCRIPT_DIR/scripts/wait-deployments.sh" "$NAMESPACE"
 record_phase "ocm-readiness" "done" "All OCM Deployments passed readiness"
 record_phase "orce-runtime" "running" "Provisioning ORCE, UI identity, persistent data and MongoDB"
 node "$SCRIPT_DIR/scripts/runtime-install.cjs" install "$NAMESPACE" "$DOMAIN" "$RUNTIME_INPUT" "$KC_POD" "$KCADM_CFG"
+node "$SCRIPT_DIR/scripts/diagnose-runtime.cjs" "$NAMESPACE" --strict
 record_phase "orce-runtime" "done" "ORCE/UI Deployment passed readiness"
 
 record_phase "smoke-tests" "running" "Verifying ingress, Keycloak connectivity, and stored secrets"
@@ -843,4 +844,4 @@ jq -cn \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.5",runtimeVersion:"11.0.5",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.6",runtimeVersion:"11.0.6",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'

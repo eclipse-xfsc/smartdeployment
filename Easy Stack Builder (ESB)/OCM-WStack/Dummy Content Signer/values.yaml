@@ -14,7 +14,7 @@ dummycontentsigner:
     authorization_server:
     - https://cloud-wallet.DOMAIN
     credential_endpoint: https://cloud-wallet.DOMAIN/api/issuance/credential
-    signerUrl: http://signer.NAMESPACE.svc.cluster.local:8080/v1/credential
+    signerCredentialUrl: http://signer.NAMESPACE.svc.cluster.local:8080/v1/credential
     signerKey: signerkey
   resourceProvider:
     enabled: false

@@ -47,6 +47,8 @@ async function main(){
  const realmClient=findClient('realm-management'),realmRoles=kc('get','clients/'+realmClient.id+'/roles');
  const needed=['query-users','view-users','manage-users','view-clients','manage-clients'];
  kc('create','users/'+sa.id+'/role-mappings/clients/'+realmClient.id,realmRoles.filter(r=>needed.includes(r.name)));
+ // With fullScopeAllowed=false, assignments also require explicit token scope mappings.
+ kc('create','clients/'+backend.id+'/scope-mappings/clients/'+realmClient.id,realmRoles.filter(r=>needed.includes(r.name)));
  let user=kc('get','users?username='+encodeURIComponent(cfg.uiAdminUsername)+'&exact=true')[0];
  if(!user){
   kc('create','users',{username:cfg.uiAdminUsername,email:cfg.uiAdminEmail,firstName:cfg.uiAdminFirstName||'',lastName:cfg.uiAdminLastName||'',enabled:true,emailVerified:false,requiredActions:['UPDATE_PASSWORD'],credentials:[{type:'password',value:cfg.uiAdminPassword,temporary:true}]});

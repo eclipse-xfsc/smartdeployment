@@ -1,9 +1,8 @@
 'use strict';
 const {EventEmitter}=require('node:events');
-const {randomUUID}=require('node:crypto');
 const {fail,object,string}=require('./errors.cjs');
 class Events extends EventEmitter {
- constructor(config){super();this.c=config;this.connected=false;this.nc=null;this.stopping=false;this.timer=null;}
+ constructor(config,bootstrap){super();this.bootstrap=bootstrap;this.c=config;this.connected=false;this.nc=null;this.stopping=false;this.timer=null;}
  async start(){
   const {connect}=require('nats');
   try{
@@ -23,8 +22,9 @@ class Events extends EventEmitter {
   object(body.claims,Object.keys(type.fields));
   for(const [key,field] of Object.entries(type.fields)){if(field.required||body.claims[key]!==undefined)string(body.claims[key],field.required?1:0,field.maxLength||256);}
   if(!this.connected||!this.nc)fail(503,'NATS_REQUIRED_FOR_ISSUANCE');
+  if(this.bootstrap){try{await this.bootstrap.ensure();}catch(e){e.dispatchNotStarted=true;throw e;}}
   const event={specversion:'1.0',id:requestId,source:'urn:xfsc:ocm-ui',type:'issuance.request',time:new Date().toISOString(),datacontenttype:'application/json',data:{tenant_id:c.tenant,group_id:c.group,request_id:requestId,identifier:type.identifier,payload:body.claims}};
-  let reply;try{reply=await this.nc.request(type.subject,Buffer.from(JSON.stringify(event)),{timeout:10000});}catch{fail(504,'OPERATION_OUTCOME_UNKNOWN');}
+  let reply;try{reply=await this.nc.request(type.subject,Buffer.from(JSON.stringify(event)),{timeout:10000});}catch(e){if(e.code==='503')fail(503,'ISSUANCE_NO_RESPONDERS');fail(504,'OPERATION_OUTCOME_UNKNOWN');}
   if(reply.data.length>65536)fail(502,'UPSTREAM_PROTOCOL_ERROR');
   let rep;try{rep=JSON.parse(Buffer.from(reply.data));if(rep.data)rep=rep.data;}catch{fail(502,'UPSTREAM_PROTOCOL_ERROR');}
   if(rep.request_id!==requestId||rep.tenant_id!==c.tenant||(rep.group_id&&rep.group_id!==c.group))fail(502,'UPSTREAM_PROTOCOL_ERROR');

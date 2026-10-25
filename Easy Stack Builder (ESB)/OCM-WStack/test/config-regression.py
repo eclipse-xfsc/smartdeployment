@@ -26,6 +26,10 @@ class Configuration(unittest.TestCase):
   self.assertEqual(read('Credential Retrieval/values.yaml')['credential-retrieval-service']['image']['tag'],'1.1.0')
   self.assertEqual(read('Storage Service/values.yaml')['storage-service']['image']['tag'],'1.2.4')
   self.assertEqual(read('signer/values.yaml')['signer']['image']['tag'],'2.3.4')
+ def test_dummy_signer_uses_current_chart_key(self):
+  config=read('Dummy Content Signer/values.yaml')['dummycontentsigner']['config']
+  self.assertEqual(config['signerCredentialUrl'],'http://signer.NAMESPACE.svc.cluster.local:8080/v1/credential')
+  self.assertNotIn('signerUrl',config)
  def test_native_ingress_preserved(self):
   baseline=json.loads((ROOT/'docs/native-route-baseline.json').read_text())
   def ingresses(x):

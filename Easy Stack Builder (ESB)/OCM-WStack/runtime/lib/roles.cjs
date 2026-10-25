@@ -1,15 +1,15 @@
 'use strict';
-const {request}=require('./http.cjs');
+const {Client}=require('./http.cjs');
 const {atomic}=require('./permissions.cjs');
 const {fail,object,string,id}=require('./errors.cjs');
 class Roles {
- constructor(config,db){this.c=config;this.db=db;this.token=null;this.client=null;}
+ constructor(config,db,http){this.http=http||new Client({iam:config.keycloakInternal});this.c=config;this.db=db;this.token=null;this.client=null;}
  async call(path,method='GET',body){
   if(!this.token||this.until<Date.now()){
-   const t=await request(this.c.keycloakInternal+'/realms/'+id(this.c.realm)+'/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'client_credentials',client_id:this.c.adminClientId,client_secret:this.c.adminClientSecret}).toString()});
+   const t=await this.http.call('iam','/realms/'+id(this.c.realm)+'/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'client_credentials',client_id:this.c.adminClientId,client_secret:this.c.adminClientSecret}).toString()});
    if(typeof t?.access_token!=='string')fail(503,'IAM_UNAVAILABLE');this.token=t.access_token;this.until=Date.now()+(t.expires_in-15)*1000;
   }
-  return request(this.c.keycloakInternal+'/admin/realms/'+id(this.c.realm)+path,{method,body,headers:{authorization:'Bearer '+this.token}});
+  return this.http.call('iam','/admin/realms/'+id(this.c.realm)+path,{method,body,headers:{authorization:'Bearer '+this.token}});
  }
  async clientId(){if(!this.client){const d=await this.call('/clients?clientId='+id(this.c.clientId));if(d.length!==1)fail(503,'IAM_UNAVAILABLE');this.client=d[0].id;}return this.client;}
  async base(){return '/clients/'+id(await this.clientId());}

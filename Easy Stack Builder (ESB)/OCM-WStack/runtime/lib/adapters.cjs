@@ -99,7 +99,7 @@ class Adapters {
  async relationAction(c,key,action,body){
   if(action==='invitations'){object(body,[]);return {state:'succeeded',invitation:await this.call(c,'didcomm','/admin/invitation','POST',{protocol:'nats',topic:this.c.didcommTopic,eventType:this.c.didcommEventType,properties:{},group:c.group})};}
   if(action==='accept'){
-   object(body,['invitation']);const u=new URL(string(body.invitation,1,16384));if(u.protocol!=='https:'||!this.c.relationshipHosts.includes(u.hostname))fail(400,'RELATIONSHIP_HOST_NOT_ALLOWED');
+   object(body,['invitation']);string(body.invitation,1,16384);let u;try{u=new URL(body.invitation);}catch{fail(400,'INVALID_INVITATION_URL');}if(u.protocol!=='https:'||!this.c.relationshipHosts.includes(u.hostname))fail(400,'RELATIONSHIP_HOST_NOT_ALLOWED');
    return {state:'succeeded',peer:await this.call(c,'didcomm','/admin/connections/accept','POST',{invitation:body.invitation,protocol:'nats',topic:this.c.didcommTopic,eventType:this.c.didcommEventType,properties:{},group:c.group})};
   }
   const current=await this.relationship(c,key);

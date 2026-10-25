@@ -1,5 +1,7 @@
 export const locales = {
   "en": {
+    "copyInvitation": "Copy invitation URL",
+    "inspectOperation": "Inspect operation",
     "app": "OCM W-Stack",
     "subtitle": "Organizational credentials",
     "login": "Sign in",
@@ -114,6 +116,8 @@ export const locales = {
     "family_name": "Family name"
   },
   "de": {
+    "copyInvitation": "Einladungs-URL kopieren",
+    "inspectOperation": "Vorgang prüfen",
     "app": "OCM W-Stack",
     "subtitle": "Organisationsnachweise",
     "login": "Anmelden",
@@ -228,6 +232,8 @@ export const locales = {
     "family_name": "Nachname"
   },
   "fr": {
+    "copyInvitation": "Copier le lien d’invitation",
+    "inspectOperation": "Vérifier l’opération",
     "app": "OCM W-Stack",
     "subtitle": "Justificatifs de l’organisation",
     "login": "Se connecter",

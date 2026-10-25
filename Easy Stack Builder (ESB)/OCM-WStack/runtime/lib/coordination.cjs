@@ -42,9 +42,9 @@ class Coordination {
    await this.audit(c,operation,safe.state,job.requestId);
    return {...result,requestId:job.requestId};
   }catch(e){
-   const state=(!e.status||e.status>=500)&&!['NATS_REQUIRED_FOR_ISSUANCE','VALIDATION_ERROR'].includes(e.code)?'unknown':'failed';
+   const state=!e.dispatchNotStarted&&(!e.status||e.status>=500)&&!['NATS_REQUIRED_FOR_ISSUANCE','VALIDATION_ERROR','ISSUER_INITIALIZING','ISSUER_TENANT_CONFIGURATION_CONFLICT','ISSUANCE_NO_RESPONDERS'].includes(e.code)?'unknown':'failed';
    await jobs.updateOne(query,{$set:{state,code:e.code||'INTERNAL_ERROR',updatedAt:new Date()}});
-   await this.audit(c,operation,state,job.requestId,e.code||'INTERNAL_ERROR');throw e;
+   await this.audit(c,operation,state,job.requestId,e.code||'INTERNAL_ERROR');e.operationId=job.requestId;e.operationState=state;throw e;
   }
  }
 }
