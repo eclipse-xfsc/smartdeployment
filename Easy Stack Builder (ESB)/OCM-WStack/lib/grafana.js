@@ -2,6 +2,18 @@
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const {fail}=require('./config');
+function validateWorkload(documents) {
+  const workloads=Object.values(documents).filter(doc=>['Deployment','StatefulSet'].includes(doc?.kind)&&doc.metadata?.labels?.['app.kubernetes.io/name']==='grafana'&&doc.metadata?.labels?.['app.kubernetes.io/instance']==='observability');
+  if(workloads.length!==1)fail('GRAFANA_STARTUP','Expected one rendered observability Grafana workload.');
+  const pod=workloads[0].spec?.template?.spec;
+  if(pod?.initContainers?.some(container=>container.name==='init-chown-data'))fail('GRAFANA_STARTUP','Grafana still includes the failing BusyBox chown init container.');
+  const security=pod?.securityContext;
+  if(security?.runAsNonRoot!==true||security.runAsUser!==472||security.runAsGroup!==472||security.fsGroup!==472||security.fsGroupChangePolicy!=='Always')fail('GRAFANA_STARTUP','Grafana must retain non-root UID/GID 472 and Kubernetes-managed PVC group permissions.');
+  const grafana=pod.containers?.find(container=>container.name==='grafana');
+  const mount=grafana?.volumeMounts?.find(volume=>volume.mountPath==='/var/lib/grafana');
+  if(!mount||mount.readOnly||mount.subPath||mount.subPathExpr||!pod.volumes?.some(volume=>volume.name===mount.name&&volume.persistentVolumeClaim?.claimName))fail('GRAFANA_STARTUP','Grafana data must retain its writable PVC mount without a subPath.');
+  return workloads[0].metadata.name;
+}
 function validate(documents) {
   const names=new Set(),uids=new Set(),defaults=new Set();let count=0;
   for(const doc of Object.values(documents)) {
@@ -31,6 +43,7 @@ async function inspect(r,root,directory,readYaml) {
   await walk(root);
   if(!Object.keys(sources).length)fail('GRAFANA_DATASOURCES','No observability manifests were rendered for datasource validation.');
   const manifests=await readYaml(r,directory,sources),provisioning={};
+  validateWorkload(manifests);
   for(const [key,doc] of Object.entries(manifests)) {
     if(doc?.Error)fail('GRAFANA_DATASOURCES','Invalid observability manifest YAML.');
     if(!['ConfigMap','Secret'].includes(doc?.kind)||doc.metadata?.labels?.grafana_datasource!=='1')continue;
@@ -40,4 +53,4 @@ async function inspect(r,root,directory,readYaml) {
   if(!Object.keys(provisioning).length)fail('GRAFANA_DATASOURCES','No Grafana sidecar datasource definitions were rendered.');
   return validate(await readYaml(r,directory,provisioning));
 }
-module.exports={validate,inspect};
+module.exports={validate,validateWorkload,inspect};
