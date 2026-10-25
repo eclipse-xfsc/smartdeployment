@@ -2,9 +2,9 @@
   {
     "id": "ocm-v12-flow",
     "type": "tab",
-    "label": "OCM W-Stack official bootstrap",
+    "label": "OCM W-Stack \u00b7 uploaded TLS",
     "disabled": false,
-    "info": "Fresh version-12 deployment. Configure the OCM node and upload kubeconfig before triggering deploy."
+    "info": "Configure kubeconfig, domain, fullchain, private key and initial access in the OCM node. Deploy resumes its matching installation. No credentials belong in this exported flow."
   },
   {
     "id": "ocm-v12-inject-0",
@@ -87,21 +87,17 @@
     "procedureVersion": 12,
     "instanceName": "ocm-wstack",
     "domainAddress": "",
-    "emailAddress": "",
     "provider": "auto",
     "storageClass": "",
-    "lbAnnotations": "{}",
     "externalDns": false,
     "dnsProvider": "auto",
-    "dnsValues": "{}",
     "tenantId": "demo-tenant",
-    "tenantSubdomain": "",
     "tenantRelease": "demotenant",
     "timeoutSeconds": 1800,
     "id": "ocm-v12-node",
     "type": "OCM-W-Stack",
     "z": "ocm-v12-flow",
-    "name": "Official OCM bootstrap",
+    "name": "OCM W-Stack",
     "x": 430,
     "y": 170,
     "wires": [
@@ -111,7 +107,10 @@
       [
         "ocm-v12-progress"
       ]
-    ]
+    ],
+    "publicDashboards": false,
+    "runtimeImage": "ecofacis/xfsc-orce:2.0.15",
+    "gatewayRouting": "internal"
   },
   {
     "id": "ocm-v12-result",

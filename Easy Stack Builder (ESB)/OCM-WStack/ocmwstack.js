@@ -15,6 +15,7 @@ module.exports=function(RED) {
       const emit=event=>{
         if(closed)return;
         if(event.type==='phase')node.status({fill:'blue',shape:'dot',text:event.phase});
+        if(event.type==='dns-progress')node.status({fill:'blue',shape:'dot',text:event.records?.every(x=>x.ready)?'DNS ready':'Waiting for DNS · '+event.elapsedSeconds+'s'});
         if(event.type==='tls-progress')node.status({fill:'blue',shape:'dot',text:`TLS ${event.elapsedSeconds}s: ${event.message}`.slice(0,100)});
         if(event.type==='routing-progress')node.status({fill:'blue',shape:'dot',text:`Routing ${event.elapsedSeconds}s: ${event.message}`.slice(0,100)});
         send([null,{_msgid:msg._msgid,topic:'ocm-wstack/progress',payload:{timestamp:new Date().toISOString(),action,...event}}]);
@@ -41,5 +42,5 @@ module.exports=function(RED) {
       if(active)active.finally(done);else done();
     });
   }
-  RED.nodes.registerType('OCM-W-Stack',OCMWStack,{credentials:{kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'},editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}}});
+  RED.nodes.registerType('OCM-W-Stack',OCMWStack,{credentials:{tlsCertificate:{type:'password'},tlsPrivateKey:{type:'password'},kubeconfig:{type:'password'},dnsToken:{type:'password'},dnsSecretData:{type:'password'},editorPassword:{type:'password'},uiAdminPassword:{type:'password'},mongoUri:{type:'password'}}});
 };

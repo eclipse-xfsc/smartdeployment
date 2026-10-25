@@ -9,7 +9,7 @@ if [ ! -f "$RELEASE/.ready" ]; then
   mkdir -p "$RELEASE"
   tar -xzf /seed/runtime.tgz -C "$RELEASE"
   cd "$RELEASE"
-  npm install --omit=dev --ignore-scripts --no-audit --no-fund > /tmp/npm-install.log 2>&1 || { echo 'Runtime dependency installation failed; check registry access.' >&2; exit 1; }
+  npm install --omit=dev --ignore-scripts --no-audit --no-fund --fetch-retries=3 --fetch-retry-mintimeout=3000 --fetch-retry-maxtimeout=20000 > /tmp/npm-install.log 2>&1 || { echo 'Runtime dependency installation failed; check registry access.' >&2; exit 1; }
   cp node_modules/vue/dist/vue.runtime.esm-browser.prod.js uibuilder/orce/dist/vue.js
   touch .ready
 fi

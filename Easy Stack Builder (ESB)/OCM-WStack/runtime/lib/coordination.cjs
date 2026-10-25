@@ -13,6 +13,8 @@ class Coordination {
   await this.db.collection('operation_jobs').createIndex({requestId:1},{unique:true});
   await this.db.collection('audit_events').createIndex({expiresAt:1},{expireAfterSeconds:0});
   await this.db.collection('audit_events').createIndex({tenant:1,timestamp:-1});
+  await this.db.collection('verification_events').createIndex({expiresAt:1},{expireAfterSeconds:0});
+  await this.db.collection('verification_events').createIndex({tenant:1,account:1,group:1,credentialId:1,timestamp:-1});
   await this.db.collection('ui_preferences').createIndex({tenant:1,subject:1},{unique:true});
  }
  scope(c){return {tenant:c.tenant,subject:c.subject,account:c.account,group:c.group};}

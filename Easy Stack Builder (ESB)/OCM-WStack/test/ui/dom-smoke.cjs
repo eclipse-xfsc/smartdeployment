@@ -1,17 +1,19 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {JSDOM}=require('jsdom');
+const {environment}=require('./environment.cjs');
 const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
-const vue=fs.readFileSync(path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
+const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
 const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.manage','roles.read','roles.manage','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
 async function boot(t,{failure=false}={}){
- const dom=new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>',{url:'https://wallet.example/orce/',runScripts:'outside-only'}),w=dom.window,calls=[];t.after(()=>dom.window.close());
+ const dom=await environment('https://wallet.example/orce/'),w=dom.window,calls=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=()=>({on(){},disconnect(){}});
  w.auth={setup:async()=>true,token:async()=>'ocm-token',logout(){},login:async()=>{}};w.pcmAuth={configure:async()=>({enabled:true}),login:async()=>{},token:async()=>'pcm-token',disconnect(){}};
- let removed=false,accepted=false;
+ let removed=false,accepted=false,connections={pcm:{enabled:false},trustedHosts:[],redirectUri:'https://wallet.example/orce/pcm/callback'};
  w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').replace(/^\/pcm/,'').split('?')[0];let data={items:[]};
-  if(p==='/auth/me')data={subject:'operator',username:'Mani',permissions};
+  if(p==='/connections'){if(o.method==='PUT')connections={...connections,...JSON.parse(o.body)};data=connections;}
+  else if(p==='/connections/test')data={state:'succeeded'};
+  else if(p==='/auth/me')data={subject:'operator',username:'Mani',permissions};
   else if(p==='/me')data={account:'alice'};
   else if(p==='/preferences')data={locale:'en'};
   else if(p==='/credentials'&&failure)return {ok:false,status:502,json:async()=>({error:{code:'UPSTREAM_REJECTED',upstream:'storage',upstreamStatus:400,reason:'STORAGE_REGION_MISSING'},requestId:'req-1'})};
@@ -44,4 +46,11 @@ test('real Vue DOM: PCM requires a distinct login and forwards only its own bear
 });
 test('real Vue DOM: upstream rejection stays visible and does not become an empty-success state',async t=>{
  const b=await boot(t,{failure:true});assert.match(b.w.document.querySelector('[role="alert"]').textContent,/HTTP 400.*STORAGE_REGION_MISSING/);assert.doesNotMatch(b.text(),/Total: 0/);
+});
+test('OCM Connections page saves PCM and trusted peers without a deployer configuration',async t=>{
+ const b=await boot(t);await b.click('Connections');assert.match(b.text(),/Personal OCM context connection/);
+ const enabled=b.w.document.querySelector('input[type=checkbox]');enabled.checked=true;enabled.dispatchEvent(new b.w.Event('change',{bubbles:true}));await b.settle();
+ for(const [id,value]of Object.entries({'f-pcmIssuer':'https://identity.pcm.example/realms/pcm','f-pcmClient':'wallet','f-pcmTenant':'pcm','f-pcmAccountUrl':'https://pcm.example'})){const field=b.w.document.getElementById(id);assert.ok(field);field.value=value;field.dispatchEvent(new b.w.Event('input',{bubbles:true}));}
+ const trusted=b.w.document.getElementById('a-trustedHosts');trusted.value='peer.example';trusted.dispatchEvent(new b.w.Event('input',{bubbles:true}));await b.click('Test connection');assert.match(b.text(),/OIDC discovery succeeded/);await b.click('Save');
+ const call=b.calls.find(x=>x.url.endsWith('/connections')&&x.o.method==='PUT');assert.ok(call);assert.equal(JSON.parse(call.o.body).pcm.accountUrl,'https://pcm.example');assert.deepEqual(JSON.parse(call.o.body).trustedHosts,['peer.example']);assert.match(b.text(),/Connection settings saved/);
 });

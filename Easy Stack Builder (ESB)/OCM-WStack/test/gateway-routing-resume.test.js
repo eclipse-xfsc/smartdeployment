@@ -5,7 +5,7 @@ const {waitTenantTls}=require('../lib/gateway-routing');
 const repository=require('../upstream-lock.json').repository;
 const host='demo-tenant.example.com';
 const classes={items:[{metadata:{name:'default-csi',annotations:{'storageclass.kubernetes.io/is-default-class':'true'}},provisioner:'unclassified.example/csi'}]};
-const configuration=extra=>resolve(config({procedureVersion:12,domain:'example.com',email:'m@example.com',timeoutSeconds:60,...extra}),{items:[]},classes,{});
+const configuration=extra=>({...resolve(config({procedureVersion:12,domain:'example.com',email:'m@example.com',timeoutSeconds:60,...extra}),{items:[]},classes,{}),tlsMode:'acme',internalGatewayRouting:extra?.gatewayRouting!=='public'});
 
 // Argo, controller and certificate evolve independently; a template change
 // alone does not grant permission to enter tenant-tls.

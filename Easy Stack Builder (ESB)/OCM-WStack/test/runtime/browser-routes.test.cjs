@@ -4,7 +4,7 @@ const {register}=require('../../runtime/lib/browser-routes.cjs');
 function red(){const routes=[];return {routes,settings:{httpNodeRoot:'/',httpNodeMiddleware(req,res,next){res.setHeader('X-Test-Middleware','applied');next();}},httpNode:{get(path,...handlers){routes.push({path,handlers});}},nodes:{registerType(){}}};}
 test('runtime module registers exact callback before flow creation and only once',()=>{
  const RED=red();require('../../runtime/nodes/runtime.js')(RED);register(RED);
- assert.equal(RED.routes.length,1);assert.equal(RED.routes[0].path,'/orce/auth/callback');
+ assert.deepEqual(RED.routes.map(r=>r.path),['/orce/auth/callback','/orce/pcm/callback']);
 });
 test('disabled HTTP node server does not register browser endpoints',()=>{const RED=red();RED.settings.httpNodeRoot=false;register(RED);assert.equal(RED.routes.length,0);});
 test('callback serves fixed HTML over HTTP without redirecting or reflecting login parameters',async t=>{

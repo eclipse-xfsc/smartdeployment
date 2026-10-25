@@ -35,10 +35,30 @@ function overrides(c) {
         messaging:{nats:{url:'nats://nats.infrastructure.svc.cluster.local:4222'}}}}}
   };
 }
-function values(c) {
-  const patch=Object.entries(overrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}\nspec:\n  source:\n    helm:\n      valuesObject: null\n      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`).join('\n')+'\n{{ end }}\n';
-  return {esbTemplatePatch:patch};
+function routingValues(){
+  const common=`spec:
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/template/spec/hostAliases]
+    - group: apps
+      kind: StatefulSet
+      jsonPointers: [/spec/template/spec/hostAliases]
+  syncPolicy:
+    syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]
+`;
+  return {tag:require('../upstream-lock.json').commit,esbTemplatePatch:common};
 }
+function values(c) {
+  const common=routingValues().esbTemplatePatch;
+  const conditional=Object.entries(overrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}
+  source:
+    helm:
+      valuesObject: null
+      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`).join('\n')+'\n{{ end }}\n';
+  return {tag:require('../upstream-lock.json').commit,esbTemplatePatch:common+conditional};
+}
+
 function signingKey() {
   const {privateKey}=crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1'});
   // The service checks this PEM label but calls x509.ParsePKCS8PrivateKey.
@@ -120,4 +140,4 @@ async function inspect(r,root,directory,readYaml,chart) {
   }}
   await walk(root);validateManifests(await readYaml(r,directory,sources),chart);
 }
-module.exports={overrides,values,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET};
+module.exports={routingValues,overrides,values,prerequisites,imagePreflight,inspect,validateManifests,signingKey,validateKey,POLICY,VERIFICATION,POLICY_IMAGE,CASSANDRA_SECRET};

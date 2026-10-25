@@ -18,7 +18,7 @@ for upgrade in [False,True]:
     for external in [False,True]:
         docs=render(root/'charts-runtime',{**base,'mongo':{'embedded':not external,'externalPorts':[27017]}},upgrade)
         route=next(d for d in docs if d['kind']=='HTTPRoute')
-        assert [r['matches'][0]['path']['value'] for r in route['spec']['rules']]==['/orce/identity','/orce']
+        assert [r['matches'][0]['path']['value'] for r in route['spec']['rules']]==['/orce/identity','/orce','/']
         assert route['spec']['parentRefs'][0]['kind']=='ListenerSet'
         runtime=next(d for d in docs if d['kind']=='Deployment' and d['metadata']['name']=='ocm-orce')
         assert runtime['spec']['template']['spec']['hostAliases']==base['hostAliases']

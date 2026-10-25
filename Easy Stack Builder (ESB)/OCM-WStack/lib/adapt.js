@@ -16,8 +16,7 @@ function networkOverrides(c) {
   Object.assign(annotations,c.resolvedLbAnnotations || require('./providers').annotations(c));
   const overrides={'INFRA/network/envoy':{envoyProxy:{service:{annotations}}}};
   if(c.externalDns){
-    const dns={extraArgs:['--txt-prefix=reg-%{record_type}.','--managed-record-types=A','--managed-record-types=AAAA','--managed-record-types=CNAME']};
-    if(c.actualDns==='custom')Object.assign(dns,c.dnsValues);
+    const dns=require('./dns-values').values(c);
     overrides['INFRA/network/external-dns']={'external-dns':dns};
   }
   return overrides;
@@ -28,9 +27,13 @@ function networkValues(c) {
   const esbTemplatePatch=Object.entries(networkOverrides(c)).map(([p,v],i)=>`{{ ${i?'else if':'if'} eq .path.path ${JSON.stringify(p)} }}
 spec:
   source:
-    helm:
+${p==='INFRA/network/external-dns'?`    repoURL: ${require('./dns-values').repository}
+    targetRevision: ${JSON.stringify(lock.helmPins['external-dns'])}
+    path: null
+    chart: external-dns
+`:''}    helm:
       valuesObject: null
-      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(v)))} }}`+(p==='INFRA/network/envoy'?`
+${p==='INFRA/network/external-dns'?'      valueFiles: []\n      parameters: []\n':''}      values: {{ ${JSON.stringify(JSON.stringify(JSON.stringify(p==='INFRA/network/external-dns'?v['external-dns']:v)))} }}`+(p==='INFRA/network/envoy'?`
   ignoreDifferences:
     - group: gateway.envoyproxy.io
       kind: EnvoyProxy
@@ -43,7 +46,7 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - RespectIgnoreDifferences=true`:'' )).join('\n')+'\n{{ end }}\n';
-  return {esbTemplatePatch};
+  return {tag:lock.commit,excludes:['INFRA/network/bind9','INFRA/network/cluster-issuer',...(!c.externalDns?['INFRA/network/external-dns']:[])],esbTemplatePatch};
 }
 async function adapt(dir) {
   // Check every adapted file before changing any. Only reviewed bootstrap source is executed.
@@ -51,6 +54,10 @@ async function adapt(dir) {
     const text = await fs.readFile(path.join(dir,name));
     if (crypto.createHash('sha256').update(text).digest('hex') !== sha) fail('UPSTREAM_CONTRACT', `Upstream contract differs: ${name}.`);
   }
+  const chartFile=path.join(dir,'INFRA/observability/opentelemtry/Chart.yaml');
+  let chart=await fs.readFile(chartFile,'utf8');
+  chart=chart.replace(/(- name: ([\w-]+)[\s\S]*?\n    version:) [^\n]+/g,(match,prefix,name)=>{if(!lock.helmPins[name])fail('UPSTREAM_CONTRACT','Unreviewed observability dependency '+name);return prefix+' '+JSON.stringify(lock.helmPins[name]);});
+  await fs.writeFile(chartFile,chart);
   // The wrapper's optional monitor is separate from the enabled subchart monitor.
   // Supply its missing default rather than disabling Kyverno's native monitoring.
   await fs.appendFile(path.join(dir,'INFRA/security/kyverno/values.yaml'), '\n\nserviceMonitor:\n  enabled: false\n');
@@ -66,6 +73,8 @@ async function adapt(dir) {
   if(dataStart < 0 || dataEnd < 0)fail('UPSTREAM_CONTRACT','Grafana datasource values changed.');
   values = values.slice(0,dataStart) + '    additionalDataSources: []\n' + values.slice(dataEnd);
   await fs.writeFile(path.join(dir,tempo),values);
+  const datasources='INFRA/observability/opentelemtry/templates/datasources.yaml';
+  await fs.writeFile(path.join(dir,datasources),once(await fs.readFile(path.join(dir,datasources),'utf8'),'-jaeger-query.','-jaeger.',datasources));
   const telemetry = 'INFRA/observability/opentelemtry/crds/telemetryconfig.yaml';
   let crd = await fs.readFile(path.join(dir,telemetry),'utf8');
   crd = once(crd, '  metrics:\n      enabled: true\n', '', telemetry);
@@ -73,6 +82,7 @@ async function adapt(dir) {
   const project = 'XFSC/Applicationsets/chart/templates/approject.yaml';
   let projectText = await fs.readFile(path.join(dir,project),'utf8');
   projectText = once(projectText, '{{- if not $existingProject }}', '{{- if or (not $existingProject) (and (eq (dig "metadata" "annotations" "meta.helm.sh/release-name" "" $existingProject) $.Release.Name) (eq (dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" $existingProject) $.Release.Namespace)) }}', project);
+  projectText=once(projectText,'    - https://github.com/eclipse-xfsc/deployment.git','    - https://github.com/eclipse-xfsc/deployment.git\n    - '+require('./dns-values').repository,project);
   await fs.writeFile(path.join(dir,project),projectText);
   const provision = 'INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml';
   let provisionText = await fs.readFile(path.join(dir,provision),'utf8');
@@ -90,6 +100,7 @@ async function adapt(dir) {
     // Rebuilding them here would select new versions after cluster writes begin.
     text = text.replace(/^helm (?:repo add|dependency build) .+$/gm, ': # Dependencies prepared by ESB chart preflight');
     text = text.replace(/^STORAGE_CLASS=.+$/m, 'STORAGE_CLASS="${ESB_STORAGE_CLASS:?ESB selected StorageClass is required}"');
+    text = text.replace(/ \|\| -z "\$EMAIL"/g, '');
     text = text.replace(/^helm install /gm, 'helm upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" ');
     // Kubernetes operators need running admission endpoints before downstream charts.
     const waits = {
@@ -106,7 +117,10 @@ async function adapt(dir) {
       const nameMatch = line.match(/-n ([\w-]+) ([\w-]+) /);
       if (!nameMatch) fail('UPSTREAM_CONTRACT','Unrecognized official Helm install.');
       let command = line;
-      if (nameMatch[2] === 'network') command += ' -f "$ESB_NETWORK_VALUES"';
+      if(nameMatch[2]==='observability')command+=' -f "$ESB_OBSERVABILITY_VALUES"';
+      if (['storage','network','core','ocm-wstack'].includes(nameMatch[2])) command += ' --set-string tag='+lock.commit;
+      if (nameMatch[2] === 'network') command = command.replace('"${NETWORK_ARGS[@]}"','')+' -f "$ESB_NETWORK_VALUES"';
+      if (nameMatch[2] === 'core') command += ' -f "$ESB_CORE_VALUES"';
       if (nameMatch[2] === 'ocm-wstack') command += ' -f "$ESB_OCM_VALUES"';
       command = command.replace(/^helm /, `node "\${ESB_HELM_UPGRADE:?ESB Helm runner is required}" ${nameMatch[1]} ${nameMatch[2]} `);
       const prerequisites=nameMatch[2]==='ocm-wstack'?'node "${ESB_OCM_PREREQUISITES:?ESB OCM prerequisites are required}"\n':'';

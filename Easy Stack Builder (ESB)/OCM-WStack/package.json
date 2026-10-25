@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "12.1.2",
+  "version": "12.2.0",
   "description": "ESB wrapper for the official eclipse-xfsc/deployment bootstrap procedure",
   "license": "Apache-2.0",
   "engines": {
@@ -27,14 +27,17 @@
     "runtime",
     "charts-runtime",
     "charts-gateway",
-    "docs"
+    "docs",
+    "charts-dashboards",
+    "SOURCE-MANIFEST.sha256"
   ],
   "scripts": {
     "test": "node --test test/*.test.js test/runtime/*.test.cjs",
     "test:helm": "python3 test/render.py",
     "check": "node scripts/cli.js check",
     "pack:check": "npm pack --dry-run --ignore-scripts",
-    "test:ui": "node --test test/ui/dom-smoke.cjs"
+    "test:ui": "node --test test/ui/dom-smoke.cjs",
+    "build:release": "python3 scripts/build-release.py"
   },
   "keywords": [
     "node-red",
@@ -44,8 +47,8 @@
     "kubernetes"
   ],
   "devDependencies": {
-    "jsdom": "26.1.0",
-    "vue": "3.5.13"
+    "vue": "3.5.13",
+    "linkedom": "0.18.12"
   },
   "dependencies": {
     "bcryptjs": "2.4.3"

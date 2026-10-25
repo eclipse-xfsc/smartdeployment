@@ -1,4 +1,5 @@
 // Personal OCM context tokens stay in memory, separate from the organizational login.
+import {token as organizationalToken} from './auth.js';
 let config,accessToken,refreshToken,expires=0,refreshing;
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 export async function configure(){
@@ -8,9 +9,9 @@ export async function configure(){
 export function connected(){return Boolean(accessToken);}
 export function disconnect(){accessToken=null;refreshToken=null;expires=0;}
 async function exchange(data){
- const r=await fetch(config.issuer+'/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:config.clientId,...data}),cache:'no-store'});
+ const r=await fetch('/orce/ui-api/v1/pcm/token',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+await organizationalToken()},body:JSON.stringify(data),cache:'no-store'});
  if(!r.ok){disconnect();throw Error('PCM_AUTHENTICATION_REQUIRED');}
- const t=await r.json();accessToken=t.access_token;refreshToken=t.refresh_token;expires=Date.now()+t.expires_in*1000;
+ const t=(await r.json()).data;accessToken=t.access_token;refreshToken=t.refresh_token||refreshToken;expires=Date.now()+t.expires_in*1000;
 }
 export async function login(){
  // Open synchronously in the click handler, before awaiting network/crypto.
@@ -26,12 +27,12 @@ export async function login(){
     if(e.origin!==location.origin||e.source!==popup||e.data?.type!=='pcm:callback')return;
     clear();popup.close();
     if(e.data.state!==state||e.data.error||typeof e.data.code!=='string')return reject(Error('PCM_AUTHENTICATION_REQUIRED'));
-    exchange({grant_type:'authorization_code',code:e.data.code,code_verifier:verifier,redirect_uri:config.redirectUri}).then(resolve,reject);
+    exchange({grant_type:'authorization_code',code:e.data.code,code_verifier:verifier}).then(resolve,reject);
    };
    const timer=setTimeout(()=>{clear();popup.close();reject(Error('PCM_AUTHENTICATION_REQUIRED'));},300000);
    const closed=setInterval(()=>{if(popup.closed){clear();reject(Error('PCM_SIGN_IN_CANCELLED'));}},500);
    window.addEventListener('message',receive);
-   popup.location=config.issuer+'/protocol/openid-connect/auth?'+new URLSearchParams({client_id:config.clientId,redirect_uri:config.redirectUri,response_type:'code',scope:'openid profile email',state,code_challenge:challenge,code_challenge_method:'S256'});
+   popup.location=(config.authorizationEndpoint||config.issuer+'/protocol/openid-connect/auth')+'?'+new URLSearchParams({client_id:config.clientId,redirect_uri:config.redirectUri,response_type:'code',scope:'openid profile email',state,code_challenge:challenge,code_challenge_method:'S256'});
   });
  }catch(e){popup.close();throw e;}
 }

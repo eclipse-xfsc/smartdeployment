@@ -6,6 +6,7 @@ const {networkOverrides, networkValues} = require('./adapt');
 const {fail} = require('./config');
 const {redisMirror}=require('./argo');
 const ocm=require('./ocm');
+const lock=require('../upstream-lock.json');
 
 const SETS = ['storage','network','core','ocm-wstack'];
 const SET_FILES = ['03_storage','04_network','05_core','06_ocm_wstack'];
@@ -39,7 +40,7 @@ async function plan(r, source, argoSource, c, directory) {
   const definitions={};
   for(let i=0;i<SETS.length;i++)definitions[SETS[i]]=await fs.readFile(path.join(source,`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`),'utf8');
   const sets=await readYaml(r,directory,definitions);
-  const jobs=BOOTSTRAP.map(([release,chart,namespace])=>({release,chart,namespace,root:source,files:[],values:{},parameters:[]}));
+  const jobs=BOOTSTRAP.map(([release,chart,namespace])=>({release,chart,namespace,root:source,files:[],values:release==='observability'?require('./observability').values(c):{},parameters:[]}));
   for(const target of ['infrastructure','ocm-wstack'])jobs.push({release:`${target}-namespace`,chart:'INFRA/app-management/app-namespace',namespace:'security',root:source,
     files:[`INFRA/app-management/app-namespace-values/${target==='infrastructure'?'infra':'ocm-wstack'}-values.yaml`],values:{},parameters:[]});
   // A reserved documentation IP exercises hostAliases rendering only. The real
@@ -50,8 +51,10 @@ async function plan(r, source, argoSource, c, directory) {
     if(set.tag!=='main'||set.matrix?.enabled||!set.path?.endsWith('/*')||set.path.slice(0,-2).includes('*'))fail('CHART_PLAN',`Unsupported upstream ApplicationSet generator: ${name}.`);
     const excluded=new Set(set.excludes||[]);
     if(name==='network'&&!c.externalDns)excluded.add('INFRA/network/external-dns');
-    const values={storageClass:c.actualStorageClass};
+    if(name==='network')excluded.add('INFRA/network/cluster-issuer');
+    const values={storageClass:c.actualStorageClass,tag:lock.commit};
     if(name==='network')Object.assign(values,{profile:c.profile,domain:c.domain,email:c.email,excludes:[...excluded]},networkValues(c));
+    if(name==='core')Object.assign(values,ocm.routingValues());
     if(name==='ocm-wstack')Object.assign(values,ocm.values(c));
     jobs.push({release:name,chart:'XFSC/Applicationsets/chart',namespace:set.namespace,root:source,files:[`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`],values,parameters:[]});
     const parent=set.path.slice(0,-2);
@@ -68,21 +71,20 @@ async function plan(r, source, argoSource, c, directory) {
         const profile=`${chart}/profiles/${c.profile}.yaml`;
         if(await exists(path.join(argoSource,profile)))files.push(profile);
       }
-      jobs.push({release,chart,namespace:set.namespace,root:argoSource,files,values:chart==='INFRA/network/cert-manager'&&c.internalGatewayRouting?{'cert-manager':{hostAliases:[{ip:'192.0.2.1',hostnames:[c.tenantHost]}]}}:overrides[chart]||{},parameters,applicationSet:name});
+      jobs.push({release,chart,namespace:set.namespace,root:argoSource,files,values:overrides[chart]||{},parameters,applicationSet:name});
     }
   }
-  jobs.push({release:'esb-ocm-gateway',chart:'charts-gateway',namespace:'security',root:path.join(__dirname,'..'),files:[],parameters:[],values:{externalTrafficPolicy:c.externalTrafficPolicy}});
+  jobs.push({release:'esb-ocm-gateway',chart:'charts-gateway',namespace:'security',root:path.join(__dirname,'..'),files:[],parameters:[],values:{externalTrafficPolicy:c.externalTrafficPolicy,tenantHost:c.tenantHost,gatewayClusterIP:'192.0.2.1'}});
+  jobs.push({release:'esb-dashboard-routes',chart:'charts-dashboards',namespace:'infrastructure',root:path.join(__dirname,'..'),files:[],parameters:[],values:{tlsSecret:require('./tls').secretName(c),services:c.publicDashboards?[{name:'argocd',namespace:'argocd',host:'argocd.'+c.domain,service:'argocd-server',port:80},{name:'grafana',namespace:'observability',host:'grafana.'+c.domain,service:'observability-grafana',port:80}]:[]}});
   if(c.runtimeEnabled)jobs.push({release:'ocm-orce-ui',chart:'charts-runtime',namespace:'ocm-wstack',root:path.join(__dirname,'..'),files:[],parameters:[],values:{host:c.tenantHost,gatewayPorts:[80,443,10080,10443],hostAliases:c.internalGatewayRouting?[{ip:'192.0.2.1',hostnames:[c.tenantHost]}]:[],listenerSetName:c.tenantRelease+'-xfsc-tenant-gateway',image:c.runtimeImage,storage:{class:c.actualStorageClass,orceSize:c.orceStorageSize,mongoSize:c.mongoStorageSize},mongo:{embedded:!c.useExternalMongo,externalPorts:[27017]},runtimeConfig:require('./runtime-install').runtimeConfig(c)}});
-  jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:{tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}});
+  jobs.push({release:c.tenantRelease,chart:'XFSC/tenant/chart',namespace:'ocm-wstack',root:source,files:['XFSC/tenant/values/tenant-ocm-wstack-values.yaml'],parameters:[],values:{certificate:{enabled:false,secretName:require('./tls').secretName(c)},tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}});
   return jobs;
 }
 
 async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   r.emit({type:'phase',phase:'chart-preflight'});
   if(!argoSource) {
-    await r.run('git',['-C',source,'fetch','--depth=1','origin','main'],{timeout:300000});
-    argoRevision=(await r.run('git',['-C',source,'rev-parse','FETCH_HEAD'])).stdout.trim();
-    if(!/^[a-f0-9]{40}$/.test(argoRevision))fail('CHART_PLAN','Could not resolve upstream main.');
+    argoRevision=lock.commit;
     argoSource=path.join(directory,'argo-source');
     await r.run('git',['-C',source,'worktree','add','--detach',argoSource,argoRevision]);
   }
@@ -90,6 +92,14 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   const envoyDefaults=await readYaml(r,validationDir,{envoy:await fs.readFile(path.join(argoSource,'INFRA/network/envoy/values.yaml'),'utf8')});
   c.upstreamAnnotationKeys=Object.keys(envoyDefaults.envoy.envoyProxy?.service?.annotations||{});
   const jobs=await plan(r,source,argoSource,c,validationDir);
+  if(c.externalDns){
+    const dns=require('./dns-values'),chartRoot=path.join(validationDir,'frozen-charts');
+    await fs.mkdir(chartRoot,{recursive:true});
+    await r.run('helm',['pull','external-dns','--repo',dns.repository,'--version',lock.helmPins['external-dns'],'--untar','--untardir',chartRoot],{timeout:180000});
+    const job=jobs.find(j=>j.chart==='INFRA/network/external-dns');
+    if(!job)fail('CHART_PLAN','ExternalDNS Application is missing.');
+    Object.assign(job,{root:chartRoot,chart:'external-dns',files:[],parameters:[],values:dns.values(c)});
+  }
   const documents={};
   for(const job of jobs)documents[path.join(job.root,job.chart)]=await fs.readFile(path.join(job.root,job.chart,'Chart.yaml'),'utf8');
   const charts=await readYaml(r,validationDir,documents);
@@ -134,10 +144,8 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
   }
   if(errors.length)fail('CHART_PREFLIGHT',`${errors.length} chart(s) failed before installation; no cluster resources were changed. ${errors.map(x=>`${x.chart}: ${x.message}`).join('\n')}`);
   await ocm.imagePreflight(r,validationDir);
-  const current=(await r.run('git',['-C',source,'ls-remote','origin','refs/heads/main'],{timeout:60000})).stdout.trim().split(/\s+/)[0];
-  if(current!==argoRevision)fail('UPSTREAM_MOVED','Upstream main changed during chart validation. Retry to validate its new revision. No installation was started.');
   const argoManifest=path.join(validationDir,'argo-install.yaml');
-  await r.run('curl',['--fail','--silent','--show-error','--location','--max-time','120','--output',argoManifest,'https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml'],{timeout:130000});
+  await r.run('curl',['--fail','--silent','--show-error','--location','--max-time','120','--output',argoManifest,`https://raw.githubusercontent.com/argoproj/argo-cd/${lock.argoCdCommit}/manifests/install.yaml`],{timeout:130000});
   const originalManifest=await fs.readFile(argoManifest,'utf8');
   const manifest=redisMirror(originalManifest);
   await fs.writeFile(argoManifest,manifest,{mode:0o600});

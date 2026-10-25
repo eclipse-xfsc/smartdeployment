@@ -50,7 +50,7 @@ async function controller(r){
  return list.items[0];
 }
 async function internalValues(r,c,values){
- if(!c.internalGatewayRouting)return values;
+ if(c.tlsMode==='uploaded'||!c.internalGatewayRouting)return values;
  const service=await publicService(r),deployment=await controller(r);
  const aliases=aliasesFor(deployment.spec.template.spec.hostAliases,c.tenantHost,service.spec.clusterIP);
  return {...values,esbTemplatePatch:routingTemplate(values.esbTemplatePatch,aliases)};
@@ -70,7 +70,7 @@ async function routingState(r,c,ip){
  return {ready,templateMapped,rolledOut,pods:podStates,message};
 }
 async function internalRouting(r,c,options){
- if(!c.internalGatewayRouting)return {enabled:false};
+ if(c.tlsMode==='uploaded'||!c.internalGatewayRouting)return {enabled:false};
  const timing={...defaults,...options};
  const service=await publicService(r),deployment=await controller(r);
  const ip=service.spec.clusterIP,aliases=aliasesFor(deployment.spec.template.spec.hostAliases,c.tenantHost,ip);
@@ -105,31 +105,33 @@ async function waitTenantTls(r,c,options){
  r.emit({type:'phase',phase:'tenant-tls',hostname:c.tenantHost,routingMode:c.internalGatewayRouting?'internal':'public'});
  while(true){
   const [certificate,listener,service,challenges]=await Promise.all([
-   r.json('kubectl',['-n','ocm-wstack','get','certificate',name,'--ignore-not-found','-o','json']),
+   r.json('kubectl',['-n','ocm-wstack','get',c.tlsMode==='uploaded'?'secret':'certificate',c.tlsMode==='uploaded'?require('./tls').secretName(c):name,'--ignore-not-found','-o','json']),
    r.json('kubectl',['-n','ocm-wstack','get','listenerset',name,'--ignore-not-found','-o','json']),
    publicService(r),
-   r.json('kubectl',['-n','ocm-wstack','get','challenges.acme.cert-manager.io','-o','json'])
+   c.tlsMode==='uploaded'?Promise.resolve({items:[]}):r.json('kubectl',['-n','ocm-wstack','get','challenges.acme.cert-manager.io','-o','json'])
   ]);
-  if(c.internalGatewayRouting&&!(await routingState(r,c,service.spec.clusterIP)).ready){
+  if(c.tlsMode!=='uploaded'&&c.internalGatewayRouting&&!(await routingState(r,c,service.spec.clusterIP)).ready){
    r.emit({type:'routing-drift',hostname:c.tenantHost,clusterIP:service.spec.clusterIP,message:'The controller mapping or gateway Service changed; reconciling before continuing TLS.'});
    if(timing.now()>=deadline)fail('GATEWAY_ROUTING_TIMEOUT','The controller mapping or gateway Service kept changing during the TLS wait. Resume deploy to reconcile the current route.');
    await internalRouting(r,{...c,timeoutSeconds:Math.max(0,(deadline-timing.now())/1000)},timing);
    continue;
   }
   const ready=o=>o?.status?.conditions?.some(x=>x.type==='Ready'&&x.status==='True'&&(x.observedGeneration===undefined||x.observedGeneration===o.metadata.generation));
-  const programmed=listener?.status?.conditions?.some(x=>x.type==='Programmed'&&x.status==='True'&&x.observedGeneration===listener.metadata.generation);
-  const certificateReady=Boolean(ready(certificate)),listenerProgrammed=Boolean(programmed),httpsPortReady=service.spec.ports.some(p=>p.port===443);
+  const referencesSecret=c.tlsMode!=='uploaded'||listener?.spec?.listeners?.some(l=>l.hostname===c.tenantHost&&l.tls?.certificateRefs?.some(x=>x.name===require('./tls').secretName(c)));
+  const programmed=referencesSecret&&listener?.status?.conditions?.some(x=>x.type==='Programmed'&&x.status==='True'&&x.observedGeneration===listener.metadata.generation);
+  const certificateReady=c.tlsMode==='uploaded'?require('./tls').ready(certificate,c.tenantHost):Boolean(ready(certificate)),listenerProgrammed=Boolean(programmed),httpsPortReady=service.spec.ports.some(p=>p.port===443);
   const matching=(challenges?.items||[]).filter(x=>x.spec?.dnsName===c.tenantHost&&!x.metadata?.deletionTimestamp).map(x=>({name:x.metadata?.name,state:x.status?.state||'pending',reason:x.status?.reason||''}));
+  const listenerErrors=(listener?.status?.listeners||[]).flatMap(l=>(l.conditions||[]).filter(x=>x.status==='False').map(x=>x.message)).filter(Boolean).join('; ');
   const reasons=matching.map(x=>x.reason).filter(Boolean).join('; ');
-  const message=certificateReady&&listenerProgrammed&&httpsPortReady?'Tenant HTTPS is ready':!certificateReady?(reasons||certificate?.status?.conditions?.find(x=>x.type==='Ready')?.message||'Waiting for tenant certificate'):!listenerProgrammed?'Waiting for the tenant ListenerSet to be programmed':'Waiting for Envoy Service port 443';
-  const state={certificateReady,listenerProgrammed,httpsPortReady,challenges:matching,gatewayService:service.metadata.name,clusterIP:service.spec.clusterIP,gatewayAddresses:(service.status?.loadBalancer?.ingress||[]).map(x=>x.ip||x.hostname),message};
+  const message=certificateReady&&listenerProgrammed&&httpsPortReady?'Tenant HTTPS is ready':!certificateReady?(reasons||certificate?.status?.conditions?.find(x=>x.type==='Ready')?.message||(c.tlsMode==='uploaded'?'Uploaded TLS Secret is missing, expired or does not match the hostname/key':'Waiting for tenant certificate')):!listenerProgrammed?(listenerErrors||'Waiting for the tenant ListenerSet to be programmed'):'Waiting for Envoy Service port 443';
+  const state={certificateSource:c.tlsMode==='uploaded'?'uploaded':'acme',certificateReady,listenerProgrammed,httpsPortReady,challenges:matching,gatewayService:service.metadata.name,clusterIP:service.spec.clusterIP,gatewayAddresses:(service.status?.loadBalancer?.ingress||[]).map(x=>x.ip||x.hostname),message};
   const key=JSON.stringify(state);
   if(key!==lastState||timing.now()-lastProgress>=timing.progressMs){
    r.emit({type:'tls-progress',phase:'tenant-tls',hostname:c.tenantHost,routingMode:c.internalGatewayRouting?'internal':'public',elapsedSeconds:Math.floor((timing.now()-started)/1000),...state});
    lastState=key;lastProgress=timing.now();
   }
   if(certificateReady&&listenerProgrammed&&httpsPortReady)return;
-  if(timing.now()>=deadline)fail('TENANT_TLS_NOT_READY','Tenant HTTPS is not ready: Certificate Ready='+certificateReady+', ListenerSet Programmed='+listenerProgrammed+', Service port 443='+httpsPortReady+'. '+message+' Current public gateway address: '+(state.gatewayAddresses.join(', ')||'pending')+'. Check public DNS A/AAAA records and port 80 against this gateway. UI installation was not started.');
+  if(timing.now()>=deadline)fail('TENANT_TLS_NOT_READY','Tenant HTTPS is not ready: Certificate Ready='+certificateReady+', ListenerSet Programmed='+listenerProgrammed+', Service port 443='+httpsPortReady+'. '+message+' Current public gateway address: '+(state.gatewayAddresses.join(', ')||'pending')+(c.tlsMode==='uploaded'?'. Inspect the uploaded TLS Secret and ListenerSet conditions.':'. Check DNS and HTTP-01 reachability.')+' UI installation was not started.');
   await timing.sleep(Math.min(timing.pollMs,deadline-timing.now()),undefined,{signal:r.signal});
  }
 }

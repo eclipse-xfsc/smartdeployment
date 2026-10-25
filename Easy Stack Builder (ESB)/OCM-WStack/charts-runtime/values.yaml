@@ -1,7 +1,4 @@
 host: ""
-tlsSecret: xfsc-wildcard
-ingressClass: nginx-orce-cluster
-controllerNamespace: ingress-nginx
 image: ecofacis/xfsc-orce:2.0.15
 secretChecksum: ""
 storage:

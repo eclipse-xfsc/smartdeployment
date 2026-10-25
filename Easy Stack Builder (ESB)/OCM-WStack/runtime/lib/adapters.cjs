@@ -6,6 +6,7 @@ const {fail,object,string,id}=require('./errors.cjs');
 const {decode,summarize,overall,statusRef}=require('./credentials.cjs');
 class Adapters {
  constructor(config,http){this.c=config;this.http=http;}
+ async statusConfiguration(){return this.c;}
  headers(c){return {authorization:'Bearer '+c.token,'x-tenantid':c.tenant,'x-groupid':c.group,'x-group':this.c.cryptoGroup,'x-namespace':this.c.cryptoNamespace,'x-origin':this.c.publicOrigin};}
  call(c,name,path,method='GET',body){return this.http.call(name,path,{method,body,headers:this.headers(c),timeout:method==='GET'?5000:15000,responseType:name==='didcomm'&&path==='/admin/invitation'?'text':'json'});}
  storagePath(c){return '/v1/tenants/'+id(c.tenant)+'/storage/'+id(c.account)+'/credentials';}
@@ -33,8 +34,8 @@ class Adapters {
   if(q.type)items=items.filter(x=>x.types.includes(q.type));
   // Check status lists managed by this OCM instance. A list read is shared
   // across credentials; remote/unsupported status remains explicitly unchecked.
-  const statusCache=new Map(),pending=[];
-  for(const item of items){if(item.status.state==='expired')continue;try{const ref=statusRef(records[item.id],this.c);pending.push({item,ref});}catch{}}
+  const statusCache=new Map(),pending=[],statusConfig=await this.statusConfiguration(c);
+  for(const item of items){if(item.status.state==='expired')continue;try{const ref=statusRef(records[item.id],statusConfig);pending.push({item,ref});}catch{}}
   const worker=async()=>{while(pending.length){const {item,ref}=pending.shift();if(!statusCache.has(ref.listId)&&statusCache.size>=16)continue;try{item.status={state:await this.readStatus(c,ref,statusCache),checkedAt:new Date().toISOString()};}catch{}}};
   await Promise.all(Array.from({length:Math.min(4,pending.length)},worker));
   const sort=q.sort||'id';if(!['id','issuedAt','expiresAt'].includes(sort))fail(400,'VALIDATION_ERROR');
@@ -46,8 +47,17 @@ class Adapters {
   return {items:items.slice(offset,offset+pageSize),counts,total:items.length,nextCursor:offset+pageSize<items.length?Buffer.from(String(offset+pageSize)).toString('base64url'):null,refreshedAt:new Date().toISOString()};
  }
  async raw(c,key){const all=await this.records(c);if(!Object.hasOwn(all,key))fail(404,'RESOURCE_NOT_FOUND');return all[key];}
- async detail(c,key){const raw=await this.raw(c,key);let revocable=true,revocationReason=null;try{statusRef(raw,this.c);}catch(e){revocable=false;revocationReason=e.code;}return {...summarize(key,raw),claims:decode(raw).claims,raw,capabilities:{verify:true,delete:true,revoke:revocable,revocationReason},provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).subject,verifier:null,source:'credential-declarations',verified:false}};}
- async provenance(c,key){return require('./provenance.cjs').graph(await this.records(c),key);}
+ async detail(c,key){const raw=await this.raw(c,key);let revocable=true,revocationReason=null;try{statusRef(raw,await this.statusConfiguration(c));}catch(e){revocable=false;revocationReason=e.code;}return {...summarize(key,raw),claims:decode(raw).claims,raw,capabilities:{verify:true,delete:true,revoke:revocable,revocationReason},provenance:{issuer:summarize(key,raw).issuer,holder:summarize(key,raw).subject,verifier:null,source:'credential-declarations',verified:false}};}
+ async provenance(c,key){
+  const records=await this.records(c),graph=require('./provenance.cjs').graph(records,key);
+  const selected=graph.nodes.filter(n=>n.kind==='credential').map(n=>n.credentialId);
+  // The upstream chain handler asserts JSON objects; JWT strings cannot use it.
+  if(selected.every(k=>records[k]&&typeof records[k]==='object'&&!Array.isArray(records[k]))){
+   try{graph.native={state:'resolved',source:'storage-chain',result:(await this.chain(c,{root:key,chainName:'credentialChain',chain:selected.filter(k=>k!==key).map(item=>({item}))})).result};}
+   catch(e){graph.native={state:'unavailable',code:e.code,reason:e.reason||null};}
+  }else graph.native={state:'unsupported-format',source:'storage-chain'};
+  return graph;
+ }
 
  async importCredential(c,body,requestId){
   object(body,['credential']);const raw=body.credential;decode(raw);
@@ -76,11 +86,11 @@ class Adapters {
    if(typeof r?.valid!=='boolean')fail(502,'UPSTREAM_PROTOCOL_ERROR');cryptographic=r.valid?'valid':'invalid';
    if(r.valid&&r.disclosedCredential&&typeof r.disclosedCredential==='object')disclosedClaims=r.disclosedCredential;
   }catch(e){if(e.status<500)throw e;}
-  if(status==='unknown'){try{status=await this.readStatus(c,statusRef(raw,this.c));}catch{/* Missing or remote status is truthfully indeterminate. */}}
+  if(status==='unknown'){try{status=await this.readStatus(c,statusRef(raw,await this.statusConfiguration(c)));}catch{/* Missing or remote status is truthfully indeterminate. */}}
   return {credentialId:key,format:parsed.format,cryptographic:{state:cryptographic},status:{state:status,checkedAt:new Date().toISOString()},...(disclosedClaims?{disclosedClaims}:{}),overall:overall(cryptographic,status,Boolean(summary.expiresAt&&Date.parse(summary.expiresAt)<Date.now()))};
  }
  async revoke(c,key){
-  const ref=statusRef(await this.raw(c,key),this.c);
+  const ref=statusRef(await this.raw(c,key),await this.statusConfiguration(c));
   let state=await this.readStatus(c,ref);
   if(state!=='revoked'){
    await this.call(c,'status','/status/'+id(c.tenant)+'/'+id(ref.listId)+'/revoke/'+ref.index,'POST');
@@ -90,7 +100,7 @@ class Adapters {
   const verification=await this.verify(c,key);
   return {state:'succeeded',credentialId:key,status:'revoked',verification};
  }
- async revoked(c,key){const ref=statusRef(await this.raw(c,key),this.c);return (await this.readStatus(c,ref))==='revoked'?{state:'succeeded',credentialId:key,status:'revoked'}:null;}
+ async revoked(c,key){const ref=statusRef(await this.raw(c,key),await this.statusConfiguration(c));return (await this.readStatus(c,ref))==='revoked'?{state:'succeeded',credentialId:key,status:'revoked'}:null;}
  async chain(c,body){object(body,['root','chain','chainName']);string(body.root,1,512);string(body.chainName,1,128);if(!Array.isArray(body.chain)||body.chain.length>32)fail(400,'VALIDATION_ERROR');return {source:'declared_chain',result:await this.call(c,'storage',this.storagePath(c)+'/chain','POST',body)};}
  offerPath(c,action){return '/v1/tenants/'+id(c.tenant)+'/offering/'+action+'/'+id(c.group);}
  async offers(c){const r=await this.call(c,'retrieval',this.offerPath(c,'list'));if(r===null)return {items:[]};if(!Array.isArray(r))fail(502,'UPSTREAM_PROTOCOL_ERROR');return {items:r.map(o=>({requestId:o.requestId,issuer:o.metadata?.credential_issuer||o.offering?.credential_issuer,credentialConfigurationIds:o.offering?.credential_configuration_ids||o.offering?.credentials||[],state:o.status||'pending',receivedAt:o.timestamp}))};}

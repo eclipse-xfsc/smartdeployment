@@ -1,103 +1,97 @@
-# OCM W-Stack ESB 12.1.2
+# OCM W-Stack ESB 12.2.0
 
-12.1.2 corrects the provider-dependent skip in 12.1.1's automatic tenant routing. Automatic mode always maps the tenant hostname to the dynamically discovered internal Envoy Service for cert-manager and the managed ORCE UI. Before entering tenant-tls, the deployer requires a complete controller rollout and ready controller pods with that mapping. It preserves the public hostname, TLS verification, existing pending issuance, provider annotations and OCM-CR UI/runtime.
+This package implements the approved uploaded-certificate deployment flow and the OCM-CR OCM W-Stack UI, preserving the 11.1.0 OCM context design. It is a release candidate for cluster acceptance, not a claim that the complete credential lifecycle has passed. The inspected native Storage source has a route/middleware defect; see **Native acceptance limitation** below.
 
-## Upgrade and resume the current deployment
+## Install and configure
 
-Install the TGZ in the existing ORCE instance's Node-RED user directory, then restart ORCE so the previous operation stops and the updated code loads:
+Install `orce-esb-ocmwstack-12.2.0.tgz` in your deployer ORCE/Node-RED user directory, then restart that runtime. The deployer may run outside the target cluster; it uses the uploaded kubeconfig explicitly. It requires Node.js 18.17+, Bash, Git, Helm 3 or 4, kubectl, jq, curl and base64. The target cluster must already provide a working public LoadBalancer and a default persistent StorageClass. Bootstrap is for a fresh cluster or an installation with this deployer's matching ownership marker.
 
-```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.1.2.tgz
+```sh
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.2.0.tgz
 ```
 
-Keep the existing node, uploaded kubeconfig, instance, provider, tenant, domain, StorageClass and credentials. Leave Tenant routing at Automatic and traffic policy at Cluster. A missing routing field also defaults to Automatic. Changing the provider or other native ownership settings is unnecessary. Keep the existing encrypted editor/UI administrator credentials; initial credentials seed new components only.
+Import `examples/node-red-flow.json`, or connect an Inject node to **OCM-W-Stack** and its two outputs to Debug nodes. Configure these three tabs once:
 
-Run the existing node with `msg.action = "deploy"`. This resumes its matching version-12 installation, persists the internal route in the network Helm/ApplicationSet configuration, waits for running controller pods, completes the existing certificate request, and installs or reconciles the retained UI. A separate recovery script or a cluster reset is not required. Removing/redeploying the node cancels local processes and retains cluster resources.
+1. **Cluster:** upload a self-contained cluster-admin kubeconfig. Choose whether the deployer manages DNS and whether Argo CD/Grafana should be public. If DNS automation is enabled, provide credentials for the account hosting the domain.
+2. **Domain & certificate:** base domain (`leanea.com` or `*.leanea.com`), tenant name (`demo-tenant`), public-trusted PEM fullchain certificate and matching unencrypted PEM private key. A `*.leanea.com` certificate covers `demo-tenant.leanea.com`, `argocd.leanea.com` and `grafana.leanea.com`.
+3. **Access:** initial OCM context administrator and editor administrator passwords, each at least 12 characters. These are separate accounts. Their stored credentials and existing roles are retained on reruns. The OCM context requires a password change at first login.
 
-The second output reports routing-progress and tls-progress at state changes and approximately every 12 seconds during an unchanged wait. It includes elapsed time, controller mapping/readiness, current Service ClusterIP, public gateway addresses, certificate/listener/HTTPS-port status and the ACME reason. The node status also updates. A changed Service address or lost controller mapping is reconciled during the TLS wait. The configured timeout still bounds each phase; the error includes the current blocker.
+Provider, StorageClass, image, PVC sizes and timeout overrides are under Advanced. ORCE defaults to `ecofacis/xfsc-orce:2.0.15`; `2.0.13` is selectable. There are no PCM, ACME, internal-routing, service endpoint or annotation JSON fields in the normal deployment flow.
 
-Public DNS must point to the current public gateway and TCP 80/443 must reach it. The internal mapping serves the controller/UI callers; it does not modify public DNS or prove public connectivity. The final deploy validation checks public HTTPS/native metadata and UI readiness/auth endpoints and reports action-required if they fail. It never reports ready based only on successful Helm operations.
+Trigger **Deploy**. Output 2 reports the current phase, provider/topology, DNS targets and readiness; output 1 returns the result. A failed operation retains cluster data. Correct configuration and trigger Deploy again to reconcile the same installation. Do not create a different tenant to recover the existing one.
 
-For a fresh cluster, configure the separate initial editor/UI credentials (at least 12-character passwords), run preflight, then deploy. Deploy performs bootstrap, tenant setup and UI installation automatically. For an existing matching installation, preflight, repair-network, install-ui and validate remain available for narrower operations, but are not required as a manual recovery sequence.
+## DNS and internet access
 
-The earlier standalone HTTPS recovery source remains an optional diagnostic aid. Its checks now use the same rollout/pod verification and TLS progress as the deployer. The normal deployment path owns and persists the correction. Service addresses are refreshed during deploy, repair-network or install-ui and during an active TLS wait; this package does not run a background address watcher after deployment completes.
+With **Manage DNS records** enabled, ExternalDNS maintains tenant and optional dashboard records. Hetzner and IONOS are supported explicitly, with topology-based provider detection. The DNS host may differ from the cluster provider: select the actual DNS provider in that case. IONOS uses the official `external-dns-ionos-webhook:v0.14.0`; Hetzner uses its official webhook `v0.3.4`. Existing ExternalDNS TXT ownership is retained across this upgrade.
 
-The supplied incident demonstrates a public challenge HTTP 200 and an internal ClusterIP HTTP 200 while the cluster-to-public path timed out. The exact hairpin versus internal DNS cause is unproven. The later output shows no cert-manager hostAliases and a still-pending self-check; the source's provider gate permitted that skip. The user's actual routing/provider setting on that later run was not supplied.
+With the toggle disabled, set the tenant's A/AAAA records to the gateway targets shown in progress. If public dashboards are enabled, set `argocd.<domain>` and `grafana.<domain>` too; a matching wildcard DNS record can cover all three. Remove stale A or AAAA targets. If the cloud assigns an address only during bootstrap, manual DNS mode necessarily needs that one DNS update after the address appears. DNS automation is the mode intended for unattended provisioning after configuration.
 
-## Upstream alignment
+The deployer waits for DNS to match the current LoadBalancer and verifies HTTPS with normal certificate validation. Public TCP 443 must reach the cluster's LoadBalancer; port 80 provides the tenant HTTPS redirect. It cannot reconfigure an unrelated upstream firewall without its credentials. This package does not claim to provision a Kubernetes cluster or cloud account from scratch.
 
-The source of truth remains [eclipse-xfsc/deployment/main](https://github.com/eclipse-xfsc/deployment/tree/main). Reviewed commit: [8485621574abdee08b8ca24c2f0f60136ba0dad7](https://github.com/eclipse-xfsc/deployment/tree/8485621574abdee08b8ca24c2f0f60136ba0dad7), rechecked on 2 October 2026. It adds `OCM W-Stack/Tools/scripts/retrieval-test.sh` and `retrieval-acceptance.sh` to the previous baseline. Bootstrap files are checked byte-for-byte against the lock before adaptation.
+The uploaded fullchain is installed as an owned Kubernetes TLS Secret. No Let's Encrypt account, Order, Challenge, ACME email, cert-manager self-check or certificate issuance wait is involved. Replace the two certificate uploads and rerun Deploy to renew. Cert-manager can remain installed for other upstream infrastructure.
 
-The official bootstrap order, tenant Helm chart, native OCM routes and service implementations are retained. Argo continues tracking main with autosync, prune and selfHeal. The wrapper checks the currently resolved main revision and all selected chart dependencies at deployment time, and stops if main moves during preflight. Future upstream changes still require acceptance; tracking a moving branch cannot provide a permanently frozen release guarantee.
+The tenant hostname is mapped to the **discovered Envoy Service ClusterIP** inside the OCM context and native tenant workloads. This preserves the hostname, SNI and certificate verification while avoiding public-IP hairpin failures. A Kyverno admission policy covers new pods; reconciliation updates existing Deployments/StatefulSets. Addresses, Service hashes and NodePorts from earlier incidents are never deployment constants.
 
-Existing 12.0.9 fixes remain: uploaded kubeconfig/context enforcement; bounded API transport recovery and lease checks; registry Bearer-challenge handling; policy/verification compatibility values; OpenBao readiness/mount handling; Grafana datasource correction; Argo Redis mirror and dependency/chart preflight.
+## What is deployed
 
-## Provider detection and persistent networking
+The reviewed official bootstrap installs observability, OpenBao, ESO, Kyverno, the XFSC operator, Argo CD and the Storage, Network, Core and OCM ApplicationSets. Then the deployer installs tenant keys/registration/routing, uploaded TLS, the persistent ORCE OCM UI runtime, UI identity, and optional dashboard routes.
 
-IONOS and Hetzner are selectable. Detection checks recognized node provider IDs, provider-specific node labels and, when node evidence is absent, CSI provisioners. It reports regions, zones and detection evidence. Mixed provider evidence uses generic behavior and requires explicit configuration where necessary. DNS hosting remains independent of compute-provider detection.
+Native OCM service implementations are not forked or replaced. Compatibility changes are Helm/bootstrap configuration: provider annotations, traffic policy, chart/environment corrections, namespace/key preparation and internal routing. Storage and DIDComm remain the credential and relationship authorities. MongoDB stores UI preferences, connection settings, audit metadata, idempotency records and encrypted temporary offer results; it is not a substitute OCM context database.
 
-Hetzner annotations are generated only for Hetzner. Location/network zone comes from explicit settings or recognized node topology. Private networking is opt-in and requires an existing private network; LB type is not forced to lb11. Unknown topology requires an explicit location/zone. User annotations are preserved; foreign Hetzner annotations on IONOS are rejected.
+| URL | Purpose |
+|---|---|
+| `https://demo-tenant.leanea.com/` | Redirect to OCM context |
+| `https://demo-tenant.leanea.com/orce/` | OCM W-Stack UI |
+| `https://demo-tenant.leanea.com/orce/editor/` | Authenticated ORCE editor |
+| `https://demo-tenant.leanea.com/.well-known/did.json` | Native tenant DID |
+| `https://demo-tenant.leanea.com/.well-known/openid-credential-issuer` | Native issuer metadata |
+| `https://argocd.leanea.com/` | Optional authenticated Argo CD |
+| `https://grafana.leanea.com/` | Optional authenticated Grafana |
 
-The exact current Envoy template omits externalTrafficPolicy. The wrapper therefore uses both:
+Optional dashboards initially use username `admin` and the configured initial editor password. Initialization is recorded and reruns do not reset changed passwords. Switching the public-dashboard toggle off removes only its routing release; it retains services, certificates and data. Fresh Grafana deployments use a PVC; upgrades retain the existing observability release and storage topology.
 
-- Helm values **strings** in ApplicationSet templatePatch, preserving null deletions through ApplicationSet merge-patching. Default annotation keys are read from the currently validated upstream values, then replaced with resolved provider/user annotations. The same representation also preserves the OCM policy NAMESPACE deletion.
-- A Helm-managed, narrowly scoped Kyverno ClusterPolicy for `infrastructure/envoy`. It sets the configured traffic policy on CREATE/UPDATE. On a fresh bootstrap it is installed after Envoy CRDs exist and before tenant/certificate creation. Existing proxies and generated public Services are reconciled explicitly. Recreated proxies are covered by admission. The Envoy Application preserves this field with RespectIgnoreDifferences; all existing sync options and other override branches remain.
+## Source freeze
 
-IONOS requires Cluster. Generic/provider-neutral deployment defaults to Cluster. Local is an explicit option for a deliberately designed topology on other providers. Proxy Services are discovered using Envoy ownership labels; observed Service hashes, IPs and NodePorts are not deployment constants. Validation checks proxy and public-Service policies, foreign annotations, TCP 80/443, admission policy readiness, the tenant certificate and public issuer/DID/JWKS endpoints.
+The deployment repository and all Git ApplicationSet sources are pinned to main as reviewed on **2 October 2026**:
 
-## Recovered OCM-CR runtime
+- Deployment: `8485621574abdee08b8ca24c2f0f60136ba0dad7`.
+- Argo CD manifest: `c9c369efcc5b2a0bd720803f8d14a1c3eaddf579`.
+- ExternalDNS: chart `1.23.0`, using the same upstream provider contract with the corrected IONOS image.
+- Observability chart dependencies: exact reviewed versions in `upstream-lock.json`; Loki 6.53.0 and Tempo 1.24.4 retain the wrapper's existing value contracts.
 
-The runtime uses the existing tenant host and Gateway ListenerSet, adding only `/orce` and the more specific `/orce/identity` path. Native OCM routes are not rewritten. The UI retains the FAP DCM/FACIS layout and logo, English/German/French labels, credentials/detail/verification/status views, issuance/receive flows, relationship adapters, provenance views, Clearing House adapter, role management, audit, encrypted operation offers and idempotency.
+No later deployment-main changes are followed automatically. Runtime preflight downloads the selected sources/charts and renders both install and upgrade branches **before cluster writes**. Bootstrap reuses those prepared dependencies. Existing installed bootstrap releases are retained on a completed-bootstrap rerun.
 
-The current upstream stack does not deploy the legacy Keycloak assumed by 11.x. The runtime chart adds its own Keycloak and PostgreSQL under OCM's namespace, with a PVC for identity data. These support UI authentication; they do not replace any OCM service. Keycloak uses a tenant-specific realm, Authorization Code + PKCE, atomic permissions and a scoped backend service account. The editor uses a separate bcrypt administrator. Initial credentials and encryption keys are created once, retained across upgrades, and never placed in ordinary Helm values.
+This is a source-revision freeze, not a claim of a fully immutable supply chain: some official native charts still reference mutable image tags or a policy Git clone, and runtime npm transitive dependencies are resolved during seeding. Those limitations are recorded in VALIDATION. Running image digests are included in inspection/evidence output. No native service version was invented to conceal them.
 
-ORCE, MongoDB and identity PVCs are retained. MongoDB contains UI preferences, audit and operation coordination, not copies of the OCM credential store. Embedded MongoDB is the default; an external URI is stored in encrypted node credentials. Changing an existing MongoDB topology is refused, requiring a separate data migration. Runtime dependency installation occurs in the init container; registry access is required. Existing flows and data are preserved.
+## OCM context and PCM
 
-Runtime connections use the configured tenant, the current `/api/credential` endpoint and NATS in `infrastructure`. Native Service names and exposed ports are discovered before installation. The runtime reads the upstream-managed issuer registration instead of silently registering a competing tenant. Missing optional backend Services are reported explicitly.
+The OCM context retains the FACIS branding, navigation, credential cards/detail dialog and EN/DE/FR controls from 11.1.0. It includes native credential browsing, verification, local deletion, supported issuer revocation, offers, issuance, relationships, roles/assignments, audit, health, provenance and **Connections**.
 
-PCM support from 11.1.0 is retained **opt-in**, using its existing issuer/client and Account Service. The deployer does not install or modify PCM. Set PCM configuration JSON with enabled, issuer, userInfo, accountUrl, clientId, realm, tenant, namespace and cryptoNamespace after configuring that existing client's `/orce/pcm/callback` redirect. See docs/PCM-INTEGRATION.md for the inherited adapter constraints; its legacy host/Keycloak deployment examples are historical.
+An administrator configures an existing PCM in **OCM context → Connections**. The deployer neither installs PCM nor requests PCM parameters. PCM users sign in separately with PKCE. Organizational tokens are not forwarded to PCM; personal tokens stay in browser memory and are never stored in the settings/audit database. See `docs/PCM-INTEGRATION.md` for the remote client registration and capability-dependent native endpoints.
 
-## Acceptance boundaries
+Clearing Houses are discovered from Gaia-X's published compliance registry through its Wizard API; lab and production entries are distinguished. Production onboarding, issuer policy and legal credentials are not generated by the deployer. See `docs/CLEARING-HOUSES.md`.
 
-The current OCM ApplicationSet excludes Didcomm; relationship adapters require a deployed supported service or an explicit runtimeServices override. Storage had a documented upstream Region/Country route-middleware mismatch; no service binary is patched or replaced here. Production credential templates, real Clearing House issuance, native graph lineage, some lifecycle/connection event contracts, two-instance journeys and cross-browser acceptance remain in the coverage record.
+## Native acceptance limitation
 
-`ready` requires infrastructure/PVC/pod readiness, correct gateway configuration, verified tenant TLS/native metadata, and public UI readiness/auth/issuer checks when enabled. It still reports `credentialLifecycle: "not-tested"`. Only the separate native credential test proves Retrieval acceptance and exact Storage read-back. UI or DID publication alone is insufficient.
+The inspected Credential Storage source (`567201e524967d5b9c0798a866f5fb587e912017`) requires `region` and `country` Gin route parameters but its registered credential routes do not supply them. This is not repaired by DNS, TLS, environment variables or request headers. The running `1.2.4` image must be checked: its digest/source correspondence was not verified here.
 
-## Actions and CLI
+The deployer checks native Storage, Retrieval, issuer bootstrap and NATS health and reports `action-required` if they fail. A native HTTP 400 is surfaced promptly instead of silently waiting or returning an empty OCM context. UI availability, internet connectivity and credential lifecycle acceptance are separate results. No Storage fork, database bypass or fake successful lifecycle was added.
 
-| Action | Purpose |
-| --- | --- |
-| preflight | Validate source, dependencies, selected Helm charts and policy image before writes |
-| deploy | Fresh/resumable official bootstrap, tenant and runtime |
-| repair-network | Reconcile network ApplicationSet and persistent gateway compatibility |
-| install-ui | Provision the runtime on a matching existing version-12 installation |
-| repair-ocm | Retain shared infrastructure, repair OCM compatibility and continue tenant/runtime setup |
-| inspect / validate | Inspect resources; validate also checks verified public HTTP endpoints |
-| diagnose-api / diagnose-auth | Read-only connectivity or uploaded-identity diagnostics |
-| test-credentials | Native credential journey; requires CREATE TEST CREDENTIAL confirmation |
-| teardown | Remove only the tenant Helm release; requires REMOVE TENANT <release> confirmation |
+The four requested business credential types depend on real issuer plugins/policies supplied by the repository or an authorized issuer. The UI lists available native definitions; demo Developer/SDJWT templates are explicitly labeled. A second-instance exchange, real production Clearing House issuance, and complete live OCM/PCM lifecycle acceptance remain outstanding. See `docs/CR-COVERAGE.md` and `VALIDATION.md`.
 
-CLI example, with passwords/URI kept in a private JSON file:
+## CLI and checks
 
-```bash
-node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml \
-  --runtime-credentials-file runtime-credentials.json
-node scripts/cli.js deploy --config deployment.json --kubeconfig cluster.yaml \
-  --runtime-credentials-file runtime-credentials.json
+A CLI uses the same implementation and file-based secret inputs:
+
+```sh
+node scripts/cli.js deploy --config examples/deployment.json \
+  --kubeconfig /private/cluster.yaml \
+  --tls-cert-file /private/fullchain.pem --tls-key-file /private/privkey.pem \
+  --runtime-credentials-file /private/runtime-credentials.json
 ```
 
-Runtime credentials JSON keys: editorPassword, uiAdminPassword, mongoUri (external Mongo only). DNS credentials use the existing dns-token-file/dns-secret-file options. Required runtime tools: Node.js >=18.17, Helm 3, kubectl, git, bash, jq, curl and base64. All deployment calls use the uploaded kubeconfig, never the ORCE ServiceAccount identity.
+Add `--dns-token-file /private/dns-token.txt` when using automatic DNS. A custom provider uses `dnsProvider: "custom"`, standard ExternalDNS values in `dnsValues`, and `--dns-secret-file` containing Secret key/value JSON. For example, `{"provider":{"name":"cloudflare"},"env":[{"name":"CF_API_TOKEN","valueFrom":{"secretKeyRef":{"name":"external-dns","key":"api-token"}}}]}` with a private Secret file containing the corresponding `api-token`. The provider is still rendered before installation.
 
-## Source integration and checks
+`preflight` validates without deploying. `inspect` and `validate` are read-only. `diagnose-api` and `diagnose-auth` verify the uploaded API path/identity. `test-credentials --confirm "CREATE TEST CREDENTIAL"` creates and accepts a test offering and checks native Storage read-back; it retains that test data. `scripts/collect-evidence.sh` exports status/digests without Secret contents. No tests run against your cluster merely by installing the package.
 
-The source archive contains `Easy Stack Builder (ESB)/OCM-WStack`, preserving the established integration directory. It contains tests, exact reviewed adaptation fixtures, current runtime source and chart source. The installable TGZ excludes development tests. No node_modules or compiled service/tool executables are distributed. The chart's nested runtime.tgz contains source and the supplied FACIS logo only.
-
-```bash
-npm install --ignore-scripts
-npm test
-npm run test:helm       # Helm 3 + Python/PyYAML
-npm run test:ui         # Real Vue + jsdom DOM interactions
-npm pack --dry-run --ignore-scripts
-```
-
- The validation record distinguishes checks actually executed here from runnable acceptance checks that remain pending.
+Explicit `teardown` requires `REMOVE TENANT <release>` and removes tenant routing only. Node deletion cancels local processes and retains cluster data. Core services, PVCs, key material, users and roles are not deleted by the normal deployment or dashboard toggles.

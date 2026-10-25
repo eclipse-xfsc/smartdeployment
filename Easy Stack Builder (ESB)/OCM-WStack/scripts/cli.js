@@ -6,8 +6,8 @@ const {Runner}=require('../lib/runner');
 const {operation}=require('../lib/install');
 
 async function main() {
-  const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},kubeconfig:{type:'string'},'dns-token-file':{type:'string'},'dns-secret-file':{type:'string'},'runtime-credentials-file':{type:'string'},confirm:{type:'string'},help:{type:'boolean',short:'h'}}});
-  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|preflight|diagnose-api|diagnose-auth|deploy|repair-ocm|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
+  const {values,positionals}=parseArgs({allowPositionals:true,options:{config:{type:'string'},kubeconfig:{type:'string'},'dns-token-file':{type:'string'},'dns-secret-file':{type:'string'},'runtime-credentials-file':{type:'string'},'tls-cert-file':{type:'string'},'tls-key-file':{type:'string'},confirm:{type:'string'},help:{type:'boolean',short:'h'}}});
+  if(values.help||!positionals.length){console.log('Usage: node scripts/cli.js <check|preflight|diagnose-api|diagnose-auth|deploy|repair-ocm|inspect|validate|test-credentials|teardown> --config deployment.json --kubeconfig cluster.yaml --tls-cert-file fullchain.pem --tls-key-file privkey.pem [--runtime-credentials-file credentials.json] [--dns-token-file token.txt] [--dns-secret-file secrets.json] [--confirm "..."]');return;}
   const action=positionals[0];
   if(positionals.length!==1)throw new Error('Provide exactly one action.');
   if(action==='check') {
@@ -20,7 +20,7 @@ async function main() {
   if(!values.config||!values.kubeconfig)throw new Error('--config and --kubeconfig are required.');
   const input=JSON.parse(await fs.readFile(values.config,'utf8'));
   const runtimeCredentials=values['runtime-credentials-file']?JSON.parse(await fs.readFile(values['runtime-credentials-file'],'utf8')):{};
-  const credentials={...runtimeCredentials,kubeconfig:await fs.readFile(values.kubeconfig,'utf8'),dnsToken:values['dns-token-file']?(await fs.readFile(values['dns-token-file'],'utf8')).trim():undefined,dnsSecretData:values['dns-secret-file']?await fs.readFile(values['dns-secret-file'],'utf8'):undefined};
+  const credentials={...runtimeCredentials,tlsCertificate:values['tls-cert-file']?await fs.readFile(values['tls-cert-file'],'utf8'):undefined,tlsPrivateKey:values['tls-key-file']?await fs.readFile(values['tls-key-file'],'utf8'):undefined,kubeconfig:await fs.readFile(values.kubeconfig,'utf8'),dnsToken:values['dns-token-file']?(await fs.readFile(values['dns-token-file'],'utf8')).trim():undefined,dnsSecretData:values['dns-secret-file']?await fs.readFile(values['dns-secret-file'],'utf8'):undefined};
   const controller=new AbortController();
   for(const sig of ['SIGINT','SIGTERM'])process.once(sig,()=>controller.abort());
   const result=await operation(action,{...input,confirm:values.confirm},credentials,{signal:controller.signal,emit:event=>process.stderr.write(JSON.stringify({timestamp:new Date().toISOString(),...event})+'\n')});

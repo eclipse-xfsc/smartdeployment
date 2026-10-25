@@ -6,7 +6,7 @@ const {graph}=require('../../runtime/lib/provenance.cjs');
 const {hintFromEvent}=require('../../runtime/lib/events.cjs');
 const {Clearing}=require('../../runtime/lib/clearing.cjs');
 const {routes}=require('../../runtime/lib/runtime.cjs');
-const config={publicOrigin:'https://wallet.example',tenant:'tenant_space',account:'org',group:'org',cryptoNamespace:'ocm-wstack',cryptoGroup:'',holderKey:'eckey',issuerDids:['did:web:wallet.example'],offerIssuerHosts:['issuer.example'],pcm:{enabled:true,tenant:'tenant_space',namespace:'pcm',cryptoNamespace:'accountSpace',userInfo:'https://id.example/realms/master/protocol/openid-connect/userinfo'}};
+const config={publicOrigin:'https://wallet.example',tenant:'tenant_space',account:'org',group:'org',cryptoNamespace:'ocm-wstack',cryptoGroup:'',holderKey:'eckey',issuerDids:['did:web:wallet.example'],offerIssuerHosts:['issuer.example'],pcm:{enabled:true,tenant:'tenant_space',namespace:'pcm',cryptoNamespace:'accountSpace',services:{storage:'https://pcm.example',retrieval:'https://pcm.example',signer:'https://pcm.example',status:'https://pcm.example'},userInfo:'https://id.example/realms/master/protocol/openid-connect/userinfo'}};
 const org={subject:'operator',tenant:'tenant_space',account:'org',group:'org',permissions:['credentials.read','credentials.delete'],token:'org-token'};
 const vc={type:['VerifiableCredential','Participant'],issuer:'did:web:issuer.example',credentialSubject:{id:'did:web:holder.example'},issuanceDate:'2026-09-01T00:00:00Z'};
 const wrapped={groups:[{credentials:{one:{type:'ldp_vc',data:JSON.stringify(vc)}}}]};
@@ -81,5 +81,5 @@ test('native Retrieval observer emits only metadata hints for the configured sco
 test('Clearing request sends only the supplied presentation and labels test results',async()=>{
  const c=new Clearing(async(url,o)=>{assert.equal(url,'https://wizard.lab.gaia-x.eu/api/credential-offers');assert.deepEqual(o.body,{verifiablePresentation:'signed.vp.jwt'});assert.equal(o.headers,undefined);return {data:vc};});
  const result=await c.acquire({provider:'gaia-lab',verifiablePresentation:'signed.vp.jwt'});assert.equal(result.stored,false);assert.equal(result.environment,'test');
- await assert.rejects(c.acquire({provider:'unknown',verifiablePresentation:'vp'}),{code:'CLEARING_ONBOARDING_REQUIRED'});
+ await assert.rejects(c.acquire({provider:'unknown',verifiablePresentation:'vp'}),{code:'CLEARING_PROVIDER_UNAVAILABLE'});
 });

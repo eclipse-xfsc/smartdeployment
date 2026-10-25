@@ -2,7 +2,7 @@
   "repository": "https://github.com/eclipse-xfsc/deployment.git",
   "commit": "8485621574abdee08b8ca24c2f0f60136ba0dad7",
   "reviewedAt": "2026-10-02",
-  "argoRevision": "main",
+  "argoRevision": "8485621574abdee08b8ca24c2f0f60136ba0dad7",
   "sha256": {
     "basic-cluster-init.sh": "af6918e713896585b8ae1c81c47e99cbd358439ef24890c186546ac486b11f82",
     "ocm-wstack-init.sh": "f07ca1c81aa49a99464d581892844d0681950f4d1c6b192ee68757b9cc358f18",
@@ -16,9 +16,25 @@
     "XFSC/Applicationsets/chart/templates/approject.yaml": "91bf21e8a9751a058d16eaa92b0454bd4c69661ea35a282417563652be733529",
     "INFRA/app-management/app-namespace/templates/openbao-access-provision-job.yaml": "f743eb0646883ad4085415a2c394b10ce55d359f3cbc6a0bf75f7b93b41b6fac",
     "INFRA/network/envoy/values.yaml": "09543ec6ee0d2ad27af22cebdc1108e679783d601a7213ddd58b440b36b136e3",
-    "INFRA/network/envoy/templates/envoyproxy.yaml": "39cc26b68f68622436078a5d940a63a3f68489ea781e792a12820611607417c5"
+    "INFRA/network/envoy/templates/envoyproxy.yaml": "39cc26b68f68622436078a5d940a63a3f68489ea781e792a12820611607417c5",
+    "INFRA/observability/opentelemtry/Chart.yaml": "04d64c4ab45137a0471257872f9405ff8552e824a457197f4086cc0fbbffde25",
+    "INFRA/observability/opentelemtry/templates/datasources.yaml": "c5eacc2b44cc4240aa8f2abee5a80fc9d5ee18e22ece355dac49159e4e190ae2"
   },
   "compatibleBootstrapCommits": [
     "739606691ecff72b3a40404a19fce44d9c22b0ee"
-  ]
+  ],
+  "argoCdCommit": "c9c369efcc5b2a0bd720803f8d14a1c3eaddf579",
+  "helmPins": {
+    "external-dns": "1.23.0",
+    "opentelemetry-collector": "0.175.0",
+    "kube-prometheus-stack": "91.8.2",
+    "loki": "6.53.0",
+    "tempo": "1.24.4",
+    "jaeger": "4.14.1",
+    "promtail": "6.17.1"
+  },
+  "dnsWebhookPins": {
+    "ionos": "v0.14.0",
+    "hetzner": "v0.3.4"
+  }
 }

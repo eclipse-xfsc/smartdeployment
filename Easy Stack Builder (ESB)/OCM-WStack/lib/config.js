@@ -16,7 +16,7 @@ function config(input = {}) {
   const c = {
     procedureVersion: Number(input.procedureVersion),
     instanceName: input.instanceName || 'ocm-wstack',
-    domain: (input.domainAddress || input.domain || '').trim().toLowerCase(),
+    domain: (input.domainAddress || input.domain || '').trim().toLowerCase().replace(/^\*\./,''),
     email: (input.emailAddress || input.email || '').trim(),
     tenantId: (input.tenantId || 'demo-tenant').trim(),
     tenantRelease: (input.tenantRelease || 'demotenant').trim(),
@@ -28,20 +28,20 @@ function config(input = {}) {
     lbAnnotations: object(input.lbAnnotations, 'Load-balancer annotations'),
     timeoutSeconds: Number(input.timeoutSeconds || 1800),
     externalTrafficPolicy: input.externalTrafficPolicy || 'Cluster',
-    gatewayRouting: input.gatewayRouting || 'auto',
+    gatewayRouting: 'internal', tlsMode: 'uploaded', publicDashboards: input.publicDashboards===true || input.publicDashboards==='true',
     lbLocation: (input.lbLocation || '').trim(), lbNetworkZone: (input.lbNetworkZone || '').trim(), lbType: (input.lbType || '').trim(), lbPrivate: input.lbPrivate===true || input.lbPrivate==='true',
-    runtimeEnabled: input.runtimeEnabled!==false && input.runtimeEnabled!=='false',
+    runtimeEnabled: true,
     runtimeImage: input.runtimeImage || 'ecofacis/xfsc-orce:2.0.15',
     orceStorageSize: input.orceStorageSize || '3Gi', mongoStorageSize: input.mongoStorageSize || '5Gi',
     useExternalMongo: input.useExternalMongo===true || input.useExternalMongo==='true',
     editorUsername: input.editorUsername || 'admin', uiAdminUsername: input.uiAdminUsername || 'admin', uiAdminEmail: input.uiAdminEmail || input.emailAddress || input.email || '',
     runtimeServices: object(input.runtimeServices, 'Runtime service overrides'),
-    pcm: object(input.pcm, 'PCM configuration')
+    pcm: {enabled:false}
   };
   if (c.procedureVersion !== 12) fail('RECONFIGURE', 'Create a new version 12 OCM-W-Stack node. Previous deployment configuration is not migrated.');
   if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(c.instanceName)) fail('CONFIG', 'Instance name must be 2–40 lowercase letters, digits or hyphens.');
   if (!dnsName(c.domain) || !c.domain.includes('.')) fail('CONFIG', 'Domain must be a bare, public DNS domain, without scheme or path.');
-  if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(c.email)) fail('CONFIG', 'A valid ACME contact email is required.');
+  if (c.email && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(c.email)) fail('CONFIG', 'The optional email address is invalid.');
   if (!/^[a-z][a-z0-9_-]{0,39}$/.test(c.tenantId)) fail('CONFIG', 'Tenant ID must start with a lowercase letter and contain at most 40 lowercase letters, digits, underscores or hyphens.');
   if (!dnsName(c.tenantSubdomain) || c.tenantSubdomain.includes('.') || !dnsName(`${c.tenantSubdomain}.${c.domain}`)) fail('CONFIG', 'Tenant subdomain must be one DNS label; the complete hostname must fit DNS limits.');
   if (!dnsName(c.tenantRelease) || c.tenantRelease.includes('.') || c.tenantRelease.length > 35) fail('CONFIG', 'Tenant release must be a DNS label of at most 35 characters.');
@@ -78,7 +78,7 @@ function resolve(c, nodes, classes, credentials) {
   const evidence=require('./providers').detect(nodes,classes);
   const detectedProvider=evidence.provider;
   const actualProvider = c.provider === 'auto' ? detectedProvider : c.provider;
-  const actualDns = !c.externalDns ? 'disabled' : c.dnsProvider === 'auto' ? (actualProvider === 'hetzner' ? 'hetzner' : '') : c.dnsProvider;
+  const actualDns = !c.externalDns ? 'disabled' : c.dnsProvider === 'auto' ? (['hetzner','ionos'].includes(actualProvider) ? actualProvider : '') : c.dnsProvider;
   if (!actualDns) fail('DNS_PROVIDER', 'The DNS hosting provider cannot be inferred from this cluster. Select Hetzner, IONOS or custom ExternalDNS values.');
   if (c.externalDns && ['hetzner','ionos'].includes(actualDns) && !credentials.dnsToken) fail('DNS_CREDENTIALS', `A DNS API token is required for ${actualDns}.`);
   const secret = c.externalDns && actualDns === 'custom' ? object(credentials.dnsSecretData, 'DNS Secret data') : {token: credentials.dnsToken || ''};
@@ -86,14 +86,14 @@ function resolve(c, nodes, classes, credentials) {
   if(actualProvider==='ionos'&&c.externalTrafficPolicy!=='Cluster')fail('CONFIG','IONOS requires Cluster traffic policy.');
   const resolved={...c, providerLocations:evidence.locations,providerZones:evidence.zones,providerEvidence:evidence.evidence, detectedProvider, actualProvider, actualDns, profile: ['hetzner','ionos'].includes(actualDns) ? actualDns : !c.externalDns && actualProvider === 'hetzner' ? 'hetzner' : 'generic', actualStorageClass: storageClass(classes, c.storageClass), dnsSecret: secret};
   // Cluster-to-public connectivity is independent of provider classification.
-  // Use the managed internal route unless public routing was explicitly selected.
+  // Uploaded-TLS deployments always use the managed internal tenant route.
   resolved.internalGatewayRouting=c.gatewayRouting!=='public';
   resolved.resolvedLbAnnotations=require('./providers').annotations(resolved);
   return resolved;
 }
 function fingerprint(c) {
   const clean = {...c}; delete clean.dnsSecret; delete clean.timeoutSeconds; delete clean.detectedProvider; delete clean.providerEvidence;delete clean.legacyFingerprint;delete clean.upstreamAnnotationKeys;delete clean.providerLocations;delete clean.providerZones;delete clean.resolvedLbAnnotations;
-  for(const key of ['gatewayRouting','internalGatewayRouting','gatewayClusterIP','runtimeEnabled','runtimeImage','orceStorageSize','mongoStorageSize','useExternalMongo','editorUsername','uiAdminUsername','uiAdminEmail','runtimeServices','pcm'])delete clean[key];
+  for(const key of ['dnsOwnerId','tlsMode','publicDashboards','gatewayRouting','internalGatewayRouting','gatewayClusterIP','runtimeEnabled','runtimeImage','orceStorageSize','mongoStorageSize','useExternalMongo','editorUsername','uiAdminUsername','uiAdminEmail','runtimeServices','pcm'])delete clean[key];
   return crypto.createHash('sha256').update(JSON.stringify(clean)).digest('hex');
 }
 function kubeconfigText(value) {
