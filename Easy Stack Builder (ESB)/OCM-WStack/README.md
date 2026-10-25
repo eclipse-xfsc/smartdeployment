@@ -1,4 +1,4 @@
-# OCM W-Stack ESB 12.0.7
+# OCM W-Stack ESB 12.0.8
 
 This release implements the approved first phase: a fresh ESB deployer that executes the official XFSC bootstrap, installs the official tenant, and validates native OCM endpoints. The CR application UI and PCM integration belong to the next phase.
 
@@ -12,11 +12,23 @@ The wrapper fetches that checkout at deployment time and executes `bash ocm-wsta
 
 No service image is rebuilt, patched or bundled. Both distribution archives contain source text only. The upstream scripts and charts download their normal dependencies when you deploy.
 
-## Updating from 12.0.0–12.0.3
+## Updating from 12.0.0–12.0.7
 
 Install the new TGZ, restart ORCE, and trigger the existing version-12 node with its current settings and credentials. Retain its cluster resources, OpenBao data and ESB ownership marker. A failed partial bootstrap can resume when settings match and the affected Helm release is absent, failed or deployed. A pending Helm operation requires inspection; ESB never clears it automatically.
 
-Version 12.0.7 pins all ESB kubectl and Helm calls to the exact uploaded kubeconfig and its current context. It clears inherited Helm authentication overrides, rejects missing upload authentication, and reports the selected context and authenticated identity. Earlier Grafana, Redis and API recovery corrections remain enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
+The credential enforcement introduced in 12.0.7 pins all ESB kubectl and Helm calls to the exact uploaded kubeconfig and its current context. It clears inherited Helm authentication overrides, rejects missing upload authentication, and reports the selected context and authenticated identity. Earlier Grafana, Redis and API recovery corrections remain enabled. It retains the earlier chart, resume, Lease timestamp and OpenBao readiness corrections.
+
+## Repairing the policy and verification deployment
+
+12.0.8 supplies chart-specific Helm values through the OCM ApplicationSet. Argo retains these values while continuing to track upstream main. Policy uses the dependency chart's published `tsa/policy:1.0.0` image, clears its unavailable deployment-key-light reference, resolves NATS/resolver/signer addresses, aligns its HTTP listener and Service on port 8080, and loads `OCM W-Stack/Policies` from the current official GitHub deployment repository.
+
+Verification connects to Cassandra and NATS in infrastructure, and to signer in ocm-wstack. It uses a dedicated ESO Secret for the legacy Cassandra password reference. This chart still uses the infrastructure Cassandra login; ESO reads its password from the existing infrastructure-openbao ClusterSecretStore and refreshes it without putting credentials in Helm values. A future migration of this legacy chart to application ResourceClaims is separate from this compatibility correction.
+
+A fresh deployment generates the missing signing Secret before starting OCM applications. The generated P-256 key follows the service decoder's unusual format: PKCS#8 EC contents with an EC PRIVATE KEY PEM label. An existing compatible key is retained. An incompatible existing key stops the operation without replacing it. This signing key is separate from ingress TLS keys and OpenBao tenant transit keys.
+
+For the current partial installation, install this TGZ and restart ORCE to stop the previous local operation. Keep the same node settings and uploaded administrator kubeconfig. Trigger an Inject node with **msg.action = "repair-ocm"**. Repair requires the matching ESB ownership marker, an existing deployed/failed OCM Helm release and healthy storage/network/core ApplicationSets. It updates OCM prerequisites and the OCM ApplicationSet, waits for all OCM applications, then continues the tenant setup and validation. It does not replay shared infrastructure Helm releases or delete workloads/PVCs. A cluster lease held by the stopped operation may need up to three minutes to expire.
+
+Preflight renders both corrected workloads for install and upgrade, checks the actual environment/Secret references and policy Service ports, and resolves the policy image using both registry HEAD and GET requests. Registry failures stop before installation writes. This is a check from the ORCE runtime; cluster-node network access and live service startup still require deployment validation.
 
 ## Kubernetes API EOF recovery
 
@@ -59,10 +71,10 @@ node scripts/cli.js preflight --config deployment.json --kubeconfig cluster.yaml
 
 Use a fresh target cluster and the configured `ecofacis/xfsc-orce:2.0.15` runtime. This package retains npm name `orce-esb-ocmwstack` and node type `OCM-W-Stack`, but requires a newly configured version-12 node. It does not migrate an existing 11.x deployment.
 
-Install `orce-esb-ocmwstack-12.0.7.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
+Install `orce-esb-ocmwstack-12.0.8.tgz` through the Node-RED palette upload facility if enabled. Alternatively, run the following **inside ORCE's configured Node-RED user directory**, with the archive available in that container, then restart ORCE:
 
 ```bash
-npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.7.tgz
+npm install --omit=dev /path/to/orce-esb-ocmwstack-12.0.8.tgz
 ```
 
 For source integration, replace the complete old `Easy Stack Builder (ESB)/OCM-WStack` directory with the directory in the source archive. Do not merge its old deployment scripts into this release.
@@ -90,6 +102,7 @@ You can import `examples/node-red-flow.json` for prewired Deploy, Validate and T
 | `diagnose-api` | Make five read-only Kubernetes API readiness probes from ORCE using the uploaded kubeconfig. |
 | `preflight` | Download dependencies and render every selected chart without writing cluster resources. |
 | `deploy` | Install the official stack and tenant, or resume the same installation configuration. |
+| `repair-ocm` | Repair the existing matching OCM deployment and continue tenant setup; retain shared infrastructure. |
 | `inspect` | Read Argo, images/digests, pods, PVC and gateway/certificate state. |
 | `validate` | Inspect the cluster and check public issuer metadata, DID and JWKS over verified HTTPS. |
 | `test-credentials` | Create an Ada Lovelace SD-JWT offer, submit it to Retrieval, list and accept it, then prove exact credential read-back from Storage. Requires `msg.confirm = "CREATE TEST CREDENTIAL"`. |
@@ -193,6 +206,6 @@ npm run test:helm
 npm pack --dry-run --ignore-scripts
 ```
 
-Tests execute the adapted official shell procedure against explicit kubectl/Helm test doubles; they verify ordering, failure propagation, exact-configuration resume, credential handling, editor behavior and removal behavior. Offline Helm tests render all 34 selected wrappers for installation and upgrade, plus provider and tenant scenarios, AppProject ownership cases, TelemetryConfig schema fields and OpenBao mount inspection. Wrapper-only tests explicitly exclude downloaded dependencies. The validation record separately reports the real Kyverno dependency render and unexecuted checks. Native HTTP tests include a real local HTTP server and failing Storage/acceptance responses. These checks do not substitute for a fresh-cluster deployment of the upstream images.
+Tests execute the adapted official shell procedure against explicit kubectl/Helm test doubles; they verify ordering, failure propagation, exact-configuration resume, credential handling, editor behavior and removal behavior. Offline Helm tests render all 34 selected wrappers for installation and upgrade, plus provider and tenant scenarios, AppProject ownership cases, TelemetryConfig schema fields and OpenBao mount inspection. Wrapper-only tests explicitly exclude downloaded dependencies. The OCM render test also exercises the available policy 1.4.3 and verification 1.0.2 dependency snapshots with the new overrides. The offline policy snapshot is not the runtime 1.0.0-helm tag; runtime preflight must validate that exact tag. The validation record reports these limits and unexecuted checks. Native HTTP tests include a real local HTTP server and failing Storage/acceptance responses. These checks do not substitute for a fresh-cluster deployment of the upstream images.
 
 Use `msg.action = "diagnose-auth"` on the configured node to report the uploaded context, user entry, authentication method, SHA-256 of the decoded upload, and the identity returned by Kubernetes. Credential contents are not returned. File references in the upload must be embedded; explicit exec/auth-provider plugins remain supported and need their configured provider tooling.

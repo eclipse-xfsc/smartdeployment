@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const {networkOverrides, networkValues} = require('./adapt');
 const {fail} = require('./config');
 const {redisMirror}=require('./argo');
+const ocm=require('./ocm');
 
 const SETS = ['storage','network','core','ocm-wstack'];
 const SET_FILES = ['03_storage','04_network','05_core','06_ocm_wstack'];
@@ -41,7 +42,7 @@ async function plan(r, source, argoSource, c, directory) {
   const jobs=BOOTSTRAP.map(([release,chart,namespace])=>({release,chart,namespace,root:source,files:[],values:{},parameters:[]}));
   for(const target of ['infrastructure','ocm-wstack'])jobs.push({release:`${target}-namespace`,chart:'INFRA/app-management/app-namespace',namespace:'security',root:source,
     files:[`INFRA/app-management/app-namespace-values/${target==='infrastructure'?'infra':'ocm-wstack'}-values.yaml`],values:{},parameters:[]});
-  const overrides=networkOverrides(c);
+  const overrides={...networkOverrides(c),...ocm.overrides(c)};
   for(let i=0;i<SETS.length;i++) {
     const name=SETS[i], set=sets[name];
     if(set.tag!=='main'||set.matrix?.enabled||!set.path?.endsWith('/*')||set.path.slice(0,-2).includes('*'))fail('CHART_PLAN',`Unsupported upstream ApplicationSet generator: ${name}.`);
@@ -49,6 +50,7 @@ async function plan(r, source, argoSource, c, directory) {
     if(name==='network'&&!c.externalDns)excluded.add('INFRA/network/external-dns');
     const values={storageClass:c.actualStorageClass};
     if(name==='network')Object.assign(values,{profile:c.profile,domain:c.domain,email:c.email,excludes:[...excluded]},networkValues(c));
+    if(name==='ocm-wstack')Object.assign(values,ocm.values(c));
     jobs.push({release:name,chart:'XFSC/Applicationsets/chart',namespace:set.namespace,root:source,files:[`XFSC/Applicationsets/values/${SET_FILES[i]}-values.yaml`],values,parameters:[]});
     const parent=set.path.slice(0,-2);
     for(const entry of (await fs.readdir(path.join(argoSource,parent),{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
@@ -111,8 +113,10 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
       const rendered=await r.run('helm',args,{timeout:180000});
       if(/cannot overwrite table with non table|destination for .* is a table/.test(rendered.stderr))throw new Error(rendered.stderr);
       if(job.release==='observability')await require('./grafana').inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml);
+      if(job.chart===ocm.POLICY||job.chart===ocm.VERIFICATION)await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       // Exercise upgrade branches as well as first-install branches in Helm templates.
       await r.run('helm',[...args,'--is-upgrade'],{timeout:180000});
+      if(job.chart===ocm.POLICY||job.chart===ocm.VERIFICATION)await ocm.inspect(r,path.join(validationDir,`render-${i}`),validationDir,readYaml,job.chart);
       const lockfile=path.join(location,'Chart.lock');
       results.push({chart:job.chart,release:job.release,namespace:job.namespace,applicationSet:job.applicationSet||null,
         dependencyLockSha256:await exists(lockfile)?crypto.createHash('sha256').update(await fs.readFile(lockfile)).digest('hex'):null});
@@ -123,6 +127,7 @@ async function prepare(r, source, c, directory, {argoSource,argoRevision}={}) {
     }
   }
   if(errors.length)fail('CHART_PREFLIGHT',`${errors.length} chart(s) failed before installation; no cluster resources were changed. ${errors.map(x=>`${x.chart}: ${x.message}`).join('\n')}`);
+  await ocm.imagePreflight(r,validationDir);
   const current=(await r.run('git',['-C',source,'ls-remote','origin','refs/heads/main'],{timeout:60000})).stdout.trim().split(/\s+/)[0];
   if(current!==argoRevision)fail('UPSTREAM_MOVED','Upstream main changed during chart validation. Retry to validate its new revision. No installation was started.');
   const argoManifest=path.join(validationDir,'argo-install.yaml');

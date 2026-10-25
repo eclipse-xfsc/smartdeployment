@@ -11,7 +11,7 @@ for(const flag of ['--kubeconfig','--context','--kube-context']) {
 const statePath=process.env.ESB_TEST_STATE,logPath=process.env.ESB_TEST_CALLS;
 const state=JSON.parse(fs.readFileSync(statePath,'utf8'));
 const record={command:cmd,args,cwd:process.cwd(),qps:process.env.HELM_QPS,burst:process.env.HELM_BURST_LIMIT,explicitConfig,explicitContext,helmTokenOverride:process.env.HELM_KUBETOKEN,kubeconfigSha256:explicitConfig?require('node:crypto').createHash('sha256').update(fs.readFileSync(explicitConfig)).digest('hex'):null};
-for(const [key,file] of [['network',process.env.ESB_NETWORK_VALUES],['dns',process.env.ESB_DNS_SECRET_FILE]])if(file&&fs.existsSync(file))record[key]=JSON.parse(fs.readFileSync(file,'utf8'));
+for(const [key,file] of [['network',process.env.ESB_NETWORK_VALUES],['ocm',process.env.ESB_OCM_VALUES],['dns',process.env.ESB_DNS_SECRET_FILE]])if(file&&fs.existsSync(file))record[key]=JSON.parse(fs.readFileSync(file,'utf8'));
 if(cmd==='kubectl'&&args.includes('apply')&&args.some(a=>a.endsWith('argo-install.yaml')))record.argoRedisImage=fs.readFileSync(args[args.indexOf('-f')+1],'utf8').match(/image: (.*redis:.*)/)?.[1];
 fs.appendFileSync(logPath,JSON.stringify(record)+'\n');
 const out=x=>process.stdout.write(typeof x==='string'?x+'\n':JSON.stringify(x)+'\n');
@@ -24,6 +24,10 @@ if(cmd==='git') {
   process.exit(0);
 }
 if(cmd==='curl') {
+  if(args.at(-1).includes('/v2/tsa/policy/')) {
+    if(process.env.ESB_TEST_BAD_POLICY_IMAGE==='true')fail('HTTP 400 Bad Request');
+    fs.writeFileSync(args[args.indexOf('--output')+1],args.includes('--head')?'HTTP/1.1 200 OK\n':JSON.stringify({schemaVersion:2,config:{mediaType:'application/vnd.oci.image.config.v1+json'},layers:[]}));process.exit(0);
+  }
   fs.writeFileSync(args[args.indexOf('--output')+1],'kind: CustomResourceDefinition\n---\nkind: Deployment\nmetadata:\n  name: argocd-server\nspec:\n  template:\n    spec:\n      containers:\n        - name: redis\n          image: public.ecr.aws/docker/library/redis:8.2.3-alpine\n');
   process.exit(0);
 }
@@ -45,6 +49,18 @@ if(cmd==='helm'){
       if(process.env.ESB_TEST_BAD_DATASOURCES==='true')ds.push({name:'Other',uid:'other',isDefault:true});
       fs.writeFileSync(path.join(root,'datasources.yaml'),JSON.stringify({kind:'ConfigMap',metadata:{labels:{grafana_datasource:'1'}},data:{'datasources.yaml':JSON.stringify({apiVersion:1,datasources:ds})}}));
     } else if(args[1]===process.env.ESB_TEST_BAD_CHART)fail('Simulated real-template rejection');
+    else if(['policy-chart','credential-verification-service-chart'].includes(args[1])&&args.includes('--output-dir')) {
+      const root=args[args.indexOf('--output-dir')+1];fs.mkdirSync(root,{recursive:true});
+      const policy=args[1]==='policy-chart';
+      const env=policy?[{name:'NATS_ADDR',value:'nats://nats.infrastructure.svc.cluster.local:4222'}]:[
+        {name:'CREDENTIALVERIFICATION_SIGNINGKEY',valueFrom:{secretKeyRef:{name:'signing',key:'signing-key'}}},
+        {name:'CREDENTIALVERIFICATION_CASSANDRAPASSWORD',valueFrom:{secretKeyRef:{name:'esb-credential-verification-cassandra',key:'cassandra-password'}}},
+        {name:'CREDENTIALVERIFICATION_CASSANDRAHOSTS',value:'cassandra.infrastructure.svc.cluster.local'},
+        {name:'CREDENTIALVERIFICATION_MESSAGING_NATS_URL',value:'nats://nats.infrastructure.svc.cluster.local:4222'}];
+      if(process.env.ESB_TEST_BAD_OCM_VALUES==='true')env.push({name:'STALE_HOST',value:'nats.NAMESPACE.svc.cluster.local'});
+      fs.writeFileSync(path.join(root,'deployment.yaml'),JSON.stringify({kind:'Deployment',spec:{template:{spec:{containers:[{name:policy?'policy':'credential-verification-service',image:policy?'node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/policy:1.0.0':'verification:main',ports:[{name:'http',containerPort:8080}],env}]}}}}));
+      if(policy)fs.writeFileSync(path.join(root,'service.yaml'),JSON.stringify({kind:'Service',metadata:{name:'policy'},spec:{ports:[{port:8080,targetPort:8080}]}}));
+    }
   }
   if(args[0]==='upgrade'){
     const release=args[args.indexOf('-n')+2];
@@ -78,6 +94,7 @@ if(verb==='auth'&&kind==='whoami'){out({status:{userInfo:{username:'uploaded-adm
 if(verb==='auth'){if(process.env.ESB_TEST_ARGO_FORBIDDEN==='true'&&a.includes('applications.argoproj.io')){out('no');process.exit(1);}out('yes');process.exit(0);}
 if(verb==='rollout'&&a.includes('statefulset/openbao'))fail('error: rollout status is only available for RollingUpdate strategy type');
 if(verb==='wait'){
+  if(ns==='ocm-wstack'&&a.includes('externalsecret/esb-credential-verification-cassandra')){out('condition met');process.exit(0);}
   if(ns!=='security'||!a.includes('pod/openbao-0')||!a.includes('--for=condition=Ready'))fail('Unexpected wait target');
   if(process.env.ESB_TEST_OPENBAO_UNREADY==='true')fail('error: timed out waiting for the condition on pods/openbao-0');
   out('pod/openbao-0 condition met');process.exit(0);
@@ -107,7 +124,10 @@ if(verb==='get'){
   else if(kind==='pvc')out({items:[]});
   else if(kind==='gateway')out({status:{addresses:[{type:'Hostname',value:'example.elb.amazonaws.com'}]}});
   else if(kind==='certificates')out({items:[{status:{conditions:[{type:'Ready',status:'True'}]}}]});
-  else if(kind==='secret')out('secret/argocd-initial-admin-secret');
+  else if(kind==='secret'||kind==='externalsecret'){
+    const doc=state.objects[`${ns}/${kind}/${name}`];
+    if(doc)out(doc);else if(!a.includes('--ignore-not-found'))out('secret/argocd-initial-admin-secret');
+  }
   else fail('Unimplemented fake get: '+args.join(' '));
   process.exit(0);
 }
@@ -116,6 +136,7 @@ if(['create','replace','apply'].includes(verb)){
   const f=a[a.indexOf('-f')+1];
   if(!f||f.startsWith('https://')||f.endsWith('argo-install.yaml')){if(f?.endsWith('argo-install.yaml')){state.argoInstalled=true;save();}out('applied');process.exit(0);}
   const doc=JSON.parse(fs.readFileSync(f==='-'?0:f,'utf8'));
+  if(doc.kind==='Secret'&&doc.stringData){doc.data=Object.fromEntries(Object.entries(doc.stringData).map(([k,v])=>[k,Buffer.from(v).toString('base64')]));delete doc.stringData;}
   if(doc.kind==='Lease')for(const field of ['acquireTime','renewTime']){
     if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(doc.spec[field]))fail('BadRequest: Lease '+field+' must use Kubernetes RFC3339Micro');
   }

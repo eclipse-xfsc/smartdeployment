@@ -39,7 +39,7 @@
     <div class="form-row"><label for="node-input-tenantRelease">Tenant Helm release</label><input type="text" id="node-input-tenantRelease"></div>
     <p id="esb-ocm-tenant-preview" class="esb-note"></p>
     <div class="form-row"><label for="node-input-timeoutSeconds">Stage timeout (seconds)</label><input type="number" id="node-input-timeoutSeconds" min="60" max="7200"></div>
-    <p class="esb-note">Argo CD tracks upstream main with autosync, prune and self-healing enabled. The first output returns the result; the second streams progress. Use an Inject node with msg.action = preflight, diagnose-api, diagnose-auth, deploy, inspect, validate or test-credentials.</p>
+    <p class="esb-note">Argo CD tracks upstream main with autosync, prune and self-healing enabled. The first output returns the result; the second streams progress. Use an Inject node with msg.action = preflight, diagnose-api, diagnose-auth, deploy, repair-ocm, inspect, validate or test-credentials.</p>
   </div>
 </script>
 <script type="text/javascript">
@@ -63,7 +63,7 @@
 </script>
 <script type="text/html" data-help-name="OCM-W-Stack">
   <p>Runs the official eclipse-xfsc/deployment ocm-wstack-init.sh, which calls basic-cluster-init.sh, then installs XFSC/tenant. Requires cluster-admin kubeconfig, Helm 3, kubectl, git, bash, jq, curl and base64 in ORCE.</p>
-  <p>Set <code>msg.action</code> to <code>preflight</code> (read-only chart checks), <code>diagnose-api</code> (read-only API connection probes from ORCE), <code>diagnose-auth</code> (uploaded context and authenticated identity), <code>deploy</code> (default), <code>inspect</code> or <code>validate</code>. A fresh installation can be resumed with the same configuration. Existing unrelated upstream namespaces are never adopted.</p>
+  <p>Set <code>msg.action</code> to <code>preflight</code> (read-only chart checks), <code>diagnose-api</code> (read-only API connection probes from ORCE), <code>diagnose-auth</code> (uploaded context and authenticated identity), <code>deploy</code> (default), <code>repair-ocm</code> (update an existing matching OCM deployment and continue tenant setup), <code>inspect</code> or <code>validate</code>. A fresh installation can be resumed with the same configuration. Existing unrelated upstream namespaces are never adopted.</p>
   <p><code>test-credentials</code> requires <code>msg.confirm = "CREATE TEST CREDENTIAL"</code>. It creates a test offering, retrieves and accepts it, then checks Storage read-back. Test data is retained as evidence. Only this result can report credential lifecycle validation.</p>
   <p><code>teardown</code> requires <code>msg.confirm = "REMOVE TENANT demotenant"</code> (substitute your configured release). It removes the tenant Helm release. Shared infrastructure, services, stored credentials and OpenBao keys remain. Removing the node only cancels its local process.</p>
   <p>State <code>ready</code> covers cluster readiness, TLS and metadata. It does not prove retrieval or storage. Native credential testing reports its stages separately and exports no tokens or credential bodies.</p>

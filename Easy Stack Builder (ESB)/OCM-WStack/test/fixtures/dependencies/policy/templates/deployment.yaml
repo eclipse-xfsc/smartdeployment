@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ template "app.name" . }}"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/instance: {{ include "app.revision" . }}
+    app.kubernetes.io/part-of: rse
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" . | nindent 8 }}
+      annotations:
+        {{- include "app.metricsAnnotations" . | nindent 8 }}
+{{- if .Values.podAnnotations }}
+{{ toYaml .Values.podAnnotations | indent 8 }}
+{{- end }}
+    spec:
+      securityContext:
+{{- include "app.securitycontext" . | nindent 8 }}
+      {{- if .Values.image.pullSecrets }}
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecrets }}
+      {{- end }}
+      containers:
+      - name: {{ template "app.name" . }}
+        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+      {{- if .Values.useSecretRef }}
+        envFrom:
+          - secretRef:
+             name: {{ .Values.secretRefName }}
+      {{- else if .Values.useConfigMap }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Values.configMapName }}
+      {{- else }}
+        env:
+          {{- if .Values.mongo.addr }}
+          - name: MONGO_ADDR
+            value: {{ .Values.mongo.addr | quote }}
+          {{- end }}
+          {{- if .Values.mongo.user }}
+          - name: MONGO_USER
+            value: {{ .Values.mongo.user | quote }}
+          {{- end }}
+          {{- if .Values.mongo.pass }}
+          - name: MONGO_PASS
+            value: {{ .Values.mongo.pass | quote }}
+          {{- end }}
+          {{- if .Values.mongo.dbname }}
+          - name: MONGO_DB
+            value: {{ .Values.mongo.dbname | quote }}
+          {{- end }}
+          - name: MONGO_EXPIRATION
+            value: {{ .Values.mongo.collection | quote }}
+          - name: LOG_LEVEL
+            value: {{ .Values.log.level | default "INFO" }}
+          - name: LOG_ENCODING
+            value: {{ .Values.log.encoding | default "json" }}
+          - name: HTTP_HOST
+            value: {{ .Values.policy.http.host | quote }}
+          - name: HTTP_PORT
+            value: {{ .Values.policy.http.port | quote }}
+          - name: HTTP_IDLE_TIMEOUT
+            value: {{ .Values.policy.http.timeout.idle | quote }}
+          - name: HTTP_READ_TIMEOUT
+            value: {{ .Values.policy.http.timeout.read | quote }}
+          - name: HTTP_WRITE_TIMEOUT
+            value: {{ .Values.policy.http.timeout.write | quote }}
+          - name: NATS_ADDR
+            value: {{ .Values.policy.nats.url | quote }}
+          - name: NATS_SUBJECT
+            value: {{ .Values.policy.nats.subject | quote }}
+          - name: CACHE_ADDR
+            value: {{ .Values.addresses.cache | quote }}
+          - name: TASK_ADDR
+            value: {{ .Values.addresses.task | quote }}
+          - name: DID_RESOLVER_ADDR
+            value: {{ .Values.addresses.didResolver | quote }}
+          - name: SIGNER_ADDR
+            value: {{ .Values.addresses.signer | quote }}
+          - name: OCM_ADDR
+            value: {{ .Values.addresses.ocm | quote }}
+
+          {{- if .Values.memoryStorage}}
+          - name: {{.Values.memoryStorage.policiesRepoVar}}
+            value: {{.Values.memoryStorage.policiesRepo}}
+          - name: {{.Values.memoryStorage.policiesFolderVar}}
+            value: {{.Values.memoryStorage.policiesFolder}}
+          {{- end}}
+        {{- end }}
+{{- if .Values.extraVars }}
+{{- toYaml .Values.extraVars | indent 10 }}
+{{- end }}
+          {{- if .Values.secretEnv }}
+          {{- range $key, $value := .Values.secretEnv }}
+          - name: "{{ $key }}"
+            valueFrom:
+              secretKeyRef:
+                name: "{{ $value.name }}"
+                key: "{{ $value.key }}"
+          {{- end }}
+          {{- end }}
+        ports:
+        {{- if .Values.metrics.enabled }}
+        - name: monitoring
+          containerPort: {{ .Values.metrics.port }}
+        {{- end }}
+        - name: http
+          containerPort: {{ .Values.policy.http.port }}
+        readinessProbe:
+          httpGet:
+            path: /readiness
+            port: {{ .Values.policy.http.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 2
+          failureThreshold: 2
+          timeoutSeconds: 5
+        resources:
+{{ toYaml .Values.resources | indent 10 }}

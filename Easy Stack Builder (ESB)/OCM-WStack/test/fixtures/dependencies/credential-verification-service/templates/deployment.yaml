@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "{{ template "app.name" . }}"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" . | nindent 8 }}
+      annotations:
+{{- if .Values.podAnnotations }}
+{{ toYaml .Values.podAnnotations | indent 8 }}
+{{- end }}
+    spec:
+      securityContext:
+        {{- include "app.securitycontext" . | nindent 8 }}
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecrets }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+        env:
+          - name: DID_RESOLVER
+            value: {{ .Values.config.didResolver}}
+          - name: CREDENTIALVERIFICATION_SERVERMODE
+            value: "{{ .Values.config.serverMode}}"
+          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_PRESENTATIONSIGNURL
+            value: {{.Values.config.signerService.presentationSignUrl}}
+          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_PRESENTATIONVERIFYURL
+            value: {{.Values.config.signerService.presentationVerifyUrl}}
+          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_SIGNERTOPIC
+            value: {{.Values.config.signerService.signerTopic}}
+         {{- if .Values.config.signing}}
+          - name: CREDENTIALVERIFICATION_SIGNINGKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.config.signing.Name }}
+                key: {{ .Values.config.signing.Key }}
+         {{- end}}
+         {{- if .Values.config.cassandra}}
+          - name: CREDENTIALVERIFICATION_CASSANDRAHOSTS
+            value: {{.Values.config.cassandra.cassandraHosts}}
+          - name: CREDENTIALVERIFICATION_CASSANDRAUSER
+            value: {{.Values.config.cassandra.cassandraUser}}
+          - name: CREDENTIALVERIFICATION_CASSANDRAPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{.Values.config.cassandra.Name}}
+                key: {{.Values.config.cassandra.Key}}
+        {{- end}}
+          - name: CREDENTIALVERIFICATION_MESSAGING_NATS_URL
+            value: {{.Values.config.messaging.nats.url}}
+          - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATION
+            value: {{.Values.config.topics.authorization}}
+          - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATIONREPLY
+            value: {{.Values.config.topics.authorizationReply}}
+          - name: CREDENTIALVERIFICATION_TOPICS_PROOFNOTIFY
+            value: {{.Values.config.topics.proofNotify}}
+          - name: CREDENTIALVERIFICATION_TOPICS_PRESENTATINREQUEST
+            value: {{.Values.config.topics.presentationRequest}}
+          - name: CREDENTIALVERIFICATION_TOPICS_STORAGEREQUEST
+            value: {{.Values.config.topics.storageRequest}}
+          - name: CREDENTIALVERIFICATION_LOG_LEVEL
+            value: info
+          - name: CREDENTIALVERIFICATION_IS_DEV
+            value: "false"
+          - name: CREDENTIALVERIFICATION_AUTHORIZEENDPOINT
+            value: {{.Values.config.externalPresentation.authorizeEndpoint}}
+          - name: CREDENTIALVERIFICATION_CLIENTURLSCHEMA
+            value: {{.Values.config.externalPresentation.clientUrlSchema}}
+          - name: CREDENTIALVERIFICATION_REQUESTOBJECTPOLICY
+            value: {{.Values.config.externalPresentation.requestObjectPolicy}}
+          - name: CREDENTIALVERIFICATION_CLIENTIDPOLICY
+            value: {{.Values.config.externalPresentation.clientIdPolicy}}
+          - name: CREDENTIALVERIFICATION_ENABLED
+            value: {{.Values.config.externalPresentation.enbaled}}
+        ports:
+        - name: http
+          containerPort: {{ .Values.server.http.port }}
+        readinessProbe:
+          httpGet:
+            path: /v1/metrics/health
+            port: {{ .Values.server.http.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 2
+          failureThreshold: 2
+          timeoutSeconds: 5

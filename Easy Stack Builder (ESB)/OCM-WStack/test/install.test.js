@@ -187,3 +187,45 @@ test('Argo authorization denial is detected before cluster writes without creati
  assert.deepEqual((await h.readState()).objects,{});
  assert.ok(!(await h.readCalls()).some(c=>c.args.includes('apply')||c.args.includes('create')));
 });
+
+test('unresolvable policy image fails before any cluster writes',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_BAD_POLICY_IMAGE='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'POLICY_IMAGE'});
+ assert.deepEqual((await h.readState()).objects,{});
+});
+test('rendered unresolved OCM placeholders fail before cluster writes',async t=>{
+ const h=await setup(t);const factory=h.options.runnerFactory;
+ h.options.runnerFactory=opts=>{const r=factory(opts);r.env.ESB_TEST_BAD_OCM_VALUES='true';return r;};
+ await assert.rejects(operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'CHART_PREFLIGHT'});
+ assert.deepEqual((await h.readState()).objects,{});
+});
+test('repair reconciles OCM and tenant only, retains signing key and preserves kubeconfig pinning',async t=>{
+ const h=await setup(t);await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
+ const interrupted=await h.readState();
+ interrupted.objects['kube-system/configmap/esb-ocmwstack-v12'].data.bootstrapComplete='false';
+ interrupted.objects['kube-system/configmap/esb-ocmwstack-v12'].data.state='failed';
+ await fs.writeFile(path.join(h.dir,'state.json'),JSON.stringify(interrupted));
+ const key=(await h.readState()).objects['ocm-wstack/secret/signing'].data['signing-key'];
+ const before=(await h.readCalls()).length;
+ const report=await operation('repair-ocm',example,{kubeconfig:'mock-cluster-config'},h.options);
+ assert.equal(report.status,'ready');
+ const calls=(await h.readCalls()).slice(before);
+ assert.deepEqual(calls.filter(c=>c.command==='helm'&&c.args[0]==='upgrade').map(c=>c.args[2]),['ocm-wstack','demotenant']);
+ assert.equal((await h.readState()).objects['ocm-wstack/secret/signing'].data['signing-key'],key);
+ assert.ok(calls.filter(c=>['helm','kubectl'].includes(c.command)).every(c=>c.explicitConfig));
+ const upgrade=calls.find(c=>c.command==='helm'&&c.args[0]==='upgrade'&&c.args[2]==='ocm-wstack');
+ assert.match(upgrade.ocm.esbTemplatePatch,/tsa\/policy/);
+ assert.ok(!JSON.stringify(h.events).includes(key));
+});
+test('repair refuses an unowned cluster and never creates an installation marker',async t=>{
+ const h=await setup(t);await assert.rejects(operation('repair-ocm',example,{kubeconfig:'mock-cluster-config'},h.options),{code:'OWNERSHIP'});
+ assert.ok(!(await h.readState()).objects['kube-system/configmap/esb-ocmwstack-v12']);
+});
+test('repair refuses changed original configuration before any writes',async t=>{
+ const h=await setup(t);await operation('deploy',example,{kubeconfig:'mock-cluster-config'},h.options);
+ const before=(await h.readCalls()).length;
+ await assert.rejects(operation('repair-ocm',{...example,tenantId:'another-tenant'},{kubeconfig:'mock-cluster-config'},h.options),{code:'OWNERSHIP'});
+ const calls=(await h.readCalls()).slice(before);
+ assert.ok(!calls.some(c=>c.command==='kubectl'&&c.args.some(a=>['create','replace','apply','patch','delete'].includes(a))));
+});

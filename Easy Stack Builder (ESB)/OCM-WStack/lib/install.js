@@ -10,6 +10,7 @@ const lock = require('../upstream-lock.json');
 const {prepare}=require('./chart-check');
 const {upgrade:helmUpgrade,transportFailure,delay,diagnose}=require('./api-recovery');
 const {bind:bindKubeconfig,identity:kubeIdentity}=require('./kube-client');
+const ocm=require('./ocm');
 const MARKER = 'esb-ocmwstack-v12';
 const LEASE = 'esb-ocmwstack-v12';
 const MANAGED_NS = ['observability','security','argocd','infrastructure','ocm-wstack'];
@@ -124,7 +125,7 @@ async function validate(r,c) {
   return report;
 }
 async function operation(action,input,credentials,{emit=()=>{},signal:externalSignal,runnerFactory,checkoutSource=checkout}={}) {
-  if(!['deploy','preflight','diagnose-api','diagnose-auth','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, preflight, diagnose-api, diagnose-auth, validate, inspect, test-credentials or teardown.');
+  if(!['deploy','repair-ocm','preflight','diagnose-api','diagnose-auth','validate','inspect','test-credentials','teardown'].includes(action))fail('ACTION','Use deploy, repair-ocm, preflight, diagnose-api, diagnose-auth, validate, inspect, test-credentials or teardown.');
   const controller=new AbortController();
   const relay=()=>controller.abort();
   if(externalSignal?.aborted)controller.abort();
@@ -171,15 +172,21 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
     const source=await checkoutSource(r,dir);
     const chartReport=await prepare(r,source,c,dir);
     if(action==='preflight')return chartReport;
+    if(action==='repair-ocm') {
+      const existing=await optional(r,'configmap',MARKER,'kube-system');
+      if(!existing)fail('OWNERSHIP','repair-ocm requires the existing matching ESB installation marker. Use deploy for a fresh cluster.');
+      if(existing.data?.instance!==c.instanceName||existing.data?.fingerprint!==fingerprint(c)||existing.data?.clusterUid!==c.clusterUid||existing.data?.upstreamCommit!==lock.commit)fail('OWNERSHIP','repair-ocm requires the original ESB configuration and bootstrap revision.');
+    }
     const holder=crypto.randomUUID();
     held=await lease(r,holder,()=>controller.abort());
-    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js')};
+    r.env={...r.env,ESB_LEASE_HOLDER:holder,ESB_HELM_UPGRADE:path.join(__dirname,'../scripts/helm-upgrade.js'),ESB_KUBE_READ:path.join(__dirname,'../scripts/kube-read.js'),ESB_ARGO_HEALTH:path.join(__dirname,'../scripts/argo-health.js'),ESB_OCM_PREREQUISITES:path.join(__dirname,'../scripts/ocm-prerequisites.js')};
     marker=await ensureMarker(r,c);
     marker=await updateMarker(r,marker,{validatedArgoRevision:chartReport.argoRevision,validatedChartCount:String(chartReport.charts.length),argoManifestSha256:chartReport.argoManifestSha256});
     const network=await privateFile(dir,'network-values.json',JSON.stringify(networkValues(c)));
+    const ocmValues=await privateFile(dir,'ocm-values.json',JSON.stringify(ocm.values(c)));
     let secretFile='';
     if(c.externalDns)secretFile=await privateFile(dir,'dns-secret.json',JSON.stringify({apiVersion:'v1',kind:'Secret',metadata:{name:'external-dns',namespace:'infrastructure'},type:'Opaque',stringData:c.dnsSecret}));
-    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_NETWORK_VALUES:network,ESB_DNS_SECRET_FILE:secretFile};
+    r.env={...r.env,ESB_STORAGE_CLASS:c.actualStorageClass,ESB_TIMEOUT_SECONDS:String(c.timeoutSeconds),TIMEOUT_SECONDS:String(c.timeoutSeconds),ESB_NETWORK_VALUES:network,ESB_OCM_VALUES:ocmValues,ESB_DNS_SECRET_FILE:secretFile};
     let lastAddresses='',observing=false;
     dnsTimer=setInterval(async()=>{
       if(observing||signal.aborted)return;
@@ -191,12 +198,23 @@ async function operation(action,input,credentials,{emit=()=>{},signal:externalSi
         if(!observerClosed&&addresses.length&&key!==lastAddresses){lastAddresses=key;emit({type:'dns',automatic:c.externalDns,hostname:c.tenantHost,targets:addresses});}
       } catch {} finally {observing=false;}
     },30000);dnsTimer.unref();
-    if(marker.data.bootstrapComplete!=='true') {
+    if(action==='repair-ocm') {
+      // Require healthy shared prerequisites, then reconcile only the OCM
+      // ApplicationSet. The existing infrastructure and its Helm releases stay.
+      const release=await r.json('helm',['status','ocm-wstack','-n','ocm-wstack','-o','json']);
+      if(!['deployed','failed'].includes(release?.info?.status))fail('HELM_PENDING','OCM release is pending or unavailable; repair stopped without changing it.');
+      for(const set of ['storage','network','core'])await r.run('bash',['check-applicationset.sh',set,'argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
+      emit({type:'phase',phase:'repair-ocm'});
+      await ocm.prerequisites(r,c.timeoutSeconds);
+      await helmUpgrade(r,['upgrade','--install','ocm-wstack',path.join(source,'XFSC/Applicationsets/chart'),'-f',path.join(source,'XFSC/Applicationsets/values/06_ocm_wstack-values.yaml'),'-f',ocmValues,'--set-string',`storageClass=${c.actualStorageClass}`,'-n','ocm-wstack','--timeout',`${c.timeoutSeconds}s`],{namespace:'ocm-wstack',release:'ocm-wstack',cwd:source,timeout:(c.timeoutSeconds+30)*1000});
+      await r.run('bash',['check-applicationset.sh','ocm-wstack','argocd'],{cwd:source,timeout:(c.timeoutSeconds+30)*1000,live:true});
+      held.check();marker=await updateMarker(r,marker,{bootstrapComplete:'true',ocmCompatibility:'12.0.8',state:'tenant',updatedAt:new Date().toISOString()});
+    } else if(marker.data.bootstrapComplete!=='true') {
       marker=await updateMarker(r,marker,{state:'bootstrapping',updatedAt:new Date().toISOString()});
       const args=['ocm-wstack-init.sh','--profile',c.profile,'--domain',c.domain,'--email',c.email];
       if(!c.externalDns)args.push('--disable-external-dns');
       await r.run('bash',args,{cwd:source,timeout:Math.min(c.timeoutSeconds*12,86400)*1000,live:true});
-      held.check();marker=await updateMarker(r,marker,{bootstrapComplete:'true',state:'tenant',updatedAt:new Date().toISOString()});
+      held.check();marker=await updateMarker(r,marker,{bootstrapComplete:'true',ocmCompatibility:'12.0.8',state:'tenant',updatedAt:new Date().toISOString()});
     }
     emit({type:'phase',phase:'tenant'});
     const tenant=await privateFile(dir,'tenant-values.json',JSON.stringify({tenant:{domain:c.domain,id:c.tenantId,group:c.tenantId,subdomain:c.tenantSubdomain},openbao:{transit:{mountPath:`ocm-wstack/${c.tenantId}`}}}));
