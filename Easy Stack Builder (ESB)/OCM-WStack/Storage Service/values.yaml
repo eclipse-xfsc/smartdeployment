@@ -28,7 +28,7 @@ storage-service:
     crypto:
       signKey: storagekey
       namespace: NAMESPACE
-      group: tenant_space
+      group: ''
     service:
       profiles: API
       mode: DIRECT

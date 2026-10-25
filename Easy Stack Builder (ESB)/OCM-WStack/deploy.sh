@@ -188,12 +188,6 @@ ensure_postgres_database() {
   fi
 }
 
-ensure_vault_key() {
-  local path="$1"
-  if ! kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault read -format=json ${path} >/dev/null 2>&1"; then
-    kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault write -f ${path} type=ecdsa-p256"
-  fi
-}
 
 repair_didcomm_dirty_migration() {
   local state_file="$WORKDIR/didcomm-migration-state.txt"
@@ -661,32 +655,9 @@ YAML
 helm upgrade --install vault hashicorp/vault --namespace "$NAMESPACE" \
   -f "./Vault/values.yaml" -f "$VAULT_RUNTIME_VALUES" --wait
 kubectl -n "$NAMESPACE" wait --for=condition=ready pod vault-0 --timeout=10m
-VAULT_ENV="VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
-# enable a TRANSIT engine at path 'tenant_space' and also the default 'transit' engine
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=tenant_space transit || true"
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable transit || true"
-for mount in "$NAMESPACE" "$NAMESPACE/tenant_space"; do
-  kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=$mount transit || true"
-  for key in signerkey DeveloperCredential SDJWTCredential eckey storagekey; do
-    ensure_vault_key "$mount/keys/$key"
-  done
-done
-ensure_vault_key tenant_space/keys/DeveloperCredential
-ensure_vault_key tenant_space/keys/SDJWTCredential
-ensure_vault_key tenant_space/keys/signerkey
-ensure_vault_key transit/keys/DeveloperCredential
-ensure_vault_key transit/keys/SDJWTCredential
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "
-  cat > /tmp/crypto-engine.hcl <<'POLICY'
-path \"transit/sign/DeveloperCredential\" { capabilities = [\"update\"] }
-path \"transit/verify/DeveloperCredential\" { capabilities = [\"update\"] }
-path \"transit/keys/DeveloperCredential\" { capabilities = [\"read\",\"list\"] }
-path \"transit/sign/SDJWTCredential\" { capabilities = [\"update\"] }
-path \"transit/verify/SDJWTCredential\" { capabilities = [\"update\"] }
-path \"transit/keys/SDJWTCredential\" { capabilities = [\"read\",\"list\"] }
-POLICY
-  $VAULT_ENV vault policy write crypto-engine-policy /tmp/crypto-engine.hcl
-"
+# Root crypto mount only: Vault prohibits overlapping parent/child engines.
+# Pass the existing generated token privately and fail on real bootstrap errors.
+OCM_VAULT_TOKEN="$VAULT_ROOT_TOKEN" node "$SCRIPT_DIR/scripts/vault-bootstrap.cjs" "$NAMESPACE"
 record_phase "vault" "done" "Vault transit keys are ready"
 
 record_phase "storage" "running" "Deploying storage service"
@@ -888,4 +859,4 @@ jq -cn \
   --arg uiUrl "${OCM_URL}/orce/" \
   --arg externalIp "$EXTERNAL_IP" \
   --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.0",runtimeVersion:"11.0.0",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecretRef:{namespace:$namespace,name:"ocm-keycloak-client",key:"clientSecret"},namespace:$namespace,uiUrl:$uiUrl,releaseVersion:"11.0.1",runtimeVersion:"11.0.1",referenceRef:"main",referenceSha:"a8df626edb3d38bcd94f7bf2b18c1b0b92c0e069",externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
