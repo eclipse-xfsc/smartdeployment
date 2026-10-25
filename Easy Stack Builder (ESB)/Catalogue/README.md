@@ -46,7 +46,7 @@ After this step, you can proceed to step 1.2 (Installing a local ORCE)
 ### 1.2. Local ORCE
 Install ORCE as described in the [ORCE page](https://github.com/eclipse-xfsc/orchestration-engine):
 ```bash
-docker run -d --name xfsc-orce-instance -p 1880:1880 leanea/xfsc-orce:1.0.8
+docker run -d --name xfsc-orce-instance -p 1880:1880 ecofacis/xfsc-orce:1.0.8
 ```
 Go to [http://localhost:1880](http://localhost:1880).
 
@@ -55,7 +55,7 @@ Click on "New Node" in the sidebar.
 
 ![new button](./docImage/add-new-node.jpg?raw=true)
 
-Upload `node-red-leanea-federated-catalogue-1.0.2.tgz` from this repository and install. Refresh to activate the node.
+Upload `node-red-ecofacis-federated-catalogue-1.0.2.tgz` from this repository and install. Refresh to activate the node.
 
 
 ### 2. Install your node
@@ -123,13 +123,13 @@ Before running:
 ## 📁 Directory Contents
 ```
 .
-├── node-red-leanea-federated-catalogue-1.0.2.tgz
+├── node-red-ecofacis-federated-catalogue-1.0.2.tgz
 ├── FederatedCatalogue.html
 ├── FederatedCatalogue.js
 ├── package.json
 ```
 
-- **node-red-leanea-federated-catalogue-1.0.2.tgz**  
+- **node-red-ecofacis-federated-catalogue-1.0.2.tgz**  
   Installable node package.
 
 - **FederatedCatalogue.html**  
