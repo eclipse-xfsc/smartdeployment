@@ -247,9 +247,13 @@ main() {
         internal_action "$@"
         return
     fi
+    # Keep the result channel outside operation and hook output redirections.
+    exec 4>&1
+    RESULT_FD=4
     read_options "$@"
     operation >"$WORKDIR/final-result.json"
-    jq -e 'type=="object"' "$WORKDIR/final-result.json" >/dev/null
+    jq -e -s 'length==1 and (.[0]|type=="object")' "$WORKDIR/final-result.json" >/dev/null ||
+        { fail ACTION_RESULT "Deployment action ended without exactly one JSON result."; return 1; }
     cat "$WORKDIR/final-result.json"
     RESULT_WRITTEN=true
     if jq -e '.status|IN("failed","action-required","api-unreliable")' "$WORKDIR/final-result.json" >/dev/null; then return 2; fi

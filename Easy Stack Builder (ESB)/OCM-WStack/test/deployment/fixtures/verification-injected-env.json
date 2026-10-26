@@ -1,0 +1,50 @@
+[
+  {
+    "name": "CREDENTIALVERIFICATION_CASSANDRA_DATACENTER",
+    "value": "dc1"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_CASSANDRA_HOSTS",
+    "value": "cassandra.infrastructure.svc.cluster.local"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_CASSANDRA_PORT",
+    "value": "9042"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_DID_RESOLVER",
+    "value": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_CREDENTIAL_URL",
+    "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/credential"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_PRESENTATIONSIGNURL",
+    "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_PRESENTATIONVERIFYURL",
+    "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_SIGN_URL",
+    "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/sign"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_TOPIC",
+    "value": "signer-topic"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_SIGNER_URL",
+    "value": "http://signer.ocm-wstack.svc.cluster.local:8080"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_STORAGE_TOPIC",
+    "value": "storage.service.store"
+  },
+  {
+    "name": "CREDENTIALVERIFICATION_STORAGE_URL",
+    "value": "http://storage-service.ocm-wstack.svc.cluster.local:8080"
+  }
+]

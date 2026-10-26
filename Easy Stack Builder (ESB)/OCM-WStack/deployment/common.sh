@@ -152,16 +152,26 @@ cleanup() {
     [[ -z $CURRENT_PID ]] || wait "$CURRENT_PID" 2>/dev/null || true
     [[ -z $LEASE_PID ]] || wait "$LEASE_PID" 2>/dev/null || true
     if [[ $OWNS_WORKDIR == true ]]; then
-        if [[ -n ${ESB_LEASE_HOLDER:-} ]]; then
-            release_lease || true
-        fi
+        # Publish the original failure before lease cleanup can fail or replace
+        # command diagnostics. The node can also read this private result file.
         if ((status != 0)) && [[ $RESULT_WRITTEN != true ]]; then
-            if [[ -s $WORKDIR/error.json ]]; then
-                cat "$WORKDIR/error.json"
+            if [[ -s $WORKDIR/error.json ]] && jq -e '
+                type=="object" and .status=="failed" and
+                (.code|type)=="string" and (.message|type)=="string"
+            ' "$WORKDIR/error.json" >/dev/null 2>&1; then
+                cp "$WORKDIR/error.json" "$WORKDIR/failure-result.json"
             else
                 jq -cn --argjson exitCode "$status" \
-                    '{status:"failed",code:"COMMAND_FAILED",exitCode:$exitCode,message:"Deployment stopped; see progress for the last completed phase."}'
+                    '{status:"failed",code:"COMMAND_FAILED",exitCode:$exitCode,message:"Deployment stopped; see progress for the last completed phase."}' >"$WORKDIR/failure-result.json"
             fi
+            if [[ -n ${ESB_RESULT_FILE:-} ]]; then
+                cp "$WORKDIR/failure-result.json" "$ESB_RESULT_FILE"
+            fi
+            cat "$WORKDIR/failure-result.json" >&"${RESULT_FD:-1}"
+            RESULT_WRITTEN=true
+        fi
+        if [[ -n ${ESB_LEASE_HOLDER:-} ]]; then
+            release_lease || true
         fi
         rm -rf -- "$WORKDIR"
     fi

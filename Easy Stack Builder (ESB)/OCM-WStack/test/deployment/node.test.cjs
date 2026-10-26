@@ -116,3 +116,29 @@ test('editor field defaults, encrypted credentials and output definitions remain
   assert.equal(definition.defaults.timeoutSeconds.validate(60), true);
   assert.equal(definition.defaults.timeoutSeconds.validate(59), false);
 });
+
+test('node recovers the original failure from its private result file',async t=>{
+  const n=node(t,`#!/bin/bash
+printf '{"status":"failed","code":"ARGO_SYNC_TIMEOUT","message":"Verification did not synchronize."}' >"$ESB_RESULT_FILE"
+printf 'incomplete output'
+exit 1
+`);
+  await n.input({action:'deploy'});
+  const result=n.messages.at(-1)[0].payload;
+  assert.equal(result.code,'ARGO_SYNC_TIMEOUT');
+  assert.equal(result.message,'Verification did not synchronize.');
+  await n.close();
+});
+test('node reports a terminated script and the last phase without exposing raw stderr',async t=>{
+  const n=node(t,`#!/bin/bash
+printf '{"type":"phase","phase":"native-validation"}\\n' >&2
+printf 'private diagnostic' >&2
+kill -KILL $$
+`);
+  await n.input({action:'deploy'});
+  const result=n.messages.at(-1)[0].payload;
+  assert.equal(result.code,'SCRIPT_TERMINATED');
+  assert.match(result.message,/native-validation.*SIGKILL/);
+  assert.ok(!JSON.stringify(n.messages).includes('private diagnostic'));
+  await n.close();
+});

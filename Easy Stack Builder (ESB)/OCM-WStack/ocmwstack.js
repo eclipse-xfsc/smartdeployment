@@ -32,11 +32,14 @@ function stopProcess(child, signal) {
 /** Execute one Bash action; stdout is a result and stderr carries JSON progress. */
 function execute(action, directory, onProgress, signal) {
   return new Promise((resolve, reject) => {
+    const resultFile = path.join(directory, 'result.json');
+    let lastPhase;
     const child = spawn('bash', [
       path.join(__dirname, 'deploy.sh'), action,
       '--config', path.join(directory, 'config.json'),
       '--credentials', path.join(directory, 'credentials.json'),
-    ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ESB_RESULT_FILE: resultFile } });
 
     let output = '';
     let killTimer;
@@ -66,7 +69,10 @@ function execute(action, directory, onProgress, signal) {
       if (line.length > 65536) return;
       try {
         const event = JSON.parse(line);
-        if (event && typeof event.type === 'string') onProgress(event);
+        if (event && typeof event.type === 'string') {
+          if (typeof event.phase === 'string') lastPhase = event.phase;
+          onProgress(event);
+        }
       } catch {
         // Only deliberate progress records are forwarded. Raw diagnostics
         // can contain subprocess arguments or private response bodies.
@@ -84,7 +90,7 @@ function execute(action, directory, onProgress, signal) {
     child.once('error', error => {
       finish(Object.assign(new Error(`Cannot start Bash: ${error.code}.`), { code: 'PREREQUISITE' }));
     });
-    child.once('close', code => {
+    child.once('close', async (code, exitSignal) => {
       progress.close();
       if (cancelled) {
         stopProcess(child, 'SIGKILL');
@@ -96,8 +102,18 @@ function execute(action, directory, onProgress, signal) {
         result = JSON.parse(output);
         if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error();
       } catch {
-        finish(Object.assign(new Error('Deployment script returned no valid result.'), { code: 'RESULT_FORMAT' }));
-        return;
+        try {
+          result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
+          if (result?.status !== 'failed' || typeof result.code !== 'string' ||
+              typeof result.message !== 'string') throw new Error();
+        } catch {
+          const reason = exitSignal ? `signal ${exitSignal}` : `exit code ${code}`;
+          const phase = lastPhase ? ` during ${lastPhase}` : '';
+          finish(Object.assign(new Error(`Deployment script ended${phase} with ${reason} without a valid result.`), {
+            code: exitSignal ? 'SCRIPT_TERMINATED' : 'RESULT_FORMAT',
+          }));
+          return;
+        }
       }
       if ((result.status === 'failed' && result.code) || (code !== 0 && code !== 2)) {
         finish(Object.assign(new Error(result.message || 'Deployment failed.'), { code: result.code || 'COMMAND_FAILED' }));
