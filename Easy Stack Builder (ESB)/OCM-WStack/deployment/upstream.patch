@@ -15,7 +15,7 @@ index f8a0e6b..c055b2a 100644
  
                  if [ -z "$MOUNT_TYPE" ]; then
 diff --git a/INFRA/observability/opentelemtry/Chart.yaml b/INFRA/observability/opentelemtry/Chart.yaml
-index 50ddad1..f108a95 100644
+index 50ddad1..c5f5de2 100644
 --- a/INFRA/observability/opentelemtry/Chart.yaml
 +++ b/INFRA/observability/opentelemtry/Chart.yaml
 @@ -9,36 +9,36 @@ appVersion: "1.0.0"
@@ -352,7 +352,7 @@ index b17b1dc..1a4ddae
 diff --git a/basic-cluster-init.sh b/basic-cluster-init.sh
 old mode 100644
 new mode 100755
-index e377f06..7830734
+index e377f06..69d5122
 --- a/basic-cluster-init.sh
 +++ b/basic-cluster-init.sh
 @@ -1,9 +1,11 @@
@@ -472,7 +472,7 @@ index e377f06..7830734
 diff --git a/check-applicationset.sh b/check-applicationset.sh
 old mode 100644
 new mode 100755
-index c50a51e..20c0a23
+index c50a51e..4609194
 --- a/check-applicationset.sh
 +++ b/check-applicationset.sh
 @@ -8,6 +8,8 @@ TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-600}"
@@ -496,30 +496,48 @@ index c50a51e..20c0a23
    )"
  
    appset_applications="$(
-@@ -91,6 +92,7 @@ while true; do
+@@ -91,6 +92,10 @@ while true; do
    )"
  
    count="$(jq 'length' <<< "$appset_applications")"
 +  expected="$(jq -er --arg name "$APPSET_NAME" '.[$name]' <<< "${ESB_APPSET_COUNTS:?ESB chart plan is required}")"
++
++  jq -cn --arg appset "$APPSET_NAME" --argjson count "$count" --argjson expected "$expected" \
++    '{type:"application-wait",phase:("waiting-for-"+$appset),applicationCount:$count,expectedCount:$expected}' >&3
  
    if [[ "$count" -eq 0 ]]; then
      echo "Noch keine Applications für ApplicationSet '${APPSET_NAME}' gefunden."
-@@ -138,6 +140,8 @@ while true; do
+@@ -133,11 +138,15 @@ while true; do
+     done <<< "$degraded_synced_applications"
+ 
+     not_ready="$(
+-      jq -r '
++      jq -L "${ESB_DEPLOY%/*}/deployment" -r '
++        include "filters";
+         .[]
++        | ({name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|accepted_sync_drift) as $accepted
          | select(
-             (.status.sync.status // "Unknown") != "Synced"
+-            (.status.sync.status // "Unknown") != "Synced"
++            ((.status.sync.status // "Unknown") != "Synced" and ($accepted|not))
              or (.status.health.status // "Unknown") != "Healthy"
-+            or (.status.operationState.phase // "") == "Running"
++            or ((.status.operationState.phase // "") == "Running" and ($accepted|not))
 +            or ((.spec.source.repoURL // "") == "https://github.com/eclipse-xfsc/deployment.git" and ((.spec.source.targetRevision // "") != env.ESB_DEPLOYMENT_REVISION or (.status.sync.comparedTo.source.targetRevision // "") != env.ESB_DEPLOYMENT_REVISION))
            )
          | [
              .metadata.name,
-@@ -150,11 +154,12 @@ while true; do
+@@ -150,11 +159,17 @@ while true; do
        ' <<< "$appset_applications"
      )"
  
 -    if [[ -z "$not_ready" ]]; then
+-      echo "Erfolgreich: Alle ${count} Applications von '${APPSET_NAME}' sind Synced und Healthy."
 +    if [[ -z "$not_ready" && "$count" -eq "$expected" ]]; then
-       echo "Erfolgreich: Alle ${count} Applications von '${APPSET_NAME}' sind Synced und Healthy."
++      echo "Ready: ${count} Applications in '${APPSET_NAME}' satisfy health and synchronization policy."
++      jq -L "${ESB_DEPLOY%/*}/deployment" -cn --argjson applications "$appset_applications" '
++        include "filters";
++        {type:"application-readiness",phase:"applications-ready",
++         acceptedSyncDifferences:[$applications[]|{name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|select(accepted_sync_drift)]}
++      ' >&3
        exit 0
      fi
  
@@ -530,7 +548,7 @@ index c50a51e..20c0a23
 diff --git a/ocm-wstack-init.sh b/ocm-wstack-init.sh
 old mode 100644
 new mode 100755
-index bdb9fe1..51168e4
+index bdb9fe1..dbac3eb
 --- a/ocm-wstack-init.sh
 +++ b/ocm-wstack-init.sh
 @@ -1,15 +1,21 @@

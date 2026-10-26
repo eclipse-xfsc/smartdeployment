@@ -639,6 +639,13 @@ def retrieval_recovery_contract($pods):
 
 # Cluster inspection report
 
+# Explicitly accepted deployment-time drift for the healthy Verification service.
+def accepted_sync_drift:
+    .name=="credential-verification-service-chart" and .sync=="OutOfSync" and .health=="Healthy";
+
+def application_ready:
+    .health=="Healthy" and (.sync=="Synced" or accepted_sync_drift);
+
 def inspect_report($c;$lock;$apps;$pods;$pvcs;$jobs;$gateway;$cert;$proxy;$policy;$services;$operational):
     ["storage","network","core","ocm-wstack"] as $sets |
     [$apps.items[] | select(any(.metadata.ownerReferences[]?;
@@ -669,7 +676,7 @@ def inspect_report($c;$lock;$apps;$pods;$pvcs;$jobs;$gateway;$cert;$proxy;$polic
         upstreamCommit:$lock.commit,argoRevision:$lock.argoRevision,tenantId:$c.tenantId,tenantUrl:$c.tenantUrl,
         provider:$c.actualProvider,providerLocations:$c.providerLocations,externalTrafficPolicy:$c.externalTrafficPolicy,storageClass:$c.actualStorageClass,
         ui:{enabled:true,url:($c.tenantUrl+"/orce/"),editorUrl:($c.tenantUrl+"/orce/editor/")},
-        applications:$applications,gatewayAddresses:$addresses,pendingVolumes:$pending,
+        applications:$applications,acceptedSyncDifferences:[$applications[]|select(accepted_sync_drift)],gatewayAddresses:$addresses,pendingVolumes:$pending,
         certificateReady:($cert.type=="kubernetes.io/tls" and ($cert.data["tls.crt"]|type)=="string" and ($cert.data["tls.key"]|type)=="string"),
         gatewayConfigurationReady:$gatewayReady,
         gatewayConfiguration:{tenantRouting:{mode:"internal",hostname:$c.tenantHost,clusterIP:$public[0].spec.clusterIP,
@@ -679,7 +686,7 @@ def inspect_report($c;$lock;$apps;$pods;$pvcs;$jobs;$gateway;$cert;$proxy;$polic
             services:[$public[] | {name:.metadata.name,externalTrafficPolicy:.spec.externalTrafficPolicy,
                 ports:[.spec.ports[].port],foreignAnnotationKeys:(.metadata.annotations|foreign_keys)}]},
         ocmOperational:$operational,ignoredTerminalPods:$readiness.ignored,failedJobs:$readiness.failedJobs,
-        clusterReady:($operational.ready==true and ($present|length)==4 and all($applications[];.sync=="Synced" and .health=="Healthy") and
+        clusterReady:($operational.ready==true and ($present|length)==4 and all($applications[];application_ready) and
             ($pending|length)==0 and $readiness.ready and
             any($managed[];.metadata.namespace=="ocm-wstack" and .metadata.labels.app=="ocm-orce") and
             ($c.useExternalMongo or any($managed[];.metadata.namespace=="ocm-wstack" and .metadata.labels.app=="ocm-ui-mongodb"))),

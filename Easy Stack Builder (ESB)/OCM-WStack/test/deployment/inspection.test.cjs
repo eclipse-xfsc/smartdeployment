@@ -55,3 +55,10 @@ test('inspection retains gateway, ownership, reconciler, volume and failed-job c
   input.cert = null;
   assert.equal(inspect(input).certificateReady, false);
 });
+
+test('healthy Verification drift is reported and does not block final readiness',()=>{
+  const input=healthy();input.apps.items.push({metadata:{name:'credential-verification-service-chart',ownerReferences:[{kind:'ApplicationSet',name:'ocm-wstack'}]},status:{sync:{status:'OutOfSync'},health:{status:'Healthy'}}});
+  let report=inspect(input);assert.equal(report.clusterReady,true);assert.equal(report.acceptedSyncDifferences.length,1);assert.equal(report.applications.at(-1).sync,'OutOfSync');
+  input.apps.items.at(-1).status.health.status='Degraded';assert.equal(inspect(input).clusterReady,false);
+  input.apps.items.at(-1).status.health.status='Healthy';input.apps.items.at(-1).metadata.name='storage-service';assert.equal(inspect(input).clusterReady,false);
+});
