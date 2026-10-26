@@ -1,0 +1,14 @@
+issuance-service:
+  image:
+    pullPolicy: Always
+    tag: 1.9.2
+
+  ingress:
+   enabled: false
+
+  podAnnotations: 
+    inject.xfsc.io/enabled: "true"
+
+  config:
+    logLevel: info
+    servingPort: 8080

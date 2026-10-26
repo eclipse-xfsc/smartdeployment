@@ -83,7 +83,7 @@ verification_pull_secret() {
 signing_secret() {
     get_optional "$WORKDIR/signing.json" ocm-wstack secret signing
     if jq -e '.!=null' "$WORKDIR/signing.json" >/dev/null; then
-        jq -er '.data["signing-key"]' "$WORKDIR/signing.json" | base64 -d >"$WORKDIR/signing.pem"
+        jq -er '.data.eckey // .data["signing-key"]' "$WORKDIR/signing.json" | base64 -d >"$WORKDIR/signing.pem"
         if ! grep -q -- '-----BEGIN' "$WORKDIR/signing.pem"; then
             base64 -d <"$WORKDIR/signing.pem" >"$WORKDIR/signing-decoded.pem"
             mv "$WORKDIR/signing-decoded.pem" "$WORKDIR/signing.pem"
@@ -96,11 +96,17 @@ signing_secret() {
             { fail SIGNING_KEY 'The retained signing key is not PKCS#8.'; return 1; }
         run_capture "$WORKDIR/signing-check.txt" 10 openssl ec -in "$WORKDIR/signing-check.pem" -check -noout ||
             { fail SIGNING_KEY 'The retained signing key is not a valid EC key.'; return 1; }
+        if ! jq -e '.data.eckey != null' "$WORKDIR/signing.json" >/dev/null; then
+            jq '[{op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
+                 {op:"add",path:"/data/eckey",value:.data["signing-key"]}]' \
+                "$WORKDIR/signing.json" >"$WORKDIR/signing-patch.json"
+            run 30 kubectl -n ocm-wstack patch secret signing --type=json --patch-file "$WORKDIR/signing-patch.json"
+        fi
     else
         run_capture "$WORKDIR/signing-pkcs8.pem" 10 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1
         sed 's/PRIVATE KEY/EC PRIVATE KEY/g' "$WORKDIR/signing-pkcs8.pem" >"$WORKDIR/signing.pem"
         jq -n --rawfile key "$WORKDIR/signing.pem" '{apiVersion:"v1",kind:"Secret",metadata:{name:"signing",namespace:"ocm-wstack",
-            labels:{"app.kubernetes.io/managed-by":"esb-ocmwstack"}},type:"Opaque",stringData:{"signing-key":$key}}' >"$WORKDIR/signing-new.json"
+            labels:{"app.kubernetes.io/managed-by":"esb-ocmwstack"}},type:"Opaque",stringData:{eckey:$key}}' >"$WORKDIR/signing-new.json"
         run 30 kubectl create -f "$WORKDIR/signing-new.json"
     fi
 }

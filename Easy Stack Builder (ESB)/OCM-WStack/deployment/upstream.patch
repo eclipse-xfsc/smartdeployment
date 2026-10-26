@@ -457,17 +457,17 @@ index e377f06..7830734
 -helm install -n infrastructure storage XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/03_storage-values.yaml --set storageClass="$STORAGE_CLASS"
 +echo "[ESB_PHASE] storage"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal native-compatibility
-+bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure storage upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure storage XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/03_storage-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag=main -f "$ESB_STORAGE_VALUES"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure storage upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure storage XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/03_storage-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag="${ESB_DEPLOYMENT_REVISION:?Pinned deployment revision is required}" -f "$ESB_STORAGE_VALUES"
  ./check-applicationset.sh storage argocd
 -helm install -n infrastructure network XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/04_network-values.yaml --set storageClass="$STORAGE_CLASS" --set profile="$PROFILE" --set domain="$DOMAIN" --set email="$EMAIL" "${NETWORK_ARGS[@]}"
 +echo "[ESB_PHASE] network"
-+bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure network upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure network XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/04_network-values.yaml --set storageClass="$STORAGE_CLASS" --set profile="$PROFILE" --set domain="$DOMAIN" --set email="$EMAIL"  --set-string tag=main -f "$ESB_NETWORK_VALUES"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure network upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure network XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/04_network-values.yaml --set storageClass="$STORAGE_CLASS" --set profile="$PROFILE" --set domain="$DOMAIN" --set email="$EMAIL"  --set-string tag="${ESB_DEPLOYMENT_REVISION:?Pinned deployment revision is required}" -f "$ESB_NETWORK_VALUES"
  ./check-applicationset.sh network argocd
 -helm install -n infrastructure core XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/05_core-values.yaml --set storageClass="$STORAGE_CLASS"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal gateway policy
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal gateway reconcile
 +echo "[ESB_PHASE] core"
-+bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure core upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure core XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/05_core-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag=main -f "$ESB_CORE_VALUES"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade infrastructure core upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n infrastructure core XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/05_core-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag="${ESB_DEPLOYMENT_REVISION:?Pinned deployment revision is required}" -f "$ESB_CORE_VALUES"
  ./check-applicationset.sh core argocd
 diff --git a/check-applicationset.sh b/check-applicationset.sh
 old mode 100644
@@ -509,7 +509,7 @@ index c50a51e..20c0a23
              (.status.sync.status // "Unknown") != "Synced"
              or (.status.health.status // "Unknown") != "Healthy"
 +            or (.status.operationState.phase // "") == "Running"
-+            or ((.spec.source.repoURL // "") == "https://github.com/eclipse-xfsc/deployment.git" and ((.spec.source.targetRevision // "") != "main" or (.status.sync.comparedTo.source.targetRevision // "") != "main"))
++            or ((.spec.source.repoURL // "") == "https://github.com/eclipse-xfsc/deployment.git" and ((.spec.source.targetRevision // "") != env.ESB_DEPLOYMENT_REVISION or (.status.sync.comparedTo.source.targetRevision // "") != env.ESB_DEPLOYMENT_REVISION))
            )
          | [
              .metadata.name,
@@ -555,6 +555,6 @@ index bdb9fe1..51168e4
 -helm install -n ocm-wstack ocm-wstack XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/06_ocm_wstack-values.yaml --set storageClass="$STORAGE_CLASS"
 +echo "[ESB_PHASE] ocm-wstack"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal prerequisites
-+bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade ocm-wstack ocm-wstack upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n ocm-wstack ocm-wstack XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/06_ocm_wstack-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag=main -f "$ESB_OCM_VALUES"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade ocm-wstack ocm-wstack upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n ocm-wstack ocm-wstack XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/06_ocm_wstack-values.yaml --set storageClass="$STORAGE_CLASS" --set-string tag="${ESB_DEPLOYMENT_REVISION:?Pinned deployment revision is required}" -f "$ESB_OCM_VALUES"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal startup
  ./check-applicationset.sh ocm-wstack argocd

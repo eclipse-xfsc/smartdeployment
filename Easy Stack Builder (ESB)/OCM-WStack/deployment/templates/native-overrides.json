@@ -22,7 +22,7 @@
       "image": {
         "repository": "node-654e3bca7fbeeed18f81d7c7.ps-xaas.io",
         "name": "tsa/policy",
-        "tag": "1.0.0",
+        "tag": "1.1.2",
         "sha": "",
         "pullSecrets": ""
       },
@@ -43,8 +43,8 @@
         "port": 8080
       },
       "memoryStorage": {
-        "policiesRepo": "https://github.com/eclipse-xfsc/deployment.git",
-        "policiesFolder": "OCM W-Stack/Policies"
+        "policiesRepo": "https://github.com/eclipse-xfsc/rego-policies.git",
+        "policiesFolder": "Policies"
       },
       "addresses": {
         "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
@@ -79,12 +79,13 @@
         },
         "signing": {
           "Name": "signing",
-          "Key": "signing-key"
+          "Key": "eckey"
         },
         "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
         "externalPresentation": {
           "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-          "enbaled": "\"true\""
+          "enbaled": "\"true\"",
+          "enabled": true
         },
         "signerService": {
           "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
@@ -95,6 +96,9 @@
             "url": "nats://nats.infrastructure.svc.cluster.local:4222"
           }
         }
+      },
+      "ingress": {
+        "enabled": false
       }
     }
   },

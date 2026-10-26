@@ -63,7 +63,7 @@ registry_authenticate() {
 
 policy_image_preflight() {
     local registry=node-654e3bca7fbeeed18f81d7c7.ps-xaas.io method status
-    local url="https://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/v2/tsa/policy/manifests/1.0.0"
+    local url="https://node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/v2/tsa/policy/manifests/1.1.2"
     rm -f "$WORKDIR/registry-auth"
     for method in HEAD GET; do
         registry_request "$method" "$url"
@@ -84,7 +84,7 @@ policy_image_preflight() {
     ' "$WORKDIR/registry-body" >/dev/null || { fail POLICY_IMAGE 'The policy tag has no container image manifest.'; return 1; }
     local authentication=anonymous
     [[ ! -s $WORKDIR/registry-auth ]] || authentication=anonymous-bearer
-    emit "$(jq -cn --arg image "$registry/tsa/policy:1.0.0" --arg authentication "$authentication" \
+    emit "$(jq -cn --arg image "$registry/tsa/policy:1.1.2" --arg authentication "$authentication" \
         '{type:"image-preflight",image:$image,authentication:$authentication}')"
     rm -f "$WORKDIR/registry-auth" "$WORKDIR/registry-body"
 }

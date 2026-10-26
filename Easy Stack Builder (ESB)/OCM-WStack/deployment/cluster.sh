@@ -341,6 +341,9 @@ checkout_source() {
     local repository revision name expected actual
     repository=$(jq -r '.repository' "$ROOT/upstream-lock.json")
     revision=$(jq -r '.commit' "$ROOT/upstream-lock.json")
+    [[ $revision =~ ^[a-f0-9]{40}$ && $revision == "$(jq -r '.argoRevision' "$ROOT/upstream-lock.json")" ]] ||
+        { fail UPSTREAM_COMMIT 'Bootstrap and ApplicationSets must use the same pinned commit.'; return 1; }
+    export ESB_DEPLOYMENT_REVISION="$revision"
     run 30 git init --quiet "$SOURCE"
     run 30 git -C "$SOURCE" remote add origin "$repository"
     run 300 git -C "$SOURCE" fetch --depth=1 origin "$revision"
@@ -510,19 +513,21 @@ prepare_charts() {
     run 300 git -C "$SOURCE" fetch --depth=1 origin "$(jq -r '.argoRevision' "$ROOT/upstream-lock.json")"
     local revision
     revision=$(git -C "$SOURCE" rev-parse FETCH_HEAD)
-    [[ $revision =~ ^[a-f0-9]{40}$ ]] || fail UPSTREAM_COMMIT 'Cannot resolve the ApplicationSet source revision.'
+    [[ $revision == "$(jq -r '.commit' "$ROOT/upstream-lock.json")" ]] ||
+        { fail UPSTREAM_COMMIT 'ApplicationSet source differs from the pinned bootstrap commit.'; return 1; }
     export ARGO_SOURCE="$WORKDIR/argo-source"
     run 30 git -C "$SOURCE" worktree add --detach "$ARGO_SOURCE" "$revision"
     jq -n --rawfile envoy "$ARGO_SOURCE/INFRA/network/envoy/values.yaml" \
         --rawfile retrieval "$ARGO_SOURCE/OCM W-Stack/Credential Retrieval/values.yaml" \
         --rawfile tenant "$SOURCE/XFSC/tenant/values/tenant-ocm-wstack-values.yaml" \
-        '{envoy:$envoy,retrieval:$retrieval,tenant:$tenant}' >"$WORKDIR/default-documents.json"
+        --rawfile tenantChart "$SOURCE/XFSC/tenant/chart/values.yaml" \
+        '{envoy:$envoy,retrieval:$retrieval,tenant:$tenant,tenantChart:$tenantChart}' >"$WORKDIR/default-documents.json"
     read_yaml "$WORKDIR/default-documents.json" "$WORKDIR/defaults.json"
     update_config '.upstreamAnnotationKeys=($defaults[0].envoy.envoyProxy.service.annotations // {} | keys) |
         .storageRegion=($defaults[0].retrieval["credential-retrieval-service"].config.region // "EU") |
         .storageCountry=($defaults[0].retrieval["credential-retrieval-service"].config.country // "DE")' --slurpfile defaults "$WORKDIR/defaults.json"
     validate_storage_scope
-    json_program 'tenant_values($defaults[0].tenant)' --slurpfile defaults "$WORKDIR/defaults.json" "$CONFIG" >"$WORKDIR/tenant-values.json"
+    json_program 'tenant_values($defaults[0].tenantChart * $defaults[0].tenant)' --slurpfile defaults "$WORKDIR/defaults.json" "$CONFIG" >"$WORKDIR/tenant-values.json"
     write_values
     jq -n --rawfile storage "$ARGO_SOURCE/XFSC/Applicationsets/values/03_storage-values.yaml" \
         --rawfile network "$ARGO_SOURCE/XFSC/Applicationsets/values/04_network-values.yaml" \
@@ -616,7 +621,7 @@ prepare_charts() {
     ESB_APPSET_COUNTS=$(jq -c 'group_by(.applicationSet) | map(select(.[0].applicationSet!=null) | {key:.[0].applicationSet,value:length}) | from_entries' "$WORKDIR/chart-jobs.json")
     jq -n --arg revision "$revision" --arg kubeVersion "$kube_version" --slurpfile charts "$WORKDIR/chart-results.json" \
         --argjson counts "$ESB_APPSET_COUNTS" --arg hash "$(sha256sum "$ESB_ARGO_MANIFEST" | cut -d ' ' -f 1)" \
-        '{status:"charts-validated",argoTrackingRevision:"main",argoRevision:$revision,kubeVersion:$kubeVersion,
+        '{status:"charts-validated",argoTrackingRevision:$revision,argoRevision:$revision,kubeVersion:$kubeVersion,
           charts:$charts[0],applicationCounts:$counts,argoRedisRegistry:"docker.io/library/redis",argoManifestSha256:$hash}' >"$WORKDIR/chart-report.json"
     emit "$(jq -cn --arg revision "$revision" --argjson count "$total" '{type:"chart-preflight-complete",argoRevision:$revision,chartCount:$count}')"
 }

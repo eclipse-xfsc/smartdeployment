@@ -192,11 +192,17 @@ def native_values($lock; $overrides; $routing):
 
 def tenant_values($defaults):
     . as $c |
-    require_that($defaults.routes | type == "array"; "Native tenant routes are missing.") |
+    ($defaults.routes // $defaults.ocm_issuer) as $issuer |
+    require_that($issuer | type == "array"; "Native issuer routes are missing.") |
+    require_that($defaults.ocm_verifier | type == "array"; "Native verifier routes are missing.") |
     {certificate:{enabled:false,secretName:("esb-"+$c.tenantRelease+"-tls")},
-     tenant:{domain:$c.domain,id:$c.tenantId,group:$c.tenantId,subdomain:$c.tenantSubdomain},
+     tenant:{domain:$c.domain,id:$c.tenantId,group:$c.tenantId,subdomain:$c.tenantSubdomain,
+             region:$c.storageRegion,country:$c.storageCountry},
      openbao:{transit:{mountPath:("ocm-wstack/"+$c.tenantId)}},
-     routes:(($defaults.routes | map(if .name == "didcomm" then .enabled=false else . end)) +
+     ocm_issuer:($issuer | map(select(.name != "didcomm"))),
+     ocm_verifier:(($defaults.ocm_verifier | map(select(.name != "didcomm"))) +
+       [$defaults.ocm_verifier[] | select(.path == "/api/verifier/presentation/proof/") |
+         .name += "-compat" | .path="/api/presentation/proof"] +
        (if $c.runtimeServices.didcomm then [] else
          [{name:"didcomm-message",method:"POST",path:"/api/didcomm/message/receive",pathType:"Exact",targetPath:"/message/receive",backend:{name:"didcomm-connector",port:9090}}] end))};
 
@@ -294,7 +300,7 @@ def validate_chart($chart):
         ($d|container($name)) as $container | ($d|environment($name)) as $e |
         $d!=null and ($container.env|tojson|contains("NAMESPACE")|not) and
         (if $name=="policy" then
-            $container.image=="node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/policy:1.0.0" and
+            $container.image=="node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/policy:1.1.2" and
             (any($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!="")|not) and
             $e.NATS_ADDR.value=="nats://nats.infrastructure.svc.cluster.local:4222" and
             any($container.ports[]?; .name=="http" and .containerPort==8080) and
@@ -310,7 +316,7 @@ def validate_chart($chart):
          else
             all($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!="") and
             any($d.spec.template.spec.imagePullSecrets[]?; .name=="esb-ocm-public-registry") and
-            $e.CREDENTIALVERIFICATION_SIGNINGKEY.valueFrom.secretKeyRef=={name:"signing",key:"signing-key"} and
+            $e.CREDENTIALVERIFICATION_SIGNINGKEY.valueFrom.secretKeyRef=={name:"signing",key:"eckey"} and
             $e.CREDENTIALVERIFICATION_CASSANDRAPASSWORD.valueFrom.secretKeyRef=={name:"esb-credential-verification-cassandra",key:"cassandra-password"} and
             $e.CREDENTIALVERIFICATION_CASSANDRAHOSTS.value=="cassandra.infrastructure.svc.cluster.local" and
             $e.CREDENTIALVERIFICATION_MESSAGING_NATS_URL.value=="nats://nats.infrastructure.svc.cluster.local:4222"

@@ -66,4 +66,41 @@ with tempfile.TemporaryDirectory() as tmp:
         if provider=='ionos': assert not any(k.startswith('load-balancer.hetzner.cloud/') for k in annotations)
         else: assert annotations['load-balancer.hetzner.cloud/location']=='hel1'
         checks+=1
-print(f'{checks} real Helm render scenarios passed (upstream Envoy wrapper only; no downloaded subchart dependencies).')
+# Render both tenant route sets with the ESB profile and per-tenant overrides.
+chart=root/'test/fixtures/tenant-0.9.1'
+profile=yaml.safe_load((root/'test/fixtures/upstream/XFSC/tenant/values/tenant-ocm-wstack-values.yaml').read_text())
+defaults=yaml.safe_load((chart/'values.yaml').read_text())
+defaults.update(profile)
+for tenant in ['demo-tenant', 'company_one']:
+    for external in [False, True]:
+        config={'tenantId':tenant,'tenantSubdomain':tenant.replace('_','-'),'domain':'example.com',
+                'tenantRelease':'demotenant','storageRegion':'EU','storageCountry':'DE',
+                'runtimeServices':{'didcomm':'http://external.example'} if external else {}}
+        args=['jq','-L',str(root/'deployment'),'--argjson','defaults',json.dumps(defaults),
+              'include "filters"; tenant_values($defaults)']
+        values=json.loads(subprocess.check_output(args,input=json.dumps(config),text=True))
+        # Helm merges the profile separately, just as the deployer does.
+        values={**profile, **values, 'tenant':{**profile['tenant'],**values['tenant']}}
+        for upgrade in [False, True]:
+            routes=[d for d in render(chart,values,upgrade) if d['kind']=='HTTPRoute']
+            assert len(routes)==2
+            issuer=next(d for d in routes if d['metadata']['name'].endswith('-issuer'))
+            verifier=next(d for d in routes if d['metadata']['name'].endswith('-verifier'))
+            assert {r['matches'][0]['path']['value'] for r in issuer['spec']['rules']} >= {
+                '/api/credential','/api/nonce','/api/schema','/test/offering/create','/api/status'}
+            proof=[r for r in verifier['spec']['rules'] if 'proof' in r['matches'][0]['path']['value']]
+            assert len(proof)==4
+            assert {r['matches'][0]['method'] for r in proof}=={'GET','POST'}
+            for rule in proof:
+                rewrite=next(f for f in rule['filters'] if f['type']=='URLRewrite')
+                assert rewrite['urlRewrite']['path']['replacePrefixMatch']==f'/v1/tenants/{tenant}/presentation/proof/'
+                headers=next(f for f in rule['filters'] if f['type']=='RequestHeaderModifier')
+                headers={h['name'].lower():h['value'] for h in headers['requestHeaderModifier']['set']}
+                assert headers['x-signerkey']=='eckey'
+                assert headers['x-audience-url']==f'https://{config["tenantSubdomain"]}.example.com'
+            didcomm=[r for d in routes for r in d['spec']['rules'] if 'didcomm' in r['name']]
+            assert len(didcomm)==(0 if external else 1)
+            if didcomm:
+                assert didcomm[0]['matches']==[{'path':{'type':'Exact','value':'/api/didcomm/message/receive'},'method':'POST'}]
+            checks+=1
+print(f'{checks} real Helm render scenarios passed (local runtime, gateway, upstream Envoy and tenant charts; no downloaded subchart dependencies).')

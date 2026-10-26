@@ -12,14 +12,14 @@ test('native signing keys retain the expected label and PKCS#8 EC contents', t =
 get_optional() { printf null >"$1"; }
 run() { cp "$WORKDIR/signing-new.json" "$WORKDIR/created.json"; }
 signing_secret
-jq '{metadata:.metadata,type:.type,data:{"signing-key":(.stringData["signing-key"]|@base64)}}' "$WORKDIR/created.json" >"$WORKDIR/retained.json"
+jq '{metadata:.metadata,type:.type,data:{"eckey":(.stringData["eckey"]|@base64)}}' "$WORKDIR/created.json" >"$WORKDIR/retained.json"
 get_optional() { cp "$WORKDIR/retained.json" "$1"; }
 run() { printf unexpected-mutation; return 9; }
 signing_secret
 `);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '');
-  assert.match(JSON.parse(fs.readFileSync(dir + '/created.json')).stringData['signing-key'], /^-----BEGIN EC PRIVATE KEY-----/);
+  assert.match(JSON.parse(fs.readFileSync(dir + '/created.json')).stringData['eckey'], /^-----BEGIN EC PRIVATE KEY-----/);
 });
 
 test('Cassandra compatibility patches only native probe timing with a resource-version precondition', t => {

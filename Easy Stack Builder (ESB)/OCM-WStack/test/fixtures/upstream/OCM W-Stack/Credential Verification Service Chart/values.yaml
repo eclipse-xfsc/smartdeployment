@@ -1,0 +1,49 @@
+credential-verification-service:
+  revisionHistoryLimit: 3
+  replicaCount: 1
+  name: credential-verification-service
+  image:
+    repository: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/ocm-wstack
+    name: credential-verification-service
+    tag: "1.2.2-alpha"
+    pullPolicy: Always
+
+
+  podAnnotations: 
+    inject.xfsc.io/enabled: "true"
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+  service:
+    port: 8080
+    type: ClusterIP
+  server:
+    http:
+      host: ""
+      port: 8080
+  config:
+    serverMode: production
+    disableTLS: false
+    signing:
+      Name:  signing
+      Key:   eckey
+    servingPort: 8080
+    country: DE
+    region: EU
+    externalPresentation:
+      enabled: true
+      authorizeEndpoint: credential-verification-service.NAMESPACE.svc.cluster.local:8080/v1/tenants/tenant_space/presentation/
+      requestObjectPolicy:
+      clientIdPolicy:
+      clientUrlSchema: https
+    topics:
+      authorization: presentation.authorisation
+      authorizationReply: presentation.authorisation.reply
+      proofNotify: presentation.proof.notify
+      presentationRequest: presentation.request
+      storageRequest: storage.service.store
