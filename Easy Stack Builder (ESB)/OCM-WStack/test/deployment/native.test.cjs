@@ -6,22 +6,6 @@ const fs = require('node:fs');
 const http = require('node:http');
 const { ROOT, workspace, bash, bashAsync } = require('./helpers.cjs');
 
-test('native signing keys retain the expected label and PKCS#8 EC contents', t => {
-  const dir = workspace(t);
-  const r = bash(dir, `
-get_optional() { printf null >"$1"; }
-run() { cp "$WORKDIR/signing-new.json" "$WORKDIR/created.json"; }
-signing_secret
-jq '{metadata:.metadata,type:.type,data:{"eckey":(.stringData["eckey"]|@base64)}}' "$WORKDIR/created.json" >"$WORKDIR/retained.json"
-get_optional() { cp "$WORKDIR/retained.json" "$1"; }
-run() { printf unexpected-mutation; return 9; }
-signing_secret
-`);
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, '');
-  assert.match(JSON.parse(fs.readFileSync(dir + '/created.json')).stringData['eckey'], /^-----BEGIN EC PRIVATE KEY-----/);
-});
-
 test('Cassandra compatibility patches only native probe timing with a resource-version precondition', t => {
   const probe = { exec: { command: ['/bin/bash', '-ec', 'nodetool statusbinary | grep -q running'] }, timeoutSeconds: 1, failureThreshold: 3 };
   const dir = workspace(t, { 'native.json': { metadata: { resourceVersion: '41' }, spec: { template: { spec: { containers: [

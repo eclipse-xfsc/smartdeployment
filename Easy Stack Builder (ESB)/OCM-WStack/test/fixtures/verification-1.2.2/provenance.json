@@ -1,0 +1,6 @@
+{
+  "chart": "credential-verification-service",
+  "version": "1.2.2-alpha.helm",
+  "ociManifestDigest": "sha256:9e59f476ce2f3f00c3072e4eed7c07c40de6a051b93599638c71a4eafc8f5c60",
+  "archiveSha256": "38b274e87a335390983832e7fd324f8ce9f547d240e63bfe65e36d83f28a0f20"
+}

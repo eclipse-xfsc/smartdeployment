@@ -365,9 +365,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -375,34 +375,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -502,9 +500,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -512,34 +510,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -1401,9 +1397,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -1411,34 +1407,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -1538,9 +1532,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -1548,34 +1542,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/company_one/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -2436,9 +2428,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -2446,34 +2438,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -2573,9 +2563,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -2583,34 +2573,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -3498,9 +3486,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -3508,34 +3496,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -3635,9 +3621,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -3645,34 +3631,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -4588,9 +4572,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -4598,34 +4582,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -4725,9 +4707,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -4735,34 +4717,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -5697,9 +5677,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -5707,34 +5687,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -5834,9 +5812,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -5844,34 +5822,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -6880,9 +6856,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -6890,34 +6866,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -7017,9 +6991,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -7027,34 +7001,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -8078,9 +8050,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -8088,34 +8060,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -8215,9 +8185,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -8225,34 +8195,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -9247,9 +9215,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -9257,34 +9225,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -9384,9 +9350,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -9394,34 +9360,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -10320,9 +10284,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -10330,34 +10294,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -10457,9 +10419,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -10467,34 +10429,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -11366,9 +11326,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -11376,34 +11336,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },
@@ -11503,9 +11461,9 @@
           },
           "podAnnotations": {
             "inject.xfsc.io/enabled": "true",
-            "inject.xfsc.io/needs": "nats",
+            "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
             "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-            "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"MESSAGING_NATS_URL\"}"
+            "inject.xfsc.io/env-replacements": null
           },
           "server": {
             "http": {
@@ -11513,34 +11471,32 @@
             }
           },
           "config": {
-            "cassandra": {
-              "Name": "esb-credential-verification-cassandra",
-              "Key": "cassandra-password",
-              "cassandraHosts": "cassandra.infrastructure.svc.cluster.local",
-              "cassandraUser": "cassandra"
-            },
-            "signing": {
-              "Name": "signing",
-              "Key": "eckey"
-            },
-            "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+            "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
             "externalPresentation": {
+              "enabled": true,
               "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/demo-tenant/presentation/",
-              "enbaled": "\"true\"",
-              "enabled": true
-            },
-            "signerService": {
-              "presentationVerifyUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify",
-              "presentationSignUrl": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+              "requestObjectPolicy": "",
+              "clientIdPolicy": "",
+              "credentialSelectionPolicy": "",
+              "clientUrlSchema": "https"
             },
             "messaging": {
+              "protocol": "nats",
               "nats": {
-                "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+                "queueGroup": "credential-verification-service",
+                "timeoutInSec": 10
               }
             }
           },
           "ingress": {
             "enabled": false
+          },
+          "resourceClaim": {
+            "cassandra": {
+              "enabled": true,
+              "providerRef": "cassandra",
+              "keyspace": "ocm"
+            }
           }
         }
       },

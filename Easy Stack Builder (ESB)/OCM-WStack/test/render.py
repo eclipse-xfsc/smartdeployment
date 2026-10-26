@@ -113,4 +113,34 @@ for tenant in ['demo-tenant', 'company_one']:
             if didcomm:
                 assert didcomm[0]['matches']==[{'path':{'type':'Exact','value':'/api/didcomm/message/receive'},'method':'POST'}]
             checks+=1
-print(f'{checks} real Helm render scenarios passed (local runtime, gateway, upstream Envoy and tenant charts; no downloaded subchart dependencies).')
+# Use the supplied verification chart, including its bundled library dependency.
+# This test needs no registry access and exercises install and upgrade rendering.
+import tarfile
+with tempfile.TemporaryDirectory() as tmp:
+    wrapper=pathlib.Path(tmp)/'verification-wrapper'
+    wrapper.mkdir()
+    upstream=root/'test/fixtures/upstream/OCM W-Stack/Credential Verification Service Chart'
+    for name in ['Chart.yaml','values.yaml']:
+        shutil.copy(upstream/name,wrapper/name)
+    (wrapper/'charts').mkdir()
+    archive=root/'test/fixtures/verification-1.2.2/credential-verification-service-1.2.2-alpha.helm.tgz'
+    with tarfile.open(archive) as tar:
+        tar.extractall(wrapper/'charts',filter='data')
+    template=json.loads((root/'deployment/templates/native-overrides.json').read_text())['OCM W-Stack/Credential Verification Service Chart']
+    for tenant in ['demo-tenant','company_one']:
+        values=json.loads(json.dumps(template).replace('@TENANT_ID@',tenant).replace('@TENANT_URL@',f'https://{tenant}.example.com'))
+        for upgrade in [False,True]:
+            docs=render(wrapper,values,upgrade)
+            checks_result=json.loads(subprocess.check_output(
+                ['jq','-L',str(root/'deployment'),'include "filters"; verification_chart_checks'],
+                input=json.dumps(docs),text=True))
+            assert all(v is True for v in checks_result.values()), checks_result
+            deployment=next(d for d in docs if d['kind']=='Deployment')
+            env={e['name']:e for e in deployment['spec']['template']['spec']['containers'][0]['env']}
+            assert 'CREDENTIALVERIFICATION_MESSAGING_NATS_URL' not in env
+            assert 'CREDENTIALVERIFICATION_SIGNINGKEY' not in env
+            assert env['CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT']['value']=='10'
+            claim=next(d for d in docs if d['kind']=='ResourceClaim')
+            assert claim['spec']['externalSecretRef']['name']=='demotenant-cassandra-credentials'
+            checks+=1
+print(f'{checks} real Helm render scenarios passed (runtime, gateway, Envoy, tenant and supplied verification charts).')

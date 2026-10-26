@@ -645,8 +645,15 @@ validate_chart_manifests() {
         *) return 0 ;;
     esac
     rendered_documents "$directory" "$WORKDIR/manifests.json"
-    jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
-        "$WORKDIR/manifests.json" >/dev/null || { fail CHART_CONTRACT "Rendered contract changed for $chart."; return 1; }
+    if [[ $chart == 'OCM W-Stack/Credential Verification Service Chart' ]]; then
+        local failed_checks
+        failed_checks=$(jq -r -L "$DEPLOYMENT" 'include "filters"; verification_chart_checks |
+            to_entries | map(select(.value!=true)|.key) | join(", ")' "$WORKDIR/manifests.json")
+        [[ -z $failed_checks ]] || { fail CHART_CONTRACT "Verification chart checks failed: $failed_checks."; return 1; }
+    else
+        jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
+            "$WORKDIR/manifests.json" >/dev/null || { fail CHART_CONTRACT "Rendered contract changed for $chart."; return 1; }
+    fi
     if [[ $release == observability ]]; then
         jq '[.[] | select((.kind=="ConfigMap" or .kind=="Secret") and .metadata.labels.grafana_datasource=="1") |
             . as $doc | ((.data // {} | to_entries[] | .value |= (if $doc.kind=="Secret" then @base64d else . end)),

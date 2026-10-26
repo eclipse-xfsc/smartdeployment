@@ -126,7 +126,7 @@
                     "value": "10s"
                   },
                   {
-                    "name": "CREDENTIALVERIFICATION_MESSAGING_NATS_URL",
+                    "name": "CREDENTIALVERIFICATION_NATS_URL",
                     "value": "nats://nats.infrastructure.svc.cluster.local:4222"
                   }
                 ]
@@ -258,7 +258,7 @@
                 "value": "10s"
               },
               {
-                "name": "CREDENTIALVERIFICATION_MESSAGING_NATS_URL",
+                "name": "CREDENTIALVERIFICATION_NATS_URL",
                 "value": "nats://nats.infrastructure.svc.cluster.local:4222"
               }
             ]

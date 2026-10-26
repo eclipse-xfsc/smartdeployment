@@ -28,6 +28,11 @@ spec:
         - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_HOST")'
         - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_PORT")'
         - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT")'
-        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_MESSAGING_NATS_URL")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_URL")'
+    - group: ""
+      kind: Secret
+      namespace: ocm-wstack
+      name: credential-verification-service-state-signing
+      jsonPointers: [/data/state-signing-key]
   syncPolicy:
     syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]

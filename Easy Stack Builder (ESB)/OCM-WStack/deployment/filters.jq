@@ -251,9 +251,38 @@ def environment($name): container($name).env // [] | map({key:.name,value:.}) | 
 def deployment($name): [.[] | select(.kind=="Deployment" and .metadata.name==$name)][0];
 def resource($kind;$name): [.[] | select(.kind==$kind and .metadata.name==$name)][0];
 
+def verification_chart_checks:
+    . as $documents |
+    deployment("credential-verification-service") as $d |
+    ($d|environment("credential-verification-service")) as $env |
+    $d.spec.template.metadata.annotations as $a |
+    $env.CREDENTIALVERIFICATION_CASSANDRA_USER.valueFrom.secretKeyRef as $user |
+    $env.CREDENTIALVERIFICATION_CASSANDRA_PASSWORD.valueFrom.secretKeyRef as $password |
+    $env.CREDENTIALVERIFICATION_STATESIGNINGKEY.valueFrom.secretKeyRef as $state |
+    {deployment:($d!=null),
+     imagePullSecret:(any($d.spec.template.spec.imagePullSecrets[]?; .name=="esb-ocm-public-registry")),
+     providerInjection:($a["inject.xfsc.io/enabled"]=="true" and $a["inject.xfsc.io/env-prefix"]=="CREDENTIALVERIFICATION" and
+        (($a["inject.xfsc.io/needs"] // "" | split(",") | sort)==["cassandra","did-resolver","nats","signer","storage"]) and
+        (($a["inject.xfsc.io/env-replacements"] // "{}" | fromjson)=={})),
+     stateSigningSecret:($state.name=="credential-verification-service-state-signing" and $state.key=="state-signing-key" and
+        ($documents|resource("Secret";$state.name)|.data["state-signing-key"]|type=="string" and length>0)),
+     cassandraCredentials:($user.key=="username" and $password.key=="password" and $user.name!=null and $user.name==$password.name),
+     cassandraClaim:(any($documents[]; .kind=="ResourceClaim" and .spec.type=="cassandra" and
+        .spec.providerRef.name=="cassandra" and .spec.externalSecretRef.name==$user.name and .spec.parameters.keyspace=="ocm")),
+     storageEndpoint:($env.CREDENTIALVERIFICATION_STORAGE_URL.value=="http://storage-service.ocm-wstack.svc.cluster.local:8080"),
+     natsProtocol:($env.CREDENTIALVERIFICATION_PROTOCOL.value=="nats"),
+     natsTimeout:($env.CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT.value=="10"),
+     externalPresentation:($env.CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED.value=="true" and
+        ($env.CREDENTIALVERIFICATION_EXTERNALPRESENTATION_AUTHORIZEENDPOINT.value // "" |
+          test("^http://credential-verification-service\\.ocm-wstack\\.svc\\.cluster\\.local:8080/v1/tenants/[a-z0-9_-]+/presentation/$"))),
+     noPlaceholders:(($d|container("credential-verification-service")).env|tojson|test("NAMESPACE|@TENANT_ID@|\\.default\\.svc")|not),
+     noIngress:(any($documents[];.kind=="Ingress")|not)};
+
 def validate_chart($chart):
     . as $documents |
-    if $chart=="INFRA/core/nats" then
+    if $chart=="OCM W-Stack/Credential Verification Service Chart" then
+        verification_chart_checks | all(.[];.==true)
+    elif $chart=="INFRA/core/nats" then
         resource("StatefulSet";"nats") |
         any(.spec.template.spec.containers[]?; .name=="nats" and any(.ports[]?; .containerPort==8222))
     elif $chart=="INFRA/core/universal-resolver" then
@@ -313,13 +342,7 @@ def validate_chart($chart):
             $e.DIDCOMMCONNECTOR_DATBASE_PASSWORD.valueFrom.secretKeyRef=={name:"esb-credential-verification-cassandra",key:"cassandra-password"} and
             ($e.DIDCOMMCONNECTOR_URL.value|test("^https://[^/]+/api/didcomm$")) and
             (any($documents[]; .kind=="Ingress")|not)
-         else
-            all($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!="") and
-            any($d.spec.template.spec.imagePullSecrets[]?; .name=="esb-ocm-public-registry") and
-            $e.CREDENTIALVERIFICATION_SIGNINGKEY.valueFrom.secretKeyRef=={name:"signing",key:"eckey"} and
-            $e.CREDENTIALVERIFICATION_CASSANDRAPASSWORD.valueFrom.secretKeyRef=={name:"esb-credential-verification-cassandra",key:"cassandra-password"} and
-            $e.CREDENTIALVERIFICATION_CASSANDRAHOSTS.value=="cassandra.infrastructure.svc.cluster.local" and
-            $e.CREDENTIALVERIFICATION_MESSAGING_NATS_URL.value=="nats://nats.infrastructure.svc.cluster.local:4222"
+         else false
          end)
     end;
 
@@ -366,7 +389,7 @@ def owned_pods($deployment; $pods; $replicasets):
 def verification_nats_environment:
     {CREDENTIALVERIFICATION_NATS_HOST:"nats.infrastructure.svc.cluster.local",
      CREDENTIALVERIFICATION_NATS_PORT:"4222",CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT:"10s",
-     CREDENTIALVERIFICATION_MESSAGING_NATS_URL:"nats://nats.infrastructure.svc.cluster.local:4222"};
+     CREDENTIALVERIFICATION_NATS_URL:"nats://nats.infrastructure.svc.cluster.local:4222"};
 
 def verification_nats_contract:
     (.spec.template.spec // .spec) as $spec |
