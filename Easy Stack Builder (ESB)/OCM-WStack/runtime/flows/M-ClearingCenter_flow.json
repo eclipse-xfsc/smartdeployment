@@ -19,8 +19,8 @@
     "id": "ocm-clearingcenter-http-0",
     "type": "http in",
     "z": "ocm-clearingcenter",
-    "name": "GET /clearing/providers",
-    "url": "/orce/ui-api/v1/clearing/providers",
+    "name": "GET /clearing/inputs",
+    "url": "/orce/ui-api/v1/clearing/inputs",
     "method": "get",
     "upload": false,
     "swaggerDoc": "",
@@ -36,13 +36,81 @@
     "id": "ocm-clearingcenter-http-1",
     "type": "http in",
     "z": "ocm-clearingcenter",
+    "name": "GET /clearing/requests",
+    "url": "/orce/ui-api/v1/clearing/requests",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 110,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-clearingcenter-http-2",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
+    "name": "GET /clearing/requests/:id",
+    "url": "/orce/ui-api/v1/clearing/requests/:id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-clearingcenter-http-3",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
+    "name": "POST /clearing/requests/:id/store",
+    "url": "/orce/ui-api/v1/clearing/requests/:id/store",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 210,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-clearingcenter-http-4",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
+    "name": "GET /clearing/providers",
+    "url": "/orce/ui-api/v1/clearing/providers",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 220,
+    "y": 260,
+    "wires": [
+      [
+        "ocm-clearingcenter-service"
+      ]
+    ]
+  },
+  {
+    "id": "ocm-clearingcenter-http-5",
+    "type": "http in",
+    "z": "ocm-clearingcenter",
     "name": "POST /clearing/requests",
     "url": "/orce/ui-api/v1/clearing/requests",
     "method": "post",
     "upload": false,
     "swaggerDoc": "",
     "x": 220,
-    "y": 110,
+    "y": 310,
     "wires": [
       [
         "ocm-clearingcenter-service"

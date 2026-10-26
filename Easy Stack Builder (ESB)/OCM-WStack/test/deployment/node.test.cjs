@@ -142,3 +142,33 @@ kill -KILL $$
   assert.ok(!JSON.stringify(n.messages).includes('private diagnostic'));
   await n.close();
 });
+
+test('every node message includes URLs and current DNS records, including failures',async t=>{
+ const n=node(t,`#!/bin/bash
+printf '%s\n' '{"type":"phase","phase":"preflight"}' >&2
+printf '%s\n' '{"type":"public-access","gatewayAddresses":[{"type":"IPAddress","value":"192.0.2.10"},{"type":"IPAddress","value":"2001:db8::10"}]}' >&2
+printf '%s\n' '{"type":"phase","phase":"native-validation"}' >&2
+printf '%s\n' '{"status":"failed","code":"FIXTURE","message":"fixture failure"}'
+exit 1
+`,{tenantSubdomain:'ocm',publicDashboards:true});
+ await n.input({});
+ const payloads=n.messages.flat().filter(Boolean).map(m=>m.payload);
+ assert.ok(payloads.length>=4);
+ assert.equal(payloads[0].access.dns.status,'pending');
+ for(const p of payloads) assert.equal(p.access.urls.ui,'https://ocm.configured.example/orce/');
+ for(const p of payloads.slice(1)) {
+  assert.equal(p.access.dns.status,'discovered');
+  assert.equal(p.access.dns.records.length,6);
+  assert.deepEqual(p.access.dns.targets,['192.0.2.10','2001:db8::10']);
+ }
+ assert.equal(payloads.at(-1).code,'FIXTURE');
+});
+
+test('final node output maps hostname targets to CNAME and omits disabled dashboards',async t=>{
+ const n=node(t,`#!/bin/bash
+printf '%s\n' '{"status":"ready","gatewayAddresses":[{"type":"Hostname","value":"lb.example.net"}]}'
+`);
+ await n.input({});const p=n.messages.flat().filter(Boolean).at(-1).payload;
+ assert.equal(p.access.urls.argocd,undefined);
+ assert.deepEqual(p.access.dns.records,[{name:'demo-tenant.configured.example',type:'CNAME',value:'lb.example.net'}]);
+});

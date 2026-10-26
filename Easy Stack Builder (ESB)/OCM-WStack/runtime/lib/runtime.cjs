@@ -6,6 +6,7 @@ const {IssuerBootstrap}=require('./issuer-bootstrap.cjs');
 const {offerUrl}=require('./offers.cjs');
 const {Clearing}=require('./clearing.cjs');
 const definitions=[
+ ['GET','/clearing/inputs','clearing.request','clearingInputs'],['GET','/clearing/requests','clearing.request','clearingHistory'],['GET','/clearing/requests/:id','clearing.request','clearingJob'],['POST','/clearing/requests/:id/store','clearing.request','clearingStore',true],
  ['GET','/clearing/providers','clearing.request','clearingProviders'],['POST','/clearing/requests','clearing.request','clearingRequest',true],
  ['GET','/metrics','system.health.read','metrics'],['GET','/auth/me',null,'me'],['GET','/health/dependencies','system.health.read','health'],
  ['GET','/preferences',null,'preferences'],['PATCH','/preferences',null,'setPreferences'],['GET','/audit','audit.read','audit'],
@@ -20,14 +21,14 @@ const routes=definitions.map(([method,path,permission,action,mutate])=>({method,
 const modules=["Auth", "Credentials", "ClearingCenter", "Issue", "Relationships", "Provenance", "Base"].map(name=>require('./modules/'+name+'.cjs'));
 for(const route of routes)route.module=["Auth", "Credentials", "ClearingCenter", "Issue", "Relationships", "Provenance", "Base"][modules.findIndex(item=>item.actions.includes(route.action))];
 class Runtime {
- constructor(config){this.c=config;this.clearing=new Clearing();this.http=new Client({...config.services,issuerBootstrap:config.issuerBootstrapUrl||'http://dummycontentsigner:8080'});this.adapters=new Adapters(config,this.http);this.issuerBootstrap=new IssuerBootstrap(config,this.http);this.events=new Events(config,this.issuerBootstrap);this.adapters.statusTransport=this.events;this.ready=false;this.nativeState={ready:false,checks:[]};this.rates=new Map();this.counts=new Map();}
+ constructor(config){this.c=config;this.clearing=new Clearing(config);this.http=new Client({...config.services,issuerBootstrap:config.issuerBootstrapUrl||'http://dummycontentsigner:8080'});this.adapters=new Adapters(config,this.http);this.issuerBootstrap=new IssuerBootstrap(config,this.http);this.events=new Events(config,this.issuerBootstrap);this.adapters.statusTransport=this.events;this.ready=false;this.nativeState={ready:false,checks:[]};this.rates=new Map();this.counts=new Map();}
  async start(){
   if(this.ready)return; if(this.starting)return this.starting;
   this.starting=this.connect();return this.starting;
  }
  async connect(){
   const {MongoClient}=require('mongodb');while(!this.closing){try{this.mongo=new MongoClient(this.c.mongoUri,{serverSelectionTimeoutMS:3000,maxPoolSize:10});await this.mongo.connect();this.db=this.mongo.db('ocm_ui');
-  this.coordination=new Coordination(this.db,this.c.offerKey);await this.coordination.init();this.roles=new LocalRoles(this.c,this.db);await this.roles.init();this.auth=new LocalAuth(this.c,this.db,this.roles);await this.auth.init();this.registry=new (require('./registry.cjs').Registry)(this.db,this.events);await this.registry.init();if(this.closing){await this.mongo.close();return;}this.ready=true;this.events.start();this.issuerBootstrap.start();this.probeNative().catch(()=>{});this.probeTimer=setInterval(()=>this.probeNative().catch(()=>{}),20000);this.probeTimer.unref?.();return;
+  this.coordination=new Coordination(this.db,this.c.offerKey);await this.coordination.init();await this.clearing.init(this.db,this.adapters,this.coordination);this.roles=new LocalRoles(this.c,this.db);await this.roles.init();this.auth=new LocalAuth(this.c,this.db,this.roles);await this.auth.init();this.registry=new (require('./registry.cjs').Registry)(this.db,this.events);await this.registry.init();if(this.closing){await this.mongo.close();return;}this.ready=true;this.events.start();this.issuerBootstrap.start();this.probeNative().catch(()=>{});this.probeTimer=setInterval(()=>this.probeNative().catch(()=>{}),20000);this.probeTimer.unref?.();return;
   }catch{if(this.mongo)await this.mongo.close().catch(()=>{});if(!this.closing)await new Promise(resolve=>setTimeout(resolve,5000));}}
  }
  async probeNative(){
@@ -81,7 +82,7 @@ class Runtime {
    const fn=id=>this.execute(route.action,ctx,key,body,query,id||requestId);
    let data;
    if(route.mutate){
-    let reconcile;if(route.action==='deleteCredential')reconcile=()=>this.adapters.absent(ctx,key);if(route.action==='revoke')reconcile=()=>this.adapters.revoked(ctx,key);
+    let reconcile;if(route.action==='clearingStore')reconcile=()=>this.clearing.store(ctx,key);if(route.action==='deleteCredential')reconcile=()=>this.adapters.absent(ctx,key);if(route.action==='revoke')reconcile=()=>this.adapters.revoked(ctx,key);
     data=await this.coordination.run(ctx,route.action,req.headers['x-idempotency-key'],{key,body},fn,reconcile);
     this.events.emit('hint',{type:'resync',requiresRefresh:true});
    }else data=await fn();
@@ -98,7 +99,7 @@ class Runtime {
    return res.status(status).json({error:{code,requestId,...(e.operationId?{operationId:e.operationId,operationState:e.operationState}:{}),...(e.upstream?{upstream:e.upstream}:{}),...(e.upstreamStatus?{upstreamStatus:e.upstreamStatus}:{}),...(e.reason?{reason:e.reason}:{})},requestId});
   }
  }
- async close(){this.closing=true;this.ready=false;clearInterval(this.probeTimer);if(singleton===this)singleton=null;this.issuerBootstrap.close();await this.events.close();if(this.mongo)await this.mongo.close();}
+ async close(){this.closing=true;this.ready=false;clearInterval(this.probeTimer);if(singleton===this)singleton=null;this.issuerBootstrap.close();await this.clearing.close();await this.events.close();if(this.mongo)await this.mongo.close();}
 }
 let singleton;
 function instance(){if(!singleton)singleton=new Runtime(require('./config.cjs').load());return singleton;}

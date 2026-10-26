@@ -126,6 +126,30 @@ function execute(action, directory, onProgress, signal) {
   });
 }
 
+/** Public access details only; never copy credentials or internal ClusterIPs. */
+function accessDetails(config, addresses = []) {
+  const domain = String(config.domainAddress || config.domain || '').trim().toLowerCase().replace(/^\*\./, '');
+  const tenant = String(config.tenantSubdomain || config.tenantId || 'demo-tenant').trim().toLowerCase().replace(/_/g, '-');
+  const hostname = domain ? `${tenant}.${domain}` : null;
+  const targets = addresses.filter(a => a && typeof a.value === 'string' && a.value &&
+    ['IPAddress', 'Hostname'].includes(a.type));
+  const hosts = hostname ? [hostname] : [];
+  const urls = { tenant: hostname ? `https://${hostname}` : null,
+    ui: hostname ? `https://${hostname}/orce/` : null,
+    editor: hostname ? `https://${hostname}/orce/editor/` : null };
+  if (domain && [true, 'true', 1, '1'].includes(config.publicDashboards)) {
+    hosts.push(`argocd.${domain}`, `grafana.${domain}`);
+    urls.argocd = `https://argocd.${domain}`;
+    urls.grafana = `https://grafana.${domain}`;
+  }
+  return { urls, dns: { status: targets.length ? 'discovered' : 'pending',
+    automatic: [true, 'true', 1, '1'].includes(config.externalDns),
+    hostnames: hosts, targets: targets.map(a => a.value),
+    records: hosts.flatMap(name => targets.map(a => ({ name,
+      type: a.type === 'Hostname' ? 'CNAME' : a.value.includes(':') ? 'AAAA' : 'A',
+      value: a.value }))) } };
+}
+
 module.exports = function register(RED) {
   function OCMWStack(config) {
     RED.nodes.createNode(this, config);
@@ -144,12 +168,14 @@ module.exports = function register(RED) {
       }
       const action = msg.action || 'deploy';
       controller = new AbortController();
+      let access = accessDetails(config);
       function progress(event) {
         if (closed) return;
+        if (Array.isArray(event.gatewayAddresses)) access = accessDetails(config, event.gatewayAddresses);
         const text = event.phase || event.message;
         if (text) node.status({ fill: 'blue', shape: 'dot', text: text.slice(0, 100) });
         send([null, { _msgid: msg._msgid, topic: 'ocm-wstack/progress',
-          payload: { timestamp: new Date().toISOString(), action, ...event } }]);
+          payload: { timestamp: new Date().toISOString(), action, ...event, access } }]);
       }
       active = Promise.resolve().then(async () => {
         let directory;
@@ -165,18 +191,19 @@ module.exports = function register(RED) {
           await fs.writeFile(path.join(directory, 'credentials.json'),
             JSON.stringify(node.credentials || {}), { mode: 0o600 });
           const result = await execute(action, directory, progress, controller.signal);
+          if (Array.isArray(result.gatewayAddresses)) access = accessDetails(config, result.gatewayAddresses);
           if (!closed) {
             const ready = READY_STATUSES.has(result.status);
             node.status({ fill: ready ? 'green' : 'yellow', shape: ready ? 'dot' : 'ring',
               text: result.status || 'Inspection complete' });
-            send([{ _msgid: msg._msgid, topic: 'ocm-wstack/result', payload: { action, ...result } }, null]);
+            send([{ _msgid: msg._msgid, topic: 'ocm-wstack/result', payload: { action, ...result, access } }, null]);
           }
         } catch (error) {
           failure = error;
           if (!closed) {
             node.status({ fill: 'red', shape: 'ring', text: error.code || 'Failed' });
             send([{ _msgid: msg._msgid, topic: 'ocm-wstack/result',
-              payload: { action, status: 'failed', code: error.code || 'ERROR', message: error.message } }, null]);
+              payload: { action, status: 'failed', code: error.code || 'ERROR', message: error.message, access } }, null]);
           }
         } finally {
           try {

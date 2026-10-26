@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.9
+# OCM W-Stack deployer 12.5.11
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -33,11 +33,11 @@ The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container ins
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.5.9.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
+Install `orce-esb-ocmwstack-12.5.11.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
 Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`. Its DNS policy includes the discovered resolver backend ports. API requests use the discovered Kubernetes Service address with TLS verification for `kubernetes.default.svc`.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.9. The runtime application remains at 12.4.0; its installation chart is 12.5.9.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.11. The runtime, UI and runtime chart are version 12.5.11.
 
 Verification comparison accepts reordering of the complete expected provider-injected environment block. Missing, duplicate or changed entries remain visible. Signing-key preservation also normalizes an empty `data` map. Failure results are saved before lease cleanup; the node can recover them from its private operation directory and reports termination signals when no result exists.
 
@@ -71,3 +71,17 @@ Native services retain credential and connection data. UI operation records cont
 The bootstrap, tenant chart and native ApplicationSets use deployment commit `c1ba65c23ffdd891b6edec3bd277fad32b097378`. See [the upstream integration notes](docs/UPSTREAM-12.5.0.md) for the reviewed service versions and routing configuration.
 
 Full offline chart validation: `npm run test:charts -- --charts /path/to/deployment --output /path/to/results`. Use the dependency collection supplied with the release. The test renders the complete deployment plan for IONOS, Hetzner, DigitalOcean and generic configurations in install and upgrade modes.
+
+## Public URLs and DNS records in node output
+
+Every progress and result payload contains `access.urls` and `access.dns`.
+DNS status is `pending` until this operation discovers public Gateway or
+LoadBalancer addresses; then it is `discovered`. Records contain name, type
+(A/AAAA/CNAME), and value. Dashboard URLs and records appear only when public
+dashboards are enabled. Targets describe intended routing, not proof that DNS
+has been configured or endpoints are reachable. Failures retain the most
+recent discovered targets. Each new action starts with pending discovery.
+
+## Clearing Center
+
+Select the required Gaia-X credentials in the Clearing Center view to request a Loire compliance credential. The runtime verifies the signed authorization request, performs the OID4VCI exchange, verifies the returned credential signature and confirms storage. See [the API and deployment notes](docs/CLEARING-CENTER.md).

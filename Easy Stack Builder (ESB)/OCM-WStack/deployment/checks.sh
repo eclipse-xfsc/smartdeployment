@@ -222,6 +222,7 @@ inspect_stack() {
     kube_json "$WORKDIR/inspect-pvcs.json" get pvc -A -o json
     kube_json "$WORKDIR/inspect-jobs.json" get jobs -A -o json
     get_optional "$WORKDIR/inspect-gateway.json" infrastructure gateway envoy-gateway
+    emit "$(jq -c '{type:"public-access",gatewayAddresses:(.status.addresses // [])}' "$WORKDIR/inspect-gateway.json")"
     get_optional "$WORKDIR/inspect-cert.json" ocm-wstack secret "esb-$(config_value '.tenantRelease')-tls"
     get_optional "$WORKDIR/inspect-proxy.json" infrastructure envoyproxy envoy
     get_optional "$WORKDIR/inspect-policy.json" '' clusterpolicy esb-ocm-envoy-traffic

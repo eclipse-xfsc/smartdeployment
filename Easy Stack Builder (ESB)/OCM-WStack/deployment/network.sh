@@ -88,6 +88,9 @@ gateway_service() {
         "$WORKDIR/gateway-candidates.json" >/dev/null ||
         { fail GATEWAY_ROUTING 'Expected one Envoy LoadBalancer Service with a ClusterIP.'; return 1; }
     jq '.[0]' "$WORKDIR/gateway-candidates.json" >"$WORKDIR/gateway-service.json"
+    emit "$(jq -c '{type:"public-access",gatewayAddresses:[.status.loadBalancer.ingress[]? |
+        if .ip then {type:"IPAddress",value:.ip} elif .hostname then {type:"Hostname",value:.hostname} else empty end]}' \
+        "$WORKDIR/gateway-service.json")"
 }
 
 gateway_ports() {

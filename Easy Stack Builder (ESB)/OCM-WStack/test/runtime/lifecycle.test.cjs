@@ -52,7 +52,3 @@ test('native Retrieval observer emits only metadata hints for the configured sco
  const hint=hintFromEvent(Buffer.from(JSON.stringify(event)),entry,config);assert.deepEqual(hint,{type:'offers.changed',requiresRefresh:true});
  event.data.group_id='foreign';assert.equal(hintFromEvent(Buffer.from(JSON.stringify(event)),entry,config),null);
 });
-test('planned Clearing request is blocked until its trigger/poll/result contract is verified',async()=>{
- const clearing=new Clearing();const catalog=await clearing.list();assert.equal(catalog.items[0].url,'https://clearing.gaia-x.eu/api/v1');assert.equal(catalog.items[0].requestSupported,false);
- await assert.rejects(clearing.acquire({provider:'gaia-x'}),{code:'CLEARING_CONTRACT_UNVERIFIED'});
-});

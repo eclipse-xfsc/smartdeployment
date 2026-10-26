@@ -5,11 +5,11 @@ const ui=path.join(__dirname,'../../runtime/uibuilder/orce/dist');
 const vue=fs.readFileSync(process.env.ESB_TEST_VUE_PATH||path.join(path.dirname(require.resolve('vue/package.json')),'dist/vue.runtime.global.prod.js'),'utf8');
 const permissions=['credentials.read','credentials.receive','credentials.issue','credentials.verify','credentials.delete','credentials.revoke','relationships.read','relationships.write','clearing.request','roles.read','admin.users','audit.read','system.health.read'];
 const summary={id:'one',types:['Participant'],issuer:{id:'did:web:issuer.example'},subject:{id:'did:web:holder.example'},status:{state:'not_checked'},format:'ldp_vc'};
-async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false,nativeLifecycle=false,nativeFailure=false,authenticated=true,passwordChangeRequired=false}={}){
+async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false,acceptanceFailure=false,nativeLifecycle=false,nativeFailure=false,authenticated=true,passwordChangeRequired=false,clearing=false,sourceComponents=false}={}){
  const dom=await environment('https://ocm.example/orce/'),w=dom.window,calls=[],navigations=[],sockets=[];t.after(()=>{dom.window.close();assert.deepEqual(dom.errors,[]);});
  Object.defineProperty(w,'crypto',{value:require('node:crypto').webcrypto});w.confirm=()=>true;w.setInterval=()=>1;w.clearInterval=()=>{};w.io=(namespace,options)=>{sockets.push({namespace,options});return {on(){},disconnect(){}};};w.location.assign=url=>navigations.push(url);
  let session=authenticated;const csrf='ui-session-csrf-token';
- let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'admin.users',kind:'atomic',editable:false,permissions:['admin.users']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false;
+ let registry=[{id:'Native',name:'Native type',format:'ldp_vc',issuerConfigurationId:'Native',fields:{},available:true,revision:0}];let users=[{id:'user-1',username:'Alice',email:'alice@example.test',enabled:true,roles:[{id:'role-1',name:'viewer'}]}];const roles=[{id:'read',name:'credentials.read',kind:'atomic',editable:false,permissions:['credentials.read']},{id:'manage',name:'admin.users',kind:'atomic',editable:false,permissions:['admin.users']},{id:'role-1',name:'viewer',description:'Read credentials',kind:'composite',editable:true,permissions:['credentials.read']}];let removed=false,accepted=false;let clearingJobs=[];
  w.fetch=async(url,o)=>{calls.push({url,o});const p=url.replace('/orce/ui-api/v1','').split('?')[0];let data={items:[]};
   if(p==='/auth/csrf')return session
    ? {ok:true,status:200,json:async()=>({data:{csrfToken:csrf}})}
@@ -24,7 +24,11 @@ async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false
   assert.equal(o.headers['X-CSRF-Token'],csrf);
   assert.equal(o.headers.Authorization,undefined);
   if(p==='/issuance'&&issuanceFailure)return {ok:false,status:500,headers:{get:()=> 'parser-request-1'},json:async()=>{throw new SyntaxError('Unexpected token I, Internal Server Error');}};
-  if(p==='/credential-types'&&o.method==='GET')data={items:registry,nativeTypes:[{id:'Native',format:'ldp_vc'}]};
+  if(p==='/clearing/providers')data={items:clearing?[{id:'gaia-x',name:'Gaia-X Clearing Center',url:'https://compliance-dispatcher.lab.gaia-x.eu/v3',protocol:'OID4VP / OID4VCI',trustScope:'GX_LOIRE_COMPLIANCE',requestSupported:true}]:[]};
+  else if(p==='/clearing/inputs')data={items:['gaiax-legal-person','gaiax-vat-id','gaiax-terms-and-conditions'].map(id=>({id,credentials:[{id:id+'-stored'}]}))};
+  else if(p==='/clearing/requests'&&o.method==='POST'){assert.equal(o.headers['X-CSRF-Token'],csrf);assert.ok(o.headers['X-Idempotency-Key']);const body=JSON.parse(o.body);assert.equal(body.provider,'gaia-x');assert.equal(Object.keys(body.credentials).length,3);clearingJobs=[{id:'clearing-1',state:'pending',phase:'receiving'}];data={state:'pending',resourceId:'clearing-1'};}
+  else if(p==='/clearing/requests')data={items:clearingJobs};
+  else if(p==='/credential-types'&&o.method==='GET')data={items:registry,nativeTypes:[{id:'Native',format:'ldp_vc'}]};
   else if(p==='/credential-types'&&o.method==='POST'){registry.push({...JSON.parse(o.body),revision:1,available:false});data={state:'succeeded'};}
   else if(p.startsWith('/credential-types/')){const id=decodeURIComponent(p.split('/').at(-1));if(o.method==='DELETE')registry=registry.filter(x=>x.id!==id);else registry=registry.map(x=>x.id===id?{...JSON.parse(o.body),revision:x.revision+1}:x);data={state:'succeeded'};}
   else if(p==='/roles'&&o.method==='GET')data={items:roles};
@@ -50,7 +54,16 @@ async function boot(t,{failure=false,issuanceFailure=false,acceptedStorage=false
  };
  const authSource=fs.readFileSync(path.join(ui,'auth.js'),'utf8').replace(/^export /gm,'');
  w.eval('globalThis.auth=(()=>{'+authSource+';return {setup,login,headers,csrfToken,logout,changePassword};})();');
- w.eval(vue);w.eval('const {createApp,h,reactive,onMounted,onUnmounted}=Vue;'+fs.readFileSync(path.join(ui,'locales.js'),'utf8').replace('export const locales','const locales')+fs.readFileSync(path.join(ui,'app.js'),'utf8').replace(/^import .*;\n/gm,''));
+ w.eval(vue);
+ if(sourceComponents){
+  const src=path.join(__dirname,'../../ui/src');
+  w.eval('const {createApp,h,reactive,onMounted,onUnmounted}=Vue;'+fs.readFileSync(path.join(src,'locales.js'),'utf8').replace('export const locales','const locales'));
+  for(const name of ['ProvenanceGraph','RelationshipsView','ClearingCenterView','IssueCredentialView','ReceiveCredentialsView','CredentialsView','App']){
+   const source=fs.readFileSync(path.join(src,name==='App'?'App.vue':'views/'+name+'.vue'),'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+   w.eval(source.replace(/^import .*;\n/gm,'').replace('export default','const '+name+' = '));
+  }
+  w.eval("createApp(App).mount('#app');");
+ }else w.eval('const {createApp,h,reactive,onMounted,onUnmounted}=Vue;'+fs.readFileSync(path.join(ui,'locales.js'),'utf8').replace('export const locales','const locales')+fs.readFileSync(path.join(ui,'app.js'),'utf8').replace(/^import .*;\n/gm,''));
  const settle=async()=>{for(let i=0;i<5;i++)await new Promise(r=>setImmediate(r));};await settle();
  const click=async text=>{const b=[...w.document.querySelectorAll('button')].find(x=>x.textContent.trim()===text&&!x.disabled);assert.ok(b,'button '+text);b.click();await settle();};
  return {w,calls,navigations,sockets,click,settle,text:()=>w.document.body.textContent};
@@ -168,4 +181,15 @@ test('Required password change precedes credential access',async t=>{
  assert.equal(change.o.headers['X-CSRF-Token'],'ui-session-csrf-token');
  assert.equal(b.w.auth.csrfToken(),undefined);
  assert.deepEqual(b.navigations,['/orce/']);
+});
+
+for(const sourceComponents of [false,true])test('UI: Clearing credential selection, consent and background progress '+(sourceComponents?'Vue components':'distribution'),async t=>{
+ const b=await boot(t,{clearing:true,sourceComponents});await b.click('Gaia-X Clearing Center');
+ const request=()=>[...b.w.document.querySelectorAll('button')].find(x=>x.textContent==='Request credential');
+ assert.ok(request().disabled);
+ for(const select of b.w.document.querySelectorAll('select[id^="s-gaiax-"]')){select.value=select.options[1].value;select.dispatchEvent(new b.w.Event('change',{bubbles:true}));}
+ await b.settle();assert.equal(request().disabled,false);
+ let consent;b.w.confirm=message=>{consent=message;return true;};await b.click('Request credential');
+ assert.match(consent,/compliance-dispatcher.lab.gaia-x.eu/);assert.match(b.text(),/Receiving the compliance credential/);assert.match(b.text(),/clearing-1/);assert.ok(request().disabled);
+ assert.equal(b.calls.filter(x=>x.url.endsWith('/clearing/requests')&&x.o.method==='POST').length,1);
 });
