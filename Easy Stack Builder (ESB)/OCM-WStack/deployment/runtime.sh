@@ -115,13 +115,14 @@ runtime_install() {
              stringData:{"secrets.json":(.|tojson),"mongo-password":.mongoPassword}}' "$WORKDIR/runtime-secrets.json" >"$WORKDIR/runtime-secret-new.json"
         run 30 kubectl create -f "$WORKDIR/runtime-secret-new.json"
     fi
+    runtime_dns_fallback "$WORKDIR/runtime-dns-egress.json"
     gateway_ports >"$WORKDIR/runtime-ports.json"
     local hash
     hash=$(jq -cj '.' "$WORKDIR/runtime-secrets.json" | sha256sum | cut -d ' ' -f 1)
     jq '.mongoUri' "$WORKDIR/runtime-secrets.json" | mongo_ports >"$WORKDIR/mongo-ports.json"
     jq --slurpfile runtime "$WORKDIR/runtime-config.json" --slurpfile gateway "$WORKDIR/gateway-service.json" \
-        --slurpfile ports "$WORKDIR/runtime-ports.json" --slurpfile mongo "$WORKDIR/mongo-ports.json" --arg hash "$hash" '
-        {host:.tenantHost,image:.runtimeImage,secretChecksum:$hash,
+        --slurpfile dns "$WORKDIR/runtime-dns-egress.json" --slurpfile ports "$WORKDIR/runtime-ports.json" --slurpfile mongo "$WORKDIR/mongo-ports.json" --arg hash "$hash" '
+        {host:.tenantHost,image:.runtimeImage,secretChecksum:$hash,dnsFallbackEgress:$dns[0],
          hostAliases:[{ip:$gateway[0].spec.clusterIP,hostnames:[.tenantHost]}],gatewayPorts:$ports[0],
          listenerSetName:(.tenantRelease+"-xfsc-tenant-gateway"),
          storage:{orceSize:.orceStorageSize,mongoSize:.mongoStorageSize,class:.actualStorageClass},
@@ -200,4 +201,18 @@ dashboard_install() {
     run "$((TIMEOUT_SECONDS+30))" kubectl -n argocd wait --for=condition=Programmed listenerset/esb-argocd "--timeout=${TIMEOUT_SECONDS}s"
     run "$((TIMEOUT_SECONDS+30))" kubectl -n observability wait --for=condition=Programmed listenerset/esb-grafana "--timeout=${TIMEOUT_SECONDS}s"
     jq '{public:true,username:"admin",argocd:("https://argocd."+.domain),grafana:("https://grafana."+.domain)}' "$CONFIG" >"$WORKDIR/dashboard-result.json"
+}
+
+# Optional discovery: standard DNS remains usable when discovery is unavailable.
+runtime_dns_fallback() {
+    local output=$1
+    printf '[]\n' >"$output"
+    if run_capture "$WORKDIR/runtime-dns-service.json" 30 kubectl -n kube-system get service kube-dns -o json &&
+       run_capture "$WORKDIR/runtime-dns-slices.json" 30 kubectl -n kube-system get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kube-dns -o json; then
+        if json_program 'runtime_dns_fallback($slices[0])' --slurpfile slices "$WORKDIR/runtime-dns-slices.json" \
+            "$WORKDIR/runtime-dns-service.json" >"$WORKDIR/runtime-dns-next.json"; then
+            mv "$WORKDIR/runtime-dns-next.json" "$output"
+        fi
+    fi
+    emit "$(jq -cn --slurpfile rules "$output" '{type:"runtime-dns",phase:"orce-ui",standardPort:53,additionalRules:$rules[0]}')"
 }

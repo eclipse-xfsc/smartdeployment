@@ -697,3 +697,8 @@ def inspect_report($c;$lock;$apps;$pods;$pvcs;$jobs;$gateway;$cert;$proxy;$polic
                 "Point the tenant hostname"+(if $c.publicDashboards then ", argocd."+$c.domain+" and grafana."+$c.domain else "" end)+
                 " to these gateway addresses. Public TCP 443 must reach Envoy. Remove stale A/AAAA records." end)}
     };
+
+# Keep standard DNS; add only verified alternate DNS backend ports.
+def runtime_dns_fallback($slices):
+    try (guard_dns_egress($slices) | map(.ports |= map(select(.port != 53))) |
+        map(select(.ports|length>0))) catch [];

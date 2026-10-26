@@ -144,3 +144,14 @@ with tempfile.TemporaryDirectory() as tmp:
             assert claim['spec']['externalSecretRef']['name']=='demotenant-cassandra-credentials'
             checks+=1
 print(f'{checks} real Helm render scenarios passed (runtime, gateway, Envoy, tenant and supplied verification charts).')
+
+for backend in [53,8053,1053]:
+    fallback=[] if backend==53 else [{'to':[{'namespaceSelector':{'matchLabels':{'kubernetes.io/metadata.name':'kube-system'}},'podSelector':{'matchLabels':{'k8s-app':'kube-dns'}}}], 'ports':[{'port':backend,'protocol':'UDP'},{'port':backend,'protocol':'TCP'}]}]
+    for upgrade in [False,True]:
+        docs=render(root/'charts-runtime',{**base,'dnsFallbackEgress':fallback},upgrade)
+        policy=next(d for d in docs if d['kind']=='NetworkPolicy' and d['metadata']['name']=='ocm-orce')
+        rules=policy['spec']['egress']
+        assert any(r.get('ports')==[{'protocol':'UDP','port':53},{'protocol':'TCP','port':53}] for r in rules)
+        if fallback: assert fallback[0] in rules
+        else: assert not any(p.get('port')==8053 for r in rules for p in r.get('ports',[]))
+        print(f'PASS runtime DNS fallback backend={backend} upgrade={upgrade}')

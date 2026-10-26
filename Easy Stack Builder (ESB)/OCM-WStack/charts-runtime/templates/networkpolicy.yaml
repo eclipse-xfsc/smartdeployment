@@ -30,6 +30,9 @@ spec:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: kube-system}
       ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- with .Values.dnsFallbackEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
     - to: [{podSelector: {}}]
       ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 8080}, {protocol: TCP, port: 9090}, {protocol: TCP, port: 8083}, {protocol: TCP, port: 4222}, {protocol: TCP, port: 27017}]
     - to:

@@ -67,3 +67,32 @@ api_request GET /api/v1/namespaces/ocm-wstack/pods "$WORKDIR/response.json"
   assert.deepEqual(JSON.parse(fs.readFileSync(dir+'/response.json')),{items:[]});
   assert.ok(!r.stdout.includes('fixture-token'));
 });
+
+test('runtime DNS fallback retains default policy on standard or unsupported discovery',()=>{
+  for(const port of [53,8053,1053]) {
+    const f=dns(port),rules=jq('runtime_dns_fallback($slices)',f.service,{slices:f.slices});
+    assert.deepEqual(rules,port===53?[]:jq('guard_dns_egress($slices)',f.service,{slices:f.slices}));
+  }
+  for(const change of [f=>f.service.spec.selector={},f=>f.slices.items=[],f=>f.slices.items[0].ports[0].port=70000,f=>f.slices.items[0].metadata.namespace='other']) {
+    const f=dns();change(f);assert.deepEqual(jq('runtime_dns_fallback($slices)',f.service,{slices:f.slices}),[]);
+  }
+});
+
+test('runtime DNS discovery tolerates API failure and writes scoped alternate rules',t=>{
+ const {bash}=require('./helpers.cjs');
+ for(const mode of ['success','unavailable']) {
+  const f=dns(),dir=workspace(t,{'service.json':f.service,'slices.json':f.slices});
+  const result=bash(dir,`
+run_capture() {
+  [[ "$MODE" == success ]] || return 1
+  if [[ "$*" == *endpointslices* ]]; then cp "$WORKDIR/slices.json" "$1";
+  else cp "$WORKDIR/service.json" "$1"; fi
+}
+runtime_dns_fallback "$WORKDIR/rules.json"
+cat "$WORKDIR/rules.json"
+`,{MODE:mode});
+  assert.equal(result.status,0,result.stderr);
+  const rules=JSON.parse(result.stdout);assert.equal(rules.length,mode==='success'?1:0);
+  if(rules.length) assert.deepEqual(rules[0].ports,[{port:8053,protocol:'TCP'},{port:8053,protocol:'UDP'}]);
+ }
+});
