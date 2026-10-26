@@ -334,6 +334,7 @@ def validate_chart($chart):
             ($d|environment($name)) as $e |
             $e.PREAUTHBRIDGE_REDIS_USERNAME.valueFrom.secretKeyRef as $user |
             $e.PREAUTHBRIDGE_REDIS_PASSWORD.valueFrom.secretKeyRef as $password |
+            ((any($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!=""))|not) and
             $user.name!=null and $user.name==$password.name and $user.key=="username" and $password.key=="password" and
             any($documents[]; .kind=="ResourceClaim" and .spec.type=="redis" and .spec.externalSecretRef.name==$user.name and
                 .spec.providerRef.name=="redis" and .spec.parameters.acl=={keys:["auth:*"]})
@@ -463,6 +464,48 @@ def credential_references($secrets):
         (if $ref.key!=null then [$ref.key] else ($secret.data // {} | keys) end)[] as $key |
         require_that($secret.data[$key]!=null or $ref.optional==true; "CONSUMER_SECRET_KEY_PENDING") |
         [$ref.name+"/"+$key,$secret.data[$key]]) | unique_by(.[0]) | sort_by(.[0]);
+
+# Public provisioning status contains references and condition codes only.
+def condition_reason:
+    (.reason // "Pending") | if type=="string" and test("^[A-Za-z][A-Za-z0-9_-]{0,63}$") then . else "Pending" end;
+
+def native_credential_status($claims; $external; $secrets):
+    [.[] | . as $deployment | secret_references[] | select(.optional!=true) |
+        . as $ref | [$secrets[] | select(.metadata.name==$ref.name)][0] as $secret |
+        [$external[] | select((.spec.target.name // .metadata.name)==$ref.name)][0] as $es |
+        [$claims[] | select($es!=null and .spec.externalSecretRef.name==$es.metadata.name)][0] as $claim |
+        [$claim.status.conditions[]? | select(.type=="Ready")][0] as $condition |
+        [$es.status.conditions[]? | select(.type=="Ready")][0] as $sync |
+        {workload:$deployment.metadata.name,secret:$ref.name,key:$ref.key,
+         present:($secret!=null and ($ref.key==null or ($secret.data[$ref.key] // "")!="")),
+         externalSecret:($es.metadata.name // null),
+         externalSecretReady:($es==null or ($sync.status=="True" and $sync.reason!="SecretDeleted")),
+         externalSecretReason:(if $es==null then null else $sync|condition_reason end),
+         claim:($claim.metadata.name // null),
+         claimReady:($claim==null or ($condition.status=="True" and
+            ($condition.observedGeneration // $claim.status.observedGeneration)==$claim.metadata.generation)),
+         claimReason:(if $claim==null then null else $condition|condition_reason end)} |
+        .ready=(.present and .externalSecretReady and .claimReady)] |
+    unique_by([.workload,.secret,.key]) |
+    {ready:all(.[];.ready),pending:map(select(.ready|not))};
+
+def credential_refresh_targets($pending; $claims; $planned):
+    . as $external |
+    [$pending.pending[] | select(.present==false and .claimReason=="ClaimSecretPending") |
+     . as $waiting |
+     [$claims[] | select(.metadata.name==$waiting.claim and .metadata.namespace=="ocm-wstack")][0] as $claim |
+     [$external[] | select(.metadata.name==$waiting.externalSecret and .metadata.namespace=="ocm-wstack")][0] as $es |
+     [$planned[] | select(.kind=="ResourceClaim" and .metadata.namespace=="ocm-wstack" and .metadata.name==$waiting.claim)][0] as $expectedClaim |
+     [$planned[] | select(.kind=="ExternalSecret" and .metadata.namespace=="ocm-wstack" and .metadata.name==$waiting.externalSecret)][0] as $expectedSecret |
+     select($expectedClaim!=null and $expectedSecret!=null and $claim.spec==$expectedClaim.spec) |
+     select(($es.spec.target.name // $es.metadata.name)==($expectedSecret.spec.target.name // $expectedSecret.metadata.name) and
+            $es.spec.secretStoreRef==$expectedSecret.spec.secretStoreRef and
+            ([$es.spec.data[]? | {secretKey,remoteRef:{key:.remoteRef.key,property:.remoteRef.property}}] | sort_by(.secretKey))==
+            ([$expectedSecret.spec.data[]? | {secretKey,remoteRef:{key:.remoteRef.key,property:.remoteRef.property}}] | sort_by(.secretKey))) |
+     select(any($claim.status.conditions[]?; .type=="Ready" and .status=="False" and .reason=="ClaimSecretPending" and
+        (.observedGeneration // $claim.status.observedGeneration)==$claim.metadata.generation)) |
+     select(($es.metadata.uid // "")!="" and ($es.metadata.resourceVersion // "")!="") |
+     $es] | unique_by(.metadata.uid);
 
 def secret_value($secrets; $name; $key):
     [$secrets[] | select(.metadata.name==$name)][0].data[$key] |

@@ -1,6 +1,9 @@
 {
   "OCM W-Stack/Pre Authorization Bridge Chart": {
     "pre-authorization-bridge": {
+      "image": {
+        "pullSecrets": ""
+      },
       "podAnnotations": {
         "inject.xfsc.io/enabled": "true",
         "inject.xfsc.io/needs": "nats,redis,signer",

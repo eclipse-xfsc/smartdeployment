@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Render the complete ESB plan using an offline deployment chart collection."""
-import argparse, concurrent.futures, json, pathlib, shutil, subprocess, tarfile
+import argparse, concurrent.futures, copy, json, pathlib, shutil, subprocess, tarfile
 import yaml
 
 yaml.SafeLoader.add_constructor('tag:yaml.org,2002:value',lambda loader,node:loader.construct_scalar(node))
@@ -38,7 +38,7 @@ def render(task):
  assert 'cannot overwrite table with non table' not in result.stderr and 'destination for' not in result.stderr,result.stderr
  docs=[d for d in yaml.safe_load_all(result.stdout) if d]
  for d in docs:
-  if d['kind'] in ('Deployment','StatefulSet','DaemonSet','ResourceProvider'):d.setdefault('metadata',{}).setdefault('namespace',job['namespace'])
+  if d['kind'] in ('Deployment','StatefulSet','DaemonSet','ResourceProvider','ResourceClaim','ExternalSecret'):d.setdefault('metadata',{}).setdefault('namespace',job['namespace'])
  if job['chart'] in checks:assert jq('validate_chart($chart)',docs,chart=job['chart']) is True,f'{scenario}/{job["chart"]}: contract'
  if job['chart']=='INFRA/observability/opentelemtry':
   datasources=[]
@@ -67,10 +67,43 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
    result,docs=future.result();all_results.append(result);combined.setdefault((task[0],task[3]),[]).extend(docs)
    print('PASS',result['scenario'],result['chart'],'upgrade' if result['upgrade'] else 'install',flush=True)
   except Exception as error:failures.append(str(error));print('FAIL',str(error),flush=True)
+credential_results=[]
 for key,docs in combined.items():
  errors=jq('provider_contract_errors',docs)
  if errors:failures.append(f'{key}: provider references: {errors}')
-report={'helm':subprocess.check_output([helm,'version','--short'],text=True).strip(),'renderScenarios':len(tasks),'passed':len(all_results),'results':all_results,'failures':failures}
+ # Replay the initial ESO deletion and subsequent claim provisioning with the
+ # actual rendered consumer, claim and ExternalSecret bindings for every plan.
+ try:
+  native=[d for d in docs if d.get('metadata',{}).get('namespace')=='ocm-wstack']
+  planned=[d for d in native if d['kind'] in ('ResourceClaim','ExternalSecret')]
+  deployments=[d for d in native if d['kind']=='Deployment']
+  claims=copy.deepcopy([d for d in native if d['kind']=='ResourceClaim'])
+  external=copy.deepcopy([d for d in native if d['kind']=='ExternalSecret'])
+  assert len(claims)==6,f'{key}: expected six native credential claims'
+  names={c['spec']['externalSecretRef']['name'] for c in claims}
+  external=[e for e in external if e['metadata']['name'] in names]
+  assert len(external)==len(claims),f'{key}: claim/ESO binding missing'
+  for c in claims:
+   c['metadata']['generation']=1
+   c['status']={'observedGeneration':1,'conditions':[{'type':'Ready','status':'False','reason':'ClaimSecretPending','observedGeneration':1}]}
+  for e in external:
+   e['metadata'].update(uid='fixture-'+e['metadata']['name'],resourceVersion='1')
+   e['status']={'conditions':[{'type':'Ready','status':'True','reason':'SecretDeleted'}]}
+  status=jq('native_credential_status($claims;$external;$secrets)',deployments,claims=claims,external=external,secrets=[])
+  targets=jq('credential_refresh_targets($pending;$claims;$planned)',external,pending=status,claims=claims,planned=planned)
+  assert {e['metadata']['name'] for e in targets}==names,f'{key}: pending targets were not selected'
+  secrets={}
+  for ref in jq('[.[] | secret_references[] | select(.optional!=true)]',deployments):
+   secret=secrets.setdefault(ref['name'],{'metadata':{'name':ref['name']},'data':{}})
+   secret['data'][ref.get('key') or 'fixture']='dGVzdA=='
+  for e in external:e['status']['conditions'][0]['reason']='SecretSynced'
+  for c in claims:c['status']['conditions'][0].update(status='True',reason='Provisioned')
+  status=jq('native_credential_status($claims;$external;$secrets)',deployments,claims=claims,external=external,secrets=list(secrets.values()))
+  assert status['ready'],f'{key}: provisioned consumer references did not become ready'
+  assert jq('credential_refresh_targets($pending;$claims;$planned)',external,pending=status,claims=claims,planned=planned)==[]
+  credential_results.append({'scenario':key[0],'upgrade':key[1],'claims':len(claims),'passed':True})
+ except Exception as error:failures.append(str(error))
+report={'helm':subprocess.check_output([helm,'version','--short'],text=True).strip(),'renderScenarios':len(tasks),'passed':len(all_results),'results':all_results,'credentialScenarios':credential_results,'failures':failures}
 (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps({k:v for k,v in report.items() if k!='results'},indent=2))
 raise SystemExit(bool(failures))

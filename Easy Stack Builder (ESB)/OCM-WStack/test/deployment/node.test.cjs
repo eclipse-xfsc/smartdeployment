@@ -83,21 +83,24 @@ test('unknown actions do not invoke Bash', async t => {
 test('node close cancels the process group, waits for completion and blocks concurrent actions', async t => {
   const n = node(t, `#!/bin/bash
 trap 'wait; exit 0' TERM
+cat >"$(dirname "$0")/child.sh" <<'CHILD'
+trap 'printf stopped >"$(dirname "$0")/child-stopped"; exit 0' TERM
+printf started >"$(dirname "$0")/child-started"
 sleep 300 &
-printf '%s' "$!" >"$(dirname "$0")/child-pid.tmp"
-mv "$(dirname "$0")/child-pid.tmp" "$(dirname "$0")/child-pid"
+wait
+CHILD
+bash "$(dirname "$0")/child.sh" &
 wait
 `);
   const operation = n.input({ action: 'deploy' });
   const deadline = Date.now() + 3000;
-  while (!fs.existsSync(path.join(n.dir, 'child-pid')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.ok(fs.existsSync(path.join(n.dir, 'child-pid')));
+  while (!fs.existsSync(path.join(n.dir, 'child-started')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(fs.existsSync(path.join(n.dir, 'child-started')));
   const busy = await n.input({ action: 'inspect' });
   assert.match(busy.message, /already running/);
   await n.close();
   assert.equal((await operation).code, 'CANCELLED');
-  const pid = fs.readFileSync(path.join(n.dir, 'child-pid'), 'utf8');
-  if (fs.existsSync(`/proc/${pid}/stat`)) assert.match(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'), /\) Z /);
+  assert.equal(fs.readFileSync(path.join(n.dir, 'child-stopped'), 'utf8'), 'stopped');
   assert.equal(n.messages.length, 0);
 });
 

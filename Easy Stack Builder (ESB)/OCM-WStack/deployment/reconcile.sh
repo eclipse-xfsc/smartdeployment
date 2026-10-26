@@ -7,7 +7,7 @@ shopt -s inherit_errexit
 umask 077
 
 GUARD_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-STATE_DIR=${OCM_GUARD_STATE_DIR:-/state}
+STATE_DIR=${OCM_GUARD_STATE_DIR:-/state/guard}
 API_ACCOUNT=/var/run/secrets/kubernetes.io/serviceaccount
 REDIS_FD=
 HTTP_PID=
@@ -343,14 +343,19 @@ http_response() {
     printf 'HTTP/1.1 %s %s\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: %s\r\n\r\n%s' "$status" "$reason" "$length" "$body"
 }
 
+guard_state_init() {
+    # The mounted volume belongs to kubelet; the process owns this subdirectory.
+    mkdir -p "$STATE_DIR"
+    chmod 700 "$STATE_DIR"
+    jq -cn '{ready:false,code:"GUARD_STARTING"}' >"$STATE_DIR/status.json"
+}
+
 guard_main() {
     local tool
     for tool in bash jq curl openssl nc timeout sha256sum; do
         command -v "$tool" >/dev/null || { printf 'Missing reconciler command: %s\n' "$tool" >&2; return 1; }
     done
-    mkdir -p "$STATE_DIR"
-    chmod 700 "$STATE_DIR"
-    jq -cn '{ready:false,code:"GUARD_STARTING"}' >"$STATE_DIR/status.json"
+    guard_state_init
     (
         server_pid=''
         trap '[[ -z $server_pid ]] || kill "$server_pid" 2>/dev/null; exit 0' TERM INT

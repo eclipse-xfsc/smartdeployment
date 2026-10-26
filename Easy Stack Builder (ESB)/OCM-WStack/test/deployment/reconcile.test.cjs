@@ -6,6 +6,28 @@ const path = require('node:path');
 const { workspace, bash, jq } = require('./helpers.cjs');
 const fixture = require('./fixtures/reconciler.json');
 
+test('guard creates private state beneath the mounted volume without chmod on its root', t => {
+  const dir = workspace(t);
+  fs.mkdirSync(path.join(dir, 'state'));
+  const result = bash(dir, `
+unset OCM_GUARD_STATE_DIR
+source "$DEPLOYMENT/reconcile.sh"
+STATE_DIR="$WORKDIR$STATE_DIR"
+chmod() {
+  [[ \${@: -1} != "$WORKDIR/state" ]] || return 1
+  command chmod "$@"
+}
+guard_state_init
+printf 'GET /health HTTP/1.1\\r\\n\\r\\n' | http_response
+`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^HTTP\/1\.1 200 /);
+  const state = path.join(dir, 'state/guard');
+  assert.equal(fs.statSync(state).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(path.join(state, 'status.json')).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(state, 'status.json'))), {ready:false,code:'GUARD_STARTING'});
+});
+
 function run(t, mutate = () => {}, options = {}) {
   const f = structuredClone(fixture); mutate(f);
   const dir = workspace(t, Object.fromEntries(Object.entries({

@@ -219,12 +219,58 @@ repair_retrieval() {
     emit "$(jq -c '{type:"migration-recovery",service:"credential-retrieval",state,version:1,checksum,evidence:"ocm-wstack/esb-retrieval-migration-recovery"}' "$WORKDIR/recovery-evidence.json")"
 }
 
+native_credential_status() {
+    kube_json "$WORKDIR/startup-claims.json" -n ocm-wstack get resourceclaims.resources.xfsc.io -o json
+    kube_json "$WORKDIR/startup-external.json" -n ocm-wstack get externalsecrets.external-secrets.io -o json
+    kube_json "$WORKDIR/startup-secrets.json" -n ocm-wstack get secrets -o json
+    json_program '.items | native_credential_status($claims[0].items;$external[0].items;$secrets[0].items)' \
+        --slurpfile claims "$WORKDIR/startup-claims.json" --slurpfile external "$WORKDIR/startup-external.json" \
+        --slurpfile secrets "$WORKDIR/startup-secrets.json" "$WORKDIR/startup-deployments.json" >"$WORKDIR/credential-status.json"
+    emit "$(jq '.+{type:"ocm-credentials",phase:"ocm-startup"}' "$WORKDIR/credential-status.json")"
+}
+
+refresh_pending_credentials() {
+    [[ -f $WORKDIR/provider-documents.json ]] ||
+        { fail CHART_PLAN 'The validated credential plan is unavailable.'; return 1; }
+    json_program '.items | credential_refresh_targets($pending[0];$claims[0].items;$planned[0])' \
+        --slurpfile pending "$WORKDIR/credential-status.json" --slurpfile claims "$WORKDIR/startup-claims.json" \
+        --slurpfile planned "$WORKDIR/provider-documents.json" "$WORKDIR/startup-external.json" >"$WORKDIR/credential-refresh.json"
+    local name uid previous now
+    [[ -f $WORKDIR/credential-refresh-times.json ]] || printf '{}\n' >"$WORKDIR/credential-refresh-times.json"
+    while IFS=$'\t' read -r name uid; do
+        now=$SECONDS
+        previous=$(jq -r --arg uid "$uid" '.[$uid] // -60' "$WORKDIR/credential-refresh-times.json")
+        ((now-previous >= 60)) || continue
+        jq --arg uid "$uid" --arg sync "${ESB_LEASE_HOLDER:-esb}-$(date +%s)-$now" '
+            .[] | select(.metadata.uid==$uid) |
+            [{op:"test",path:"/metadata/uid",value:.metadata.uid},
+             {op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
+             {op:"add",path:"/metadata/annotations",value:((.metadata.annotations // {})+{"force-sync":$sync})}]' \
+            "$WORKDIR/credential-refresh.json" >"$WORKDIR/credential-refresh-patch.json"
+        verify_lease
+        if run_capture "$WORKDIR/credential-refreshed.json" 30 kubectl -n ocm-wstack patch externalsecret "$name" \
+            --type=json --patch-file "$WORKDIR/credential-refresh-patch.json"; then
+            jq --arg uid "$uid" --argjson now "$now" '.[$uid]=$now' "$WORKDIR/credential-refresh-times.json" >"$WORKDIR/credential-refresh-times-next.json"
+            mv "$WORKDIR/credential-refresh-times-next.json" "$WORKDIR/credential-refresh-times.json"
+            emit "$(jq -cn --arg name "$name" '{type:"credential-refresh",phase:"ocm-startup",externalSecret:$name}')"
+        elif grep -Eiq 'Conflict|object has been modified|test failed|test operation does not apply|NotFound' "$LAST_ERROR"; then
+            # Read the updated resource on the next startup pass.
+            continue
+        else
+            fail KUBERNETES "Credential refresh failed for $name: $(safe_error "$LAST_ERROR")"
+            return 1
+        fi
+    done < <(jq -r '.[] | [.metadata.name,.metadata.uid] | @tsv' "$WORKDIR/credential-refresh.json")
+}
+
 native_startup() {
     local started=$SECONDS name pod dirty
     local targets=(credential-retrieval-service)
     [[ $(optional_value '.runtimeServices.didcomm') != '' ]] || targets+=(didcomm-connector)
     while ((SECONDS-started < TIMEOUT_SECONDS)); do
         kube_json "$WORKDIR/startup-deployments.json" -n ocm-wstack get deployments -o json
+        native_credential_status
+        refresh_pending_credentials
         jq '[.items[]|select(.metadata.name=="credential-retrieval-service")][0]' "$WORKDIR/startup-deployments.json" >"$WORKDIR/retrieval-deployment.json"
         if jq -e '.!=null and .spec.strategy.type!="Recreate"' "$WORKDIR/retrieval-deployment.json" >/dev/null; then
             jq '[{op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},{op:"add",path:"/spec/strategy",value:{type:"Recreate"}}]' \
@@ -236,7 +282,8 @@ native_startup() {
         jq -L "$DEPLOYMENT" --args 'include "filters"; [.items[]|select(.metadata.name as $name | $ARGS.positional|index($name)!=null)|
             {name:.metadata.name,ready:ready_workload,available:(.status.availableReplicas // 0)}]' \
             "${targets[@]}" <"$WORKDIR/startup-deployments.json" >"$WORKDIR/startup-status.json"
-        if jq -e --argjson count "${#targets[@]}" 'length==$count and all(.[];.ready)' "$WORKDIR/startup-status.json" >/dev/null; then
+        if jq -e --argjson count "${#targets[@]}" 'length==$count and all(.[];.ready)' "$WORKDIR/startup-status.json" >/dev/null &&
+            jq -e '.ready' "$WORKDIR/credential-status.json" >/dev/null; then
             guard_status
             jq -e '.ready' "$WORKDIR/guard-status.json" >/dev/null && return 0
             emit "$(jq '.+{type:"ocm-guard",phase:"ocm-startup"}' "$WORKDIR/guard-status.json")"
@@ -254,5 +301,9 @@ native_startup() {
         [[ $dirty != true ]] || repair_retrieval
         sleep 10
     done
+    if jq -e '.ready==false' "$WORKDIR/credential-status.json" >/dev/null; then
+        fail OCM_CREDENTIALS_PENDING "Native credentials are pending for: $(jq -r '[.pending[].workload]|unique|join(", ")' "$WORKDIR/credential-status.json"). See ocm-credentials progress for claim and Secret status."
+        return 1
+    fi
     fail OCM_STARTUP 'Native services and their credential/listener checks did not become ready.'
 }

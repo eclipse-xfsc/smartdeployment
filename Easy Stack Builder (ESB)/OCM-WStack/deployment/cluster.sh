@@ -646,7 +646,7 @@ validate_chart_manifests() {
     local directory=$1 chart=$2 release=$3 namespace=${4:-default}
     rendered_documents "$directory" "$WORKDIR/manifests.json"
     if [[ -f $WORKDIR/provider-documents.json ]]; then
-        jq -s --arg namespace "$namespace" '.[0]+[.[1][] | select(.kind=="ResourceProvider" or .kind=="Deployment" or .kind=="StatefulSet" or .kind=="DaemonSet") | .metadata.namespace //= $namespace]' \
+        jq -s --arg namespace "$namespace" '.[0]+[.[1][] | select(.kind=="ResourceProvider" or .kind=="ResourceClaim" or .kind=="ExternalSecret" or .kind=="Deployment" or .kind=="StatefulSet" or .kind=="DaemonSet") | .metadata.namespace //= $namespace]' \
             "$WORKDIR/provider-documents.json" "$WORKDIR/manifests.json" >"$WORKDIR/provider-documents-next.json"
         mv "$WORKDIR/provider-documents-next.json" "$WORKDIR/provider-documents.json"
     fi

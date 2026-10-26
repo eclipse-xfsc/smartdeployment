@@ -84,7 +84,14 @@ run() {
     shift
     local output
     output=$(mktemp "$WORKDIR/command-output.XXXXXX")
+    rm -f "$WORKDIR/error.json"
     if ! run_capture "$output" "$seconds" "$@"; then
+        # Internal bootstrap hooks write their specific result in this directory.
+        if [[ -s $WORKDIR/error.json ]] && jq -e '
+            type=="object" and .status=="failed" and
+            (.code|type)=="string" and (.message|type)=="string"' "$WORKDIR/error.json" >/dev/null; then
+            return 1
+        fi
         fail COMMAND_FAILED "${1##*/} failed: $(safe_error "$LAST_ERROR")"
         return 1
     fi
