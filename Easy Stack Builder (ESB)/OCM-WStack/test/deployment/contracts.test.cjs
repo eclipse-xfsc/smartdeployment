@@ -134,10 +134,14 @@ test('dual-stack API egress retains exact address and port pairs', () => {
 test('installed reconciler receives the executable filters and discovered API egress', t => {
   const f = apiFixture();
   const dir = workspace(t, { 'config.json': { runtimeImage: 'example.invalid/ocm:12.4.0' },
-    'service.json': f.service, 'slices.json': f.slices });
+    'service.json': f.service, 'slices.json': f.slices,
+    'dns-service.json':{metadata:{name:'kube-dns',namespace:'kube-system'},spec:{selector:{'k8s-app':'kube-dns'},ports:[{name:'dns',port:53,protocol:'UDP'},{name:'dns-tcp',port:53,protocol:'TCP'}]}},
+    'dns-fixture.json':{items:[{metadata:{namespace:'kube-system',labels:{'kubernetes.io/service-name':'kube-dns'}},ports:[{name:'dns',port:8053,protocol:'UDP'},{name:'dns-tcp',port:8053,protocol:'TCP'}],endpoints:[{conditions:{ready:true}}]}]} });
   const result = bash(dir, `
     kube_json() {
       case "$*" in
+        *kube-system*endpointslices*) cp "$WORKDIR/dns-fixture.json" "$1" ;;
+        *kube-system*service*) : ;;
         *endpointslices*) cp "$WORKDIR/slices.json" "$1" ;;
         *service*) cp "$WORKDIR/service.json" "$1" ;;
         *) return 1 ;;
@@ -160,6 +164,10 @@ test('installed reconciler receives the executable filters and discovered API eg
   const checksum = crypto.createHash('sha256').update(data['reconcile.sh']).update(data['filters.jq']).digest('hex');
   assert.equal(items.find(item => item.kind === 'Deployment').spec.template.metadata.annotations['esb.xfsc.io/source'], checksum);
   const egress = items.find(item => item.kind === 'NetworkPolicy').spec.egress;
+  assert.ok(egress.some(rule=>rule.ports.some(p=>p.port===8053)));
+  assert.deepEqual(items.find(item=>item.kind==='Deployment').spec.template.spec.containers[0].env,[
+    {name:'OCM_GUARD_API_ADDRESS',value:'100.64.0.1'}, {name:'OCM_GUARD_API_PORT',value:'443'},
+  ]);
   for (const rule of routes(f)) assert.ok(egress.some(item => JSON.stringify(item) === JSON.stringify(rule)));
   const run = spawnSync('bash', ['-c', 'source "$1/reconcile.sh"; guard_filter \'ip_family\' <<<\'"2001:db8::1"\'', 'bash', mounted], { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);

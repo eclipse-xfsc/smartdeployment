@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.4
+# OCM W-Stack deployer 12.5.5
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -33,11 +33,11 @@ The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container ins
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.5.4.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
+Install `orce-esb-ocmwstack-12.5.5.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
-Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`.
+Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`. Its DNS policy includes the discovered resolver backend ports. API requests use the discovered Kubernetes Service address with TLS verification for `kubernetes.default.svc`.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.4. The runtime application remains at 12.4.0; its installation chart is 12.5.1.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.5. The runtime application remains at 12.4.0; its installation chart is 12.5.1.
 
 ## Standalone deployment
 

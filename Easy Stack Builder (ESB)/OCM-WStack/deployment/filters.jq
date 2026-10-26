@@ -575,6 +575,23 @@ def api_egress($backends):
     group_by(.port) | map({ports:[{protocol:"TCP",port:.[0].port}],
         to:([.[].ip]|unique|map({ipBlock:{cidr:(.+(if contains(":") then "/128" else "/32" end))}}))});
 
+def guard_dns_egress($slices):
+    require_that(.metadata.name=="kube-dns" and .metadata.namespace=="kube-system" and
+        (.spec.selector|type)=="object" and (.spec.selector|length)>0;"GUARD_DNS_SERVICE") |
+    . as $service |
+    [.spec.ports[] | select(.port==53 and (.protocol|IN("UDP","TCP")))] as $ports |
+    [$slices.items[]? | select(.metadata.namespace=="kube-system" and
+        .metadata.labels["kubernetes.io/service-name"]=="kube-dns") |
+        select(any(.endpoints[]?; .conditions.ready!=false and .conditions.terminating!=true)) |
+        .ports[]? | . as $p | select(any($ports[]; .name==$p.name and .protocol==$p.protocol)) |
+        {port,protocol}] | unique as $backends |
+    require_that(($backends|length)>0 and all($ports[]; .protocol as $protocol |
+        any($backends[];.protocol==$protocol));"GUARD_DNS_ENDPOINTS_PENDING") |
+    require_that(all($backends[]; (.port|type)=="number" and .port>=1 and .port<=65535 and
+        (.port|floor)==.port);"GUARD_DNS_ENDPOINTS") |
+    [{to:[{namespaceSelector:{matchLabels:{"kubernetes.io/metadata.name":"kube-system"}},
+        podSelector:{matchLabels:$service.spec.selector}}],ports:$backends}];
+
 def validate_guard_status($deployments;$pods;$replicasets;$now):
     . as $report |
     (["pre-authorization-bridge","well-known-service"] | all(.[]; . as $name |

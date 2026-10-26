@@ -115,14 +115,23 @@ discover_api_egress() {
 
 install_reconciler() {
     discover_api_egress
+    kube_json "$WORKDIR/dns-service.json" -n kube-system get service kube-dns -o json
+    kube_json "$WORKDIR/dns-slices.json" -n kube-system get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kube-dns -o json
+    json_program 'guard_dns_egress($slices[0])' --slurpfile slices "$WORKDIR/dns-slices.json" \
+        "$WORKDIR/dns-service.json" >"$WORKDIR/guard-dns-egress.json"
     local checksum
     checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$DEPLOYMENT/filters.jq" | sha256sum | cut -d ' ' -f 1)
-    jq --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \
-        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile filters "$DEPLOYMENT/filters.jq" --slurpfile egress "$WORKDIR/api-egress.json" '
+    jq -L "$DEPLOYMENT" --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \
+        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile filters "$DEPLOYMENT/filters.jq" --slurpfile egress "$WORKDIR/api-egress.json" \
+        --slurpfile dns "$WORKDIR/guard-dns-egress.json" --slurpfile api "$WORKDIR/api-service.json" '
+        include "filters";
         .items |= map(if .kind=="ConfigMap" then .data={"reconcile.sh":$script,"filters.jq":$filters}
         elif .kind=="Deployment" then .spec.template.spec.containers[0].image=$image |
+            .spec.template.spec.containers[0].env=[
+                {name:"OCM_GUARD_API_ADDRESS",value:$api[0].spec.clusterIP},
+                {name:"OCM_GUARD_API_PORT",value:($api[0]|api_https_port|.port|tostring)}] |
             .spec.template.metadata.annotations["esb.xfsc.io/source"]=$checksum
-        elif .kind=="NetworkPolicy" then .spec.egress=(.spec.egress[0:1]+$egress[0]+.spec.egress[1:]) else . end)' \
+        elif .kind=="NetworkPolicy" then .spec.egress=(.spec.egress[0:1]+$dns[0]+$egress[0]+.spec.egress[1:]) else . end)' \
         "$DEPLOYMENT/templates/reconciler.json" >"$WORKDIR/reconciler.json"
     local kind namespace name
     while IFS=$'\t' read -r kind namespace name; do

@@ -47,6 +47,14 @@ api_request() {
     [[ $host != *:* ]] || host="[$host]"
     local args=(--disable --fail --silent --show-error --connect-timeout 5 --max-time 10 --max-filesize 16777216
         --cacert "$API_ACCOUNT/ca.crt" --request "$method" --header "@$STATE_DIR/api-authorization")
+    if [[ -n ${OCM_GUARD_API_ADDRESS:-} ]]; then
+        # Use the discovered Service route while verifying its Kubernetes DNS name.
+        host=kubernetes.default.svc
+        port=${OCM_GUARD_API_PORT:?}
+        local address=$OCM_GUARD_API_ADDRESS
+        [[ $address != *:* ]] || address="[$address]"
+        args+=(--resolve "$host:$port:$address")
+    fi
     {
         printf 'Authorization: Bearer '
         tr -d '\r\n' <"$API_ACCOUNT/token"
