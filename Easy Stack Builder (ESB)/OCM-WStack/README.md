@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.0
+# OCM W-Stack deployer 12.5.1
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -29,13 +29,13 @@ npm run test:ui
 npm run test:helm
 ```
 
-Follow [BUILD.md](docs/BUILD.md) to generate dependency locks, compile the Vue application and build the runtime image. Supply that image to the deployer. `npm run build:flows` regenerates the domain flow aggregate; `node scripts/build-flows.js --check` checks it against the source routes. [VALIDATION.md](VALIDATION.md) describes the checks.
+The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container installs the packaged runtime dependencies and compiles the Vue UI on the persistent volume. Follow [BUILD.md](docs/BUILD.md) for source verification and packaging. `npm run build:flows` regenerates the domain flow aggregate; `node scripts/build-flows.js --check` checks it against the source routes. [VALIDATION.md](VALIDATION.md) describes the checks.
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.5.0.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key, runtime image and initial UI/editor credentials.
+Install `orce-esb-ocmwstack-12.5.1.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.0. The deployed ORCE runtime and local runtime charts retain version 12.4.0.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.1. The runtime application remains at 12.4.0; its installation chart is 12.5.1.
 
 ## Standalone deployment
 

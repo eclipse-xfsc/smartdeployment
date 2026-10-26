@@ -36,7 +36,7 @@ spec:
     metadata:
       labels: {app: ocm-orce}
       annotations:
-        checksum/seed: {{ .Files.Get "files/seed.sh" | sha256sum }}
+        checksum/seed: {{ printf "%s%s%s" (.Files.Get "files/seed.sh") (.Files.Get "files/runtime.tgz") (.Files.Get "files/ui.tgz") | sha256sum }}
         checksum/config: {{ .Values.runtimeConfig | toJson | sha256sum }}
         checksum/secret: {{ .Values.secretChecksum | quote }}
     spec:
@@ -55,28 +55,32 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       initContainers:
         - name: seed-orce-runtime
-          image: {{ required "A built OCM 12.4.0 image is required" .Values.image | quote }}
+          image: {{ required "An ORCE base image is required" .Values.image | quote }}
           command: ["/bin/sh", "/seed/seed.sh"]
+          env:
+            - {name: OCM_BASE_IMAGE, value: {{ .Values.image | quote }}}
+            - {name: npm_config_cache, value: /tmp/npm-cache}
+            - {name: npm_config_update_notifier, value: "false"}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
-            limits: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: seed, mountPath: /seed, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       containers:
         - name: orce
-          image: {{ required "A built OCM 12.4.0 image is required" .Values.image | quote }}
+          image: {{ required "An ORCE base image is required" .Values.image | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
           ports: [{name: http, containerPort: 1880}]
           resources:
             requests: {cpu: 100m, memory: 256Mi}
-            limits: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
           env:
             - {name: OCM_RUNTIME_CONFIG, value: /etc/ocm/config.json}
             - {name: OCM_RUNTIME_SECRETS, value: /run/ocm-secrets/secrets.json}

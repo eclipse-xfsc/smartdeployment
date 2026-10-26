@@ -12,7 +12,7 @@ def render(chart,values,upgrade=False):
         args=[helm,'template','demotenant',str(chart),'-n','ocm-wstack','-f',f.name]
         if upgrade: args+=['--is-upgrade']
         return [d for d in yaml.safe_load_all(subprocess.check_output(args,text=True)) if d]
-base={'image':'example.invalid/ocm-ui:12.4.0','host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','auth':{'mode':'local-session','sessionHours':24}}}
+base={'image':'ecofacis/xfsc-orce:2.0.15','host':'demo-tenant.example.com','listenerSetName':'demotenant-xfsc-tenant-gateway','storage':{'class':'ionos-cloud-essential'},'gatewayPorts':[80,443,10080,10443],'hostAliases':[{'ip':'100.64.9.12','hostnames':['demo-tenant.example.com']}],'runtimeConfig':{'publicOrigin':'https://demo-tenant.example.com','auth':{'mode':'local-session','sessionHours':24}}}
 checks=0
 for upgrade in [False,True]:
     for external in [False,True]:
@@ -22,6 +22,16 @@ for upgrade in [False,True]:
         assert route['spec']['parentRefs'][0]['kind']=='ListenerSet'
         runtime=next(d for d in docs if d['kind']=='Deployment' and d['metadata']['name']=='ocm-orce')
         assert runtime['spec']['template']['spec']['hostAliases']==base['hostAliases']
+        seed=next(d for d in docs if d['kind']=='ConfigMap' and d['metadata']['name']=='ocm-orce-seed')
+        import base64
+        for archive in ['runtime.tgz','ui.tgz']:
+            assert base64.b64decode(seed['binaryData'][archive])==(root/'charts-runtime/files'/archive).read_bytes()
+        assert sum(len(base64.b64decode(v)) for v in seed['binaryData'].values())+len(seed['data']['seed.sh'].encode()) < 1048576
+        init=runtime['spec']['template']['spec']['initContainers'][0]
+        assert init['image']=='ecofacis/xfsc-orce:2.0.15'
+        assert init['command']==['/bin/sh','/seed/seed.sh']
+        assert runtime['spec']['template']['spec']['containers'][0]['image']==init['image']
+
         policy=next(d for d in docs if d['kind']=='NetworkPolicy' and d['metadata']['name']=='ocm-orce')
         assert {80,443,10080,10443}.issubset({p['port'] for p in policy['spec']['egress'][0]['ports']})
         assert not any(d['kind']=='Ingress' for d in docs)

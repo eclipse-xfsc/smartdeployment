@@ -1,5 +1,5 @@
 host: ""
-image: ""
+image: "ecofacis/xfsc-orce:2.0.15"
 secretChecksum: ""
 storage:
   orceSize: 3Gi

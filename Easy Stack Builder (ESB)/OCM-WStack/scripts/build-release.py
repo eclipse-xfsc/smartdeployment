@@ -13,22 +13,23 @@ if out == root or root in out.parents:
 out.mkdir(parents=True, exist_ok=True)
 version = json.loads((root / 'package.json').read_text())['version']
 
-# Include uibuilder/.config middleware as well as its public UI assets.
-source = root / 'runtime'
-buffer = io.BytesIO()
-with tarfile.open(fileobj=buffer, mode='w', format=tarfile.PAX_FORMAT) as archive:
-    for p in sorted(source.rglob('*')):
-        if not p.is_file():
-            continue
-        if any(part in {'node_modules', '.git', '__pycache__'} for part in p.relative_to(source).parts):
-            continue
-        if p.is_symlink():
-            raise SystemExit(f'Unexpected runtime content: {p.relative_to(root)}')
-        info = tarfile.TarInfo(p.relative_to(source).as_posix())
-        data = p.read_bytes()
-        info.size, info.mode, info.mtime = len(data), 0o644, 0
-        archive.addfile(info, io.BytesIO(data))
-(root / 'charts-runtime/files/runtime.tgz').write_bytes(gzip.compress(buffer.getvalue(), mtime=0))
+# Package runtime and editable UI sources for the ORCE init container.
+for directory in ('runtime', 'ui'):
+    source = root / directory
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w', format=tarfile.PAX_FORMAT) as archive:
+        for p in sorted(source.rglob('*')):
+            if not p.is_file():
+                continue
+            if any(part in {'node_modules', '.git', '__pycache__'} for part in p.relative_to(source).parts):
+                continue
+            if p.is_symlink():
+                raise SystemExit(f'Unexpected seed content: {p.relative_to(root)}')
+            info = tarfile.TarInfo(p.relative_to(source).as_posix())
+            data = p.read_bytes()
+            info.size, info.mode, info.mtime = len(data), 0o644, 0
+            archive.addfile(info, io.BytesIO(data))
+    (root / f'charts-runtime/files/{directory}.tgz').write_bytes(gzip.compress(buffer.getvalue(), mtime=0))
 
 files = []
 for p in sorted(root.rglob('*')):

@@ -14,3 +14,6 @@ metadata:
 data:
   seed.sh: |
 {{ .Files.Get "files/seed.sh" | indent 4 }}
+binaryData:
+  runtime.tgz: {{ .Files.Get "files/runtime.tgz" | b64enc | quote }}
+  ui.tgz: {{ .Files.Get "files/ui.tgz" | b64enc | quote }}

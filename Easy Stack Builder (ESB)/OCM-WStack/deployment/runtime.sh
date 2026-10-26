@@ -30,8 +30,8 @@ mongo_ports() {
 runtime_preflight() {
     local image
     image=$(config_value '.runtimeImage')
-    [[ -n $image && $image != ecofacis/xfsc-orce:2.0.15 ]] ||
-        { fail RUNTIME_IMAGE_REQUIRED 'Select the built OCM UI runtime image.'; return 1; }
+    [[ -n $image ]] ||
+        { fail RUNTIME_IMAGE_REQUIRED 'Select an ORCE base image.'; return 1; }
     get_optional "$WORKDIR/runtime-secret.json" ocm-wstack secret ocm-orce-runtime
     if jq -e '.!=null' "$WORKDIR/runtime-secret.json" >/dev/null; then
         jq -r '.data["secrets.json"]' "$WORKDIR/runtime-secret.json" | base64 -d >"$WORKDIR/runtime-secrets.json"

@@ -40,7 +40,7 @@ def normalize_config:
         publicDashboards:(.publicDashboards | enabled),
         lbLocation:(.lbLocation | text), lbNetworkZone:(.lbNetworkZone | text),
         lbType:(.lbType | text), lbPrivate:(.lbPrivate | enabled),
-        runtimeEnabled:true, runtimeImage:(.runtimeImage // ""),
+        runtimeEnabled:true, runtimeImage:((.runtimeImage | nonempty) // "ecofacis/xfsc-orce:2.0.15"),
         orceStorageSize:((.orceStorageSize|nonempty) // "3Gi"), mongoStorageSize:((.mongoStorageSize|nonempty) // "5Gi"),
         useExternalMongo:(.useExternalMongo | enabled),
         editorUsername:((.editorUsername|nonempty) // "admin"), uiAdminUsername:((.uiAdminUsername|nonempty) // "admin"),

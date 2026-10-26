@@ -78,7 +78,7 @@
       "value": true
     },
     "runtimeImage": {
-      "value": ""
+      "value": "ecofacis/xfsc-orce:2.0.15"
     },
     "runtimeServices": {
       "value": "{}"

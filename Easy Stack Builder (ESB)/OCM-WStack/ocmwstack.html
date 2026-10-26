@@ -256,9 +256,9 @@
           </div>
           <div class="form-row">
             <label for="node-input-runtimeImage">
-              OCM UI image
+              ORCE base image
             </label>
-            <input type="text" id="node-input-runtimeImage" placeholder="registry.example/ocm-ui@sha256:…">
+            <input type="text" id="node-input-runtimeImage" placeholder="ecofacis/xfsc-orce:2.0.15">
           </div>
           <div class="form-row">
             <label for="node-input-useExternalMongo">
@@ -379,7 +379,7 @@
         </p>
       </div>
       <div class="esb-preview">
-        Supply the built OCM UI runtime image for this deployment.
+        The ORCE base image defaults to ecofacis/xfsc-orce:2.0.15. The deployment installs the OCM runtime and builds its UI automatically.
       </div>
     </div>
   </div>
@@ -431,7 +431,7 @@
       dnsValues: { value: '{}', validate: jsonObject },
       publicDashboards: { value: false },
       runtimeEnabled: { value: true },
-      runtimeImage: { value: '' },
+      runtimeImage: { value: 'ecofacis/xfsc-orce:2.0.15' },
       runtimeServices: { value: '{}' },
       orceStorageSize: { value: '3Gi' },
       mongoStorageSize: { value: '5Gi' },
