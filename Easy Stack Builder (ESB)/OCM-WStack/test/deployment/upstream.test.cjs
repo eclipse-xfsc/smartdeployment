@@ -36,7 +36,7 @@ test('native overrides select Policy 1.1.2, its policy repository and provider-b
   assert.equal(policy.memoryStorage.policiesFolder, 'Policies');
   assert.equal(policy.policy.http.port, policy.service.port);
   const verifier = overrides['OCM W-Stack/Credential Verification Service Chart']['credential-verification-service'];
-  assert.equal(verifier.podAnnotations['inject.xfsc.io/needs'], 'nats,cassandra,signer,did-resolver,storage');
+  assert.equal(verifier.podAnnotations['inject.xfsc.io/needs'], 'nats,cassandra,signer,did-resolver,storageservice');
   assert.equal(verifier.config.storageServiceUrl, 'http://storage-service.ocm-wstack.svc.cluster.local:8080');
   assert.equal(verifier.ingress.enabled, false);
   assert.equal(verifier.config.externalPresentation.enabled, true);

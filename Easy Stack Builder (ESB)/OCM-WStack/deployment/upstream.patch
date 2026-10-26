@@ -23,21 +23,21 @@ index 50ddad1..f108a95 100644
    - name: opentelemetry-collector
      alias: otelcollector
 -    version: ">=0.120.0"
-+    version: "0.175.0"
++    version: "0.177.0"
      repository: https://open-telemetry.github.io/opentelemetry-helm-charts
      condition: otelcollector.enabled
  
    - name: kube-prometheus-stack
      alias: monitoring
 -    version: ">=85.0.0"
-+    version: "91.8.2"
++    version: "92.13.1"
      repository: https://prometheus-community.github.io/helm-charts
      condition: monitoring.enabled
  
    - name: loki
      alias: loki
 -    version: ">=6.0.0"
-+    version: "6.53.0"
++    version: "7.5.0"
      repository: https://grafana.github.io/helm-charts
      condition: loki.enabled
  
@@ -51,7 +51,7 @@ index 50ddad1..f108a95 100644
    - name: jaeger
      alias: jaeger
 -    version: ">=4.8.0"
-+    version: "4.14.1"
++    version: "4.16.1"
      repository: https://jaegertracing.github.io/helm-charts
      condition: jaeger.enabled
  

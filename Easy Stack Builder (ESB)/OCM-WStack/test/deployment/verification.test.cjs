@@ -22,7 +22,7 @@ function documents() {
   return [
     {kind:'Deployment',metadata:{name:'credential-verification-service'},spec:{template:{metadata:{annotations:{
       'inject.xfsc.io/enabled':'true','inject.xfsc.io/env-prefix':'CREDENTIALVERIFICATION',
-      'inject.xfsc.io/needs':'nats,cassandra,signer,did-resolver,storage',
+      'inject.xfsc.io/needs':'nats,cassandra,signer,did-resolver,storageservice',
     }},spec:{imagePullSecrets:[{name:'esb-ocm-public-registry'}],containers:[{name:'credential-verification-service',env:Object.entries(entries).map(([name,v])=>({name,...v}))}]}}}},
     {kind:'Secret',metadata:{name:'credential-verification-service-state-signing'},data:{'state-signing-key':Buffer.from('test-only-state-key').toString('base64')}},
     {kind:'ResourceClaim',spec:{type:'cassandra',providerRef:{name:'cassandra'},externalSecretRef:{name:'verification-cassandra-credentials'},parameters:{keyspace:'ocm'}}},
@@ -60,7 +60,7 @@ test('verification chart failure identifies the mismatched field',t=>{
   assert.notEqual(result.status,0);
   const error=JSON.parse(fs.readFileSync(dir+'/error.json'));
   assert.equal(error.code,'CHART_CONTRACT');
-  assert.equal(error.message,'Verification chart checks failed: natsTimeout.');
+  assert.equal(error.message,'OCM W-Stack/Credential Verification Service Chart checks failed: natsTimeout.');
 });
 test('live verification NATS contract uses provider URL and duration',()=>{
   const d=documents()[0];

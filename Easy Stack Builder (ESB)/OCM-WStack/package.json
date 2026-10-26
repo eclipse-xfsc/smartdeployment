@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "12.5.2",
+  "version": "12.5.3",
   "description": "ESB wrapper for the official eclipse-xfsc/deployment bootstrap procedure",
   "license": "Apache-2.0",
   "engines": {
@@ -53,7 +53,8 @@
     "lint": "eslint runtime/lib runtime/nodes ui/src",
     "typecheck": "vue-tsc --noEmit -p ui/tsconfig.json",
     "test:bdd": "node --test test/bdd/*.test.cjs",
-    "test:recovery": "python3 test/retrieval-recovery.py"
+    "test:recovery": "python3 test/retrieval-recovery.py",
+    "test:charts": "python3 test/all-charts.py"
   },
   "keywords": [
     "node-red",

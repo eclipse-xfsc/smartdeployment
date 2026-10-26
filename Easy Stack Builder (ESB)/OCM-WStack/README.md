@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.2
+# OCM W-Stack deployer 12.5.3
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -33,9 +33,9 @@ The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container ins
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.5.2.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
+Install `orce-esb-ocmwstack-12.5.3.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.2. The runtime application remains at 12.4.0; its installation chart is 12.5.1.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.3. The runtime application remains at 12.4.0; its installation chart is 12.5.1.
 
 ## Standalone deployment
 
@@ -63,3 +63,5 @@ Native services retain credential and connection data. UI operation records cont
 [INTERFACES.md](docs/INTERFACES.md) describes the native integration requirements. The release verification command, `npm run verify:code`, checks the requirement register, dependency locks, build checks and release evidence. Deployment journeys are listed in [LIVE-ACCEPTANCE.md](docs/LIVE-ACCEPTANCE.md).
 
 The bootstrap, tenant chart and native ApplicationSets use deployment commit `c1ba65c23ffdd891b6edec3bd277fad32b097378`. See [the upstream integration notes](docs/UPSTREAM-12.5.0.md) for the reviewed service versions and routing configuration.
+
+Full offline chart validation: `npm run test:charts -- --charts /path/to/deployment --output /path/to/results`. Use the dependency collection supplied with the release. The test renders the complete deployment plan for IONOS, Hetzner, DigitalOcean and generic configurations in install and upgrade modes.

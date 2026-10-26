@@ -563,6 +563,7 @@ prepare_charts() {
     local kube_version
     kube_version=$(jq -er '.serverVersion.gitVersion' "$WORKDIR/kube-version.json")
     [[ $kube_version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]] || fail CHART_PLAN 'Kubernetes server version is unavailable.'
+    printf '[]\n' >"$WORKDIR/provider-documents.json"
     local index total chart release namespace root file parameter api digest
     local -A built=()
     printf '[]\n' >"$WORKDIR/chart-results.json"
@@ -600,7 +601,7 @@ prepare_charts() {
             fail CHART_PREFLIGHT "Chart $chart contains incompatible merged values."
             return 1
         fi
-        validate_chart_manifests "$WORKDIR/render-$index" "$chart" "$release"
+        validate_chart_manifests "$WORKDIR/render-$index" "$chart" "$release" "$namespace"
         digest=null
         [[ ! -f $location/Chart.lock ]] || digest=$(sha256sum "$location/Chart.lock" | cut -d ' ' -f 1)
         jq --slurpfile job "$WORKDIR/chart-job.json" --arg digest "$digest" \
@@ -608,6 +609,9 @@ prepare_charts() {
             "$WORKDIR/chart-results.json" >"$WORKDIR/chart-results-next.json"
         mv "$WORKDIR/chart-results-next.json" "$WORKDIR/chart-results.json"
     done
+    local provider_errors
+    provider_errors=$(jq -c -L "$DEPLOYMENT" 'include "filters"; provider_contract_errors' "$WORKDIR/provider-documents.json")
+    [[ $provider_errors == '[]' ]] || { fail CHART_PROVIDERS "Unresolved chart providers: $provider_errors"; return 1; }
     policy_image_preflight
     export ESB_ARGO_MANIFEST="$WORKDIR/argo-install.yaml"
     run 130 curl --disable --fail --silent --show-error --location --max-time 120 \
@@ -639,17 +643,22 @@ rendered_documents() {
 }
 
 validate_chart_manifests() {
-    local directory=$1 chart=$2 release=$3
+    local directory=$1 chart=$2 release=$3 namespace=${4:-default}
+    rendered_documents "$directory" "$WORKDIR/manifests.json"
+    if [[ -f $WORKDIR/provider-documents.json ]]; then
+        jq -s --arg namespace "$namespace" '.[0]+[.[1][] | select(.kind=="ResourceProvider" or .kind=="Deployment" or .kind=="StatefulSet" or .kind=="DaemonSet") | .metadata.namespace //= $namespace]' \
+            "$WORKDIR/provider-documents.json" "$WORKDIR/manifests.json" >"$WORKDIR/provider-documents-next.json"
+        mv "$WORKDIR/provider-documents-next.json" "$WORKDIR/provider-documents.json"
+    fi
     case "$chart" in
         'OCM W-Stack/Policy Chart'|'OCM W-Stack/Credential Verification Service Chart'|'OCM W-Stack/Didcomm'|'OCM W-Stack/Pre Authorization Bridge Chart'|'OCM W-Stack/Well Known Chart'|'INFRA/core/nats'|'INFRA/core/universal-resolver'|'INFRA/observability/opentelemtry') ;;
         *) return 0 ;;
     esac
-    rendered_documents "$directory" "$WORKDIR/manifests.json"
-    if [[ $chart == 'OCM W-Stack/Credential Verification Service Chart' ]]; then
+    if [[ $chart == 'OCM W-Stack/Credential Verification Service Chart' || $chart == 'OCM W-Stack/Policy Chart' ]]; then
         local failed_checks
-        failed_checks=$(jq -r -L "$DEPLOYMENT" 'include "filters"; verification_chart_checks |
+        failed_checks=$(jq -r -L "$DEPLOYMENT" --arg chart "$chart" 'include "filters"; (if $chart=="OCM W-Stack/Policy Chart" then policy_chart_checks else verification_chart_checks end) |
             to_entries | map(select(.value!=true)|.key) | join(", ")' "$WORKDIR/manifests.json")
-        [[ -z $failed_checks ]] || { fail CHART_CONTRACT "Verification chart checks failed: $failed_checks."; return 1; }
+        [[ -z $failed_checks ]] || { fail CHART_CONTRACT "$chart checks failed: $failed_checks."; return 1; }
     else
         jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
             "$WORKDIR/manifests.json" >/dev/null || { fail CHART_CONTRACT "Rendered contract changed for $chart."; return 1; }

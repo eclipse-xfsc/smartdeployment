@@ -251,6 +251,33 @@ def environment($name): container($name).env // [] | map({key:.name,value:.}) | 
 def deployment($name): [.[] | select(.kind=="Deployment" and .metadata.name==$name)][0];
 def resource($kind;$name): [.[] | select(.kind==$kind and .metadata.name==$name)][0];
 
+def policy_chart_checks:
+    . as $documents | deployment("policy") as $d |
+    ($d|container("policy")) as $c | ($d|environment("policy")) as $e |
+    $d.spec.template.metadata.annotations as $a |
+    {deployment:($d!=null),
+     image:($c.image=="node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/policy:1.1.2"),
+     publicImage:((any($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!=""))|not),
+     providers:($a["inject.xfsc.io/enabled"]=="true" and
+        (($a["inject.xfsc.io/needs"] // "" | split(",") | sort)==["did-resolver","nats","signer"]) and
+        ($a["inject.xfsc.io/env-prefix"] // "")=="" and
+        (($a["inject.xfsc.io/env-replacements"] // "{}" | fromjson)=={})),
+     httpPort:($e.HTTP_PORT.value=="8080" and any($c.ports[]?;.name=="http" and .containerPort==8080)),
+     servicePort:(any(($documents|resource("Service";"policy")).spec.ports[]?;.port==8080 and .targetPort==8080)),
+     policyRepository:($e.POLICY_REPOSITORY_CLONE_URL.value=="https://github.com/eclipse-xfsc/rego-policies.git" and $e.POLICY_REPO_FOLDER.value=="Policies"),
+     noPlaceholders:($c.env|tojson|contains("NAMESPACE")|not)};
+
+# Provider references are resolved against all selected charts, across namespaces.
+def provider_contract_errors:
+    . as $docs |
+    [$docs[]|select(.kind=="ResourceProvider")|{name:.metadata.name,namespace:.metadata.namespace,scope:(.spec.scope // "Namespaced")}] as $providers |
+    [$docs[]|select(.kind=="Deployment" or .kind=="StatefulSet" or .kind=="DaemonSet")|
+      . as $workload | .spec.template.metadata.annotations as $a |
+      select($a["inject.xfsc.io/enabled"]=="true") |
+      ($a["inject.xfsc.io/needs"] // "" | split(",")[] | gsub("^ +| +$";"")) as $name |
+      select($name!="" and (any($providers[];.name==$name and (.scope=="Cluster" or .namespace==$workload.metadata.namespace))|not)) |
+      {workload:($workload.metadata.namespace+"/"+$workload.metadata.name),provider:$name}];
+
 def verification_chart_checks:
     . as $documents |
     deployment("credential-verification-service") as $d |
@@ -262,7 +289,7 @@ def verification_chart_checks:
     {deployment:($d!=null),
      imagePullSecret:(any($d.spec.template.spec.imagePullSecrets[]?; .name=="esb-ocm-public-registry")),
      providerInjection:($a["inject.xfsc.io/enabled"]=="true" and $a["inject.xfsc.io/env-prefix"]=="CREDENTIALVERIFICATION" and
-        (($a["inject.xfsc.io/needs"] // "" | split(",") | sort)==["cassandra","did-resolver","nats","signer","storage"]) and
+        (($a["inject.xfsc.io/needs"] // "" | split(",") | sort)==["cassandra","did-resolver","nats","signer","storageservice"]) and
         (($a["inject.xfsc.io/env-replacements"] // "{}" | fromjson)=={})),
      stateSigningSecret:($state.name=="credential-verification-service-state-signing" and $state.key=="state-signing-key" and
         ($documents|resource("Secret";$state.name)|.data["state-signing-key"]|type=="string" and length>0)),
@@ -282,6 +309,8 @@ def validate_chart($chart):
     . as $documents |
     if $chart=="OCM W-Stack/Credential Verification Service Chart" then
         verification_chart_checks | all(.[];.==true)
+    elif $chart=="OCM W-Stack/Policy Chart" then
+        policy_chart_checks | all(.[];.==true)
     elif $chart=="INFRA/core/nats" then
         resource("StatefulSet";"nats") |
         any(.spec.template.spec.containers[]?; .name=="nats" and any(.ports[]?; .containerPort==8222))
@@ -328,13 +357,7 @@ def validate_chart($chart):
         [.[] | select(.kind=="Deployment" and any(.spec.template.spec.containers[]?; .name==$name))][0] as $d |
         ($d|container($name)) as $container | ($d|environment($name)) as $e |
         $d!=null and ($container.env|tojson|contains("NAMESPACE")|not) and
-        (if $name=="policy" then
-            $container.image=="node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/policy:1.1.2" and
-            (any($d.spec.template.spec.imagePullSecrets[]?; (.name // "")!="")|not) and
-            $e.NATS_ADDR.value=="nats://nats.infrastructure.svc.cluster.local:4222" and
-            any($container.ports[]?; .name=="http" and .containerPort==8080) and
-            any(($documents|resource("Service";"policy")).spec.ports[]?; .port==8080 and .targetPort==8080)
-         elif $name=="didcomm-connector" then
+        (if $name=="didcomm-connector" then
             $e.DIDCOMMCONNECTOR_DATBASE_HOST.value=="cassandra.infrastructure.svc.cluster.local" and
             ($e.DIDCOMMCONNECTOR_DATBASE_PORT.value|tostring)=="9042" and
             $e.DIDCOMMCONNECTOR_DIDCOMM_RESOLVERURL.value=="http://universal-resolver-service.infrastructure.svc.cluster.local:8080" and

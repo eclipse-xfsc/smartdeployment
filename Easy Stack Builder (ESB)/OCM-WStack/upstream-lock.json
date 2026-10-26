@@ -64,11 +64,11 @@
   "argoCdCommit": "c9c369efcc5b2a0bd720803f8d14a1c3eaddf579",
   "helmPins": {
     "external-dns": "1.23.0",
-    "opentelemetry-collector": "0.175.0",
-    "kube-prometheus-stack": "91.8.2",
-    "loki": "6.53.0",
+    "opentelemetry-collector": "0.177.0",
+    "kube-prometheus-stack": "92.13.1",
+    "loki": "7.5.0",
     "tempo": "1.24.4",
-    "jaeger": "4.14.1",
+    "jaeger": "4.16.1",
     "promtail": "6.17.1"
   },
   "dnsWebhookPins": {

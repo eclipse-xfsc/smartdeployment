@@ -28,8 +28,9 @@
       },
       "podAnnotations": {
         "inject.xfsc.io/enabled": "true",
-        "inject.xfsc.io/needs": "nats",
-        "inject.xfsc.io/env-replacements": "{\"NATS_URL\":\"NATS_ADDR\"}"
+        "inject.xfsc.io/needs": "nats,signer,did-resolver",
+        "inject.xfsc.io/env-replacements": "{}",
+        "inject.xfsc.io/env-prefix": ""
       },
       "policy": {
         "nats": {
@@ -61,9 +62,9 @@
       },
       "podAnnotations": {
         "inject.xfsc.io/enabled": "true",
-        "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storage",
+        "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storageservice",
         "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
-        "inject.xfsc.io/env-replacements": null
+        "inject.xfsc.io/env-replacements": "{}"
       },
       "server": {
         "http": {
