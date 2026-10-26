@@ -533,11 +533,11 @@ index c50a51e..4609194
 -      echo "Erfolgreich: Alle ${count} Applications von '${APPSET_NAME}' sind Synced und Healthy."
 +    if [[ -z "$not_ready" && "$count" -eq "$expected" ]]; then
 +      echo "Ready: ${count} Applications in '${APPSET_NAME}' satisfy health and synchronization policy."
-+      jq -L "${ESB_DEPLOY%/*}/deployment" -cn --argjson applications "$appset_applications" '
++      jq -L "${ESB_DEPLOY%/*}/deployment" -c '
 +        include "filters";
 +        {type:"application-readiness",phase:"applications-ready",
-+         acceptedSyncDifferences:[$applications[]|{name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|select(accepted_sync_drift)]}
-+      ' >&3
++         acceptedSyncDifferences:[.[]|{name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|select(accepted_sync_drift)]}
++      ' <<< "$appset_applications" >&3
        exit 0
      fi
  
