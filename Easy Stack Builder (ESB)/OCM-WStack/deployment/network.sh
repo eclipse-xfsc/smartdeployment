@@ -165,7 +165,7 @@ native_routing() {
                   {op:"add",path:"/spec/template/spec/hostAliases",value:$aliases[0]}]' \
                 "$WORKDIR/routing-workload.json" >"$WORKDIR/routing-patch.json"
             run 30 kubectl -n "$namespace" patch "$kind" "$name" --type=json --patch-file "$WORKDIR/routing-patch.json"
-            run "$((TIMEOUT_SECONDS+30))" kubectl -n "$namespace" rollout status "$kind/$name" "--timeout=${TIMEOUT_SECONDS}s"
+            wait_workloads "$namespace" "$kind/$name"
         done < <(jq -r --arg namespace "$namespace" '.items[] |
             select(.metadata.name | test("^ocm-(ui-|orce)") | not) |
             select($namespace != "infrastructure" or (.metadata.name | test("resolver|driver-did"))) |
@@ -298,4 +298,40 @@ wait_dns() {
         sleep 10
     done
     fail DNS_NOT_READY 'DNS A and AAAA records did not converge on the current gateway addresses.'
+}
+
+# Discover DNS Services in kube-system. Requiring TCP and UDP port 53 and a
+# non-empty pod selector excludes headless monitoring Services.
+discover_dns() {
+    local output=$1 service started=$SECONDS remaining
+    kube_json "$WORKDIR/dns-services.json" -n kube-system get services -o json || return 1
+    jq '[.items[] | select((.spec.selector|type)=="object" and (.spec.selector|length)>0) |
+        select(any(.spec.ports[]?; .port==53 and .protocol=="UDP") and
+               any(.spec.ports[]?; .port==53 and .protocol=="TCP"))]' \
+        "$WORKDIR/dns-services.json" >"$WORKDIR/dns-candidates.json"
+    jq -e 'length>0' "$WORKDIR/dns-candidates.json" >/dev/null ||
+        { fail DNS_DISCOVERY 'No cluster DNS Service with TCP/UDP port 53 and a pod selector was found.'; return 1; }
+    while ((SECONDS-started<120)); do
+        printf '[]\n' >"$output"
+        while IFS= read -r service; do
+            remaining=$((120-(SECONDS-started)))
+            ((remaining>0)) || break
+            jq --arg name "$service" '.[]|select(.metadata.name==$name)' "$WORKDIR/dns-candidates.json" >"$WORKDIR/dns-service.json"
+            ESB_READ_BUDGET=$remaining kube_json "$WORKDIR/dns-slices.json" -n kube-system get endpointslices.discovery.k8s.io \
+                -l "kubernetes.io/service-name=$service" -o json || return 1
+            if json_program 'guard_dns_egress($slices[0])' --slurpfile slices "$WORKDIR/dns-slices.json" \
+                "$WORKDIR/dns-service.json" >"$WORKDIR/dns-rules.json" 2>"$WORKDIR/dns-discovery-error"; then
+                jq -s '(.[0]+.[1])|unique' "$output" "$WORKDIR/dns-rules.json" >"$WORKDIR/dns-combined.json"
+                mv "$WORKDIR/dns-combined.json" "$output"
+            fi
+        done < <(jq -r '.[].metadata.name' "$WORKDIR/dns-candidates.json")
+        if jq -e 'length>0' "$output" >/dev/null; then
+            emit "$(jq -cn --slurpfile rules "$output" '{type:"dns-discovery",rules:$rules[0]}')"
+            return 0
+        fi
+        remaining=$((120-(SECONDS-started)))
+        ((remaining>0)) || break
+        sleep "$((remaining<3 ? remaining : 3))"
+    done
+    fail DNS_ENDPOINTS 'Cluster DNS Services have no usable ready endpoints after 120 seconds.'
 }

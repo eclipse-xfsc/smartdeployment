@@ -21,6 +21,12 @@ const CREDENTIALS = Object.fromEntries([
   'editorPassword', 'uiAdminPassword', 'mongoUri',
 ].map(name => [name, { type: 'password' }]));
 
+async function writeJson(file, value) {
+  const temporary = `${file}.next`;
+  await fs.writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await fs.rename(temporary, file);
+}
+
 /** Stop the script and its subprocesses together when the node closes. */
 function stopProcess(child, signal) {
   if (!child || !child.pid) return;
@@ -196,6 +202,31 @@ async function fullLog(directory, summary) {
   return { filename, payload: await fs.readFile(filename, 'utf8') };
 }
 
+/** Reconstruct an interrupted run from a persistent user directory. */
+async function interruptedLogs(root, nodeId, send) {
+  for (const name of (await fs.readdir(root)).sort()) {
+    const directory = path.join(root, name);
+    let run;
+    try { run = JSON.parse(await fs.readFile(path.join(directory, 'run.json'), 'utf8')); }
+    catch { continue; }
+    if (run.nodeId !== nodeId || run.state !== 'running') continue;
+    // Another Node-RED process sharing this directory must not have its run
+    // marked interrupted. Linux start time also prevents PID reuse confusion.
+    try {
+      const processStart = syncFs.readFileSync(`/proc/${run.pid}/stat`, 'utf8').split(') ')[1].split(' ')[19];
+      if (run.host === os.hostname() && processStart === run.processStart) continue;
+    } catch {}
+    const result = { action: run.action, status: 'failed', code: 'PROCESS_INTERRUPTED',
+      message: 'The previous deployer process stopped. Its cluster resources are retained; deployment will reconcile their state.',
+      access: run.access };
+    const summary = { ...run, state: 'interrupted', finishedAt: new Date().toISOString(), result };
+    const log = await fullLog(directory, summary);
+    send([null, null, { topic: 'ocm-wstack/log', ...log, action: run.action,
+      status: 'failed', access: run.access, complete: false, recovered: true }]);
+    await writeJson(path.join(directory, 'run.json'), summary);
+  }
+}
+
 /** Public access details only; never copy credentials or internal ClusterIPs. */
 function accessDetails(config, addresses = []) {
   const domain = String(config.domainAddress || config.domain || '').trim().toLowerCase().replace(/^\*\./, '');
@@ -243,6 +274,7 @@ module.exports = function register(RED) {
       let lastPhase = 'starting';
       let heartbeat;
       let progressLogError;
+      let runInfo;
       const startedAt = new Date().toISOString();
       const commands = new Map();
       function progress(event) {
@@ -256,7 +288,15 @@ module.exports = function register(RED) {
         if (text) node.status({ fill: 'blue', shape: 'dot', text: text.slice(0, 100) });
         const payload = { timestamp: new Date().toISOString(), action, ...event, access };
         if (logDirectory) {
-          try { syncFs.appendFileSync(path.join(logDirectory, 'progress.jsonl'), JSON.stringify(payload) + '\n', { mode: 0o600 }); }
+          try {
+            syncFs.appendFileSync(path.join(logDirectory, 'progress.jsonl'), JSON.stringify(payload) + '\n', { mode: 0o600 });
+            if (runInfo && (event.type === 'phase' || Array.isArray(event.gatewayAddresses))) {
+              runInfo = { ...runInfo, access, lastPhase, lastEventAt: payload.timestamp };
+              const file = path.join(logDirectory, 'run.json');
+              syncFs.writeFileSync(`${file}.next`, JSON.stringify(runInfo), { mode: 0o600 });
+              syncFs.renameSync(`${file}.next`, file);
+            }
+          }
           catch (error) { progressLogError = error; controller?.abort(); }
         }
         send([null, { _msgid: msg._msgid, topic: 'ocm-wstack/progress',
@@ -267,10 +307,18 @@ module.exports = function register(RED) {
         let failure;
         let finalMessage;
         try {
-          const logRoot = path.join(RED.settings?.userDir || os.tmpdir(), 'ocm-deployer-logs');
+          const logRoot = config.logDirectory ? path.resolve(config.logDirectory) :
+            path.join(RED.settings?.userDir || os.tmpdir(), 'ocm-deployer-logs');
           await fs.mkdir(logRoot, { recursive: true, mode: 0o700 });
+          const nodeId = node.id || config.id || 'ocm-deployer';
+          await interruptedLogs(logRoot, nodeId, send);
           logDirectory = await fs.mkdtemp(path.join(logRoot, startedAt.replace(/[:.]/g, '-') + '-'));
           await fs.chmod(logDirectory, 0o700);
+          let processStart;
+          try { processStart = syncFs.readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[19]; } catch {}
+          runInfo = { nodeId, action, state: 'running', startedAt, pid: process.pid,
+            processStart, host: os.hostname(), access };
+          await writeJson(path.join(logDirectory, 'run.json'), runInfo);
           heartbeat = setInterval(() => progress({ type: 'heartbeat', phase: lastPhase,
             elapsedSeconds: Math.floor((Date.now() - Date.parse(startedAt)) / 1000),
             activeCommands: [...commands.values()].map(({ id, command, phase, startedAt, timeoutSeconds }) => ({ id, command, phase, startedAt, timeoutSeconds })) }), 10000);
@@ -307,6 +355,8 @@ module.exports = function register(RED) {
           try {
             if (!logDirectory) throw new Error('Log directory could not be created.');
             const log = await fullLog(logDirectory, { action, startedAt, finishedAt: new Date().toISOString(), result });
+            await writeJson(path.join(logDirectory, 'run.json'), { ...runInfo,
+              state: 'finished', finishedAt: new Date().toISOString(), result });
             logMessage = { _msgid: msg._msgid, topic: 'ocm-wstack/log', ...log,
               action, status: result.status, access, complete: !progressLogError && result.code !== 'LOG_WRITE',
               ...(progressLogError ? { logError: progressLogError.message } : {}) };

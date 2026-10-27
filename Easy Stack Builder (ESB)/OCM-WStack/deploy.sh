@@ -53,6 +53,11 @@ internal_action() {
         { printf 'Deployment operation context is unavailable.\n' >&2; return 1; }
     case "$action" in
         helm-upgrade) helm_upgrade "$@" ;;
+        namespace-create)
+            [[ ${1:-} == observability || ${1:-} == security ]] || return 1
+            jq -n --arg name "$1" '{apiVersion:"v1",kind:"Namespace",metadata:{name:$name}}' >"$WORKDIR/namespace-$1.json"
+            apply_json "$WORKDIR/namespace-$1.json" ;;
+        apply-file) apply_json "${1:?}" ;;
         argo-install) argo_install ;;
         workload-ready) wait_workloads "$@" ;;
         native-compatibility) cassandra_compatibility ;;

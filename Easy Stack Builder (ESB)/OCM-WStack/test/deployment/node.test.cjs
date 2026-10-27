@@ -30,6 +30,27 @@ function node(t, script, config = {}) {
   };
 }
 
+test('the next trigger reconstructs an interrupted run from persistent logs',async t=>{
+ const n=node(t,'#!/bin/bash\nprintf \'{"status":"ready"}\'');
+ const dir=path.join(n.dir,'ocm-deployer-logs','previous-run');fs.mkdirSync(dir,{recursive:true});
+ fs.writeFileSync(path.join(dir,'run.json'),JSON.stringify({nodeId:'ocm-deployer',state:'running',action:'deploy',
+  host:'previous-container',pid:999999,startedAt:'2026-10-27T00:00:00Z',access:{urls:{tenant:'https://example.invalid'}}}));
+ fs.writeFileSync(path.join(dir,'script.stderr'),'retained interruption evidence\n');
+ assert.equal(await n.input({action:'deploy'}),undefined);
+ const recovered=n.messages.find(m=>m[2]?.recovered)?.[2];assert.ok(recovered);
+ assert.equal(recovered.complete,false);assert.match(recovered.payload,/retained interruption evidence/);
+ assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'run.json'))).state,'interrupted');
+ assert.equal(n.messages.at(-1)[0].payload.status,'ready');await n.close();
+});
+
+test('configured persistent log directory receives the complete result and raw log',async t=>{
+ const logRoot=workspace(t),n=node(t,'#!/bin/bash\nprintf \'{"status":"ready"}\'',{logDirectory:logRoot});
+ assert.equal(await n.input({action:'deploy'}),undefined);
+ const log=n.messages.at(-1)[2];assert.ok(log.filename.startsWith(logRoot+'/'));
+ const run=JSON.parse(fs.readFileSync(path.join(path.dirname(log.filename),'run.json')));
+ assert.equal(run.state,'finished');assert.equal(run.result.status,'ready');await n.close();
+});
+
 test('node keeps configuration and credentials private and preserves the two output topics', async t => {
   const n = node(t, `#!/bin/bash
 set -euo pipefail

@@ -140,14 +140,31 @@ run() {
     local output
     output=$(mktemp "$WORKDIR/command-output.XXXXXX")
     rm -f "$WORKDIR/error.json"
-    if ! run_capture "$output" "$seconds" "$@"; then
+    local status=0 attempt reason repeatable=false
+    case "${1##*/}" in
+        kubectl) [[ " $* " == *' apply '* ]] && repeatable=true ;;
+        git) [[ " $* " == *' fetch '* ]] && repeatable=true ;;
+        helm) case "${2:-}" in pull|repo|dependency) repeatable=true ;; esac ;;
+    esac
+    for attempt in 1 2 3 4 5; do
+        status=0
+        run_capture "$output" "$seconds" "$@" || status=$?
+        ((status!=0)) || break
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        [[ $repeatable == true ]] && retryable_api_reason "$reason" && ((attempt<5)) || break
+        emit "$(jq -cn --arg command "${1##*/}" --arg reason "$reason" --argjson attempt "$attempt" \
+            '{type:"command-retry",command:$command,reason:$reason,attempt:$attempt}')"
+        sleep "$((attempt*2))"
+        if [[ ${1##*/} == kubectl && -n ${ESB_LEASE_HOLDER:-} ]]; then verify_lease || return 1; fi
+    done
+    if ((status!=0)); then
         # Internal bootstrap hooks write their specific result in this directory.
         if [[ -s $WORKDIR/error.json ]] && jq -e '
             type=="object" and .status=="failed" and
             (.code|type)=="string" and (.message|type)=="string"' "$WORKDIR/error.json" >/dev/null; then
             return 1
         fi
-        fail COMMAND_FAILED "${1##*/} failed (exit $LAST_STATUS${LAST_COMMAND_ID:+, command $LAST_COMMAND_ID}): $(safe_error "$LAST_ERROR"). See output 3 for the full log."
+        command_failure COMMAND_FAILED "${1##*/} failed (exit $LAST_STATUS${LAST_COMMAND_ID:+, command $LAST_COMMAND_ID}): $(safe_error "$LAST_ERROR"). See output 3 for the full log."
         return 1
     fi
 }
@@ -155,13 +172,17 @@ run() {
 kube_json() {
     local output=$1
     shift
-    if ! run_capture "$output" 30 kubectl "$@"; then
-        fail KUBERNETES "Kubernetes request failed: $(safe_error "$LAST_ERROR")"
+    local status=0
+    if kube_query "$@"; then
+        read_capture "$output" 30 "${ESB_READ_BUDGET:-120}" kubectl "$@" || status=$?
+    else
+        run_capture "$output" 30 kubectl "$@" || status=$?
+    fi
+    if ((status != 0)); then
+        command_failure KUBERNETES "Kubernetes request failed (exit $status, command ${LAST_COMMAND_ID:-unrecorded}): $(safe_error "$LAST_ERROR"). See output 3."
         return 1
     fi
-    if [[ ! -s $output ]]; then
-        printf 'null\n' >"$output"
-    fi
+    [[ -s $output ]] || printf 'null\n' >"$output"
     jq -e 'type == "object" or . == null' "$output" >/dev/null ||
         fail API_RESPONSE 'Kubernetes returned an invalid resource document.'
 }
@@ -242,7 +263,7 @@ cancel() {
 
 load_libraries() {
     local name
-    for name in cluster kyverno network services runtime checks; do
+    for name in cluster recovery kyverno network services runtime checks; do
         # shellcheck source=/dev/null
         source "$DEPLOYMENT/$name.sh"
     done

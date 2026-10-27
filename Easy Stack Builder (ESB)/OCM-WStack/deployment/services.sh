@@ -45,7 +45,7 @@ cassandra_compatibility() {
         "$WORKDIR/cassandra.json" >"$WORKDIR/cassandra-patch.json"
     if jq -e 'length>1' "$WORKDIR/cassandra-patch.json" >/dev/null; then
         run 30 kubectl -n infrastructure patch statefulset cassandra --type=json --patch-file "$WORKDIR/cassandra-patch.json"
-        run "$((TIMEOUT_SECONDS+30))" kubectl -n infrastructure rollout status statefulset/cassandra "--timeout=${TIMEOUT_SECONDS}s"
+        wait_workloads infrastructure statefulset/cassandra
     fi
     emit '{"type":"cassandra-probes","timeoutSeconds":10,"livenessFailureThreshold":6}'
 }
@@ -67,7 +67,7 @@ verification_pull_secret() {
         jq -n --arg name "$name" '{apiVersion:"v1",kind:"Secret",metadata:{name:$name,namespace:"ocm-wstack",
             labels:{"app.kubernetes.io/managed-by":"esb-ocmwstack"}},type:"kubernetes.io/dockerconfigjson",
             stringData:{".dockerconfigjson":"{\"auths\":{}}"}}' >"$WORKDIR/pull-secret-new.json"
-        run 30 kubectl create -f "$WORKDIR/pull-secret-new.json"
+        create_retained "$WORKDIR/pull-secret-new.json"
     fi
     get_optional "$WORKDIR/verification.json" ocm-wstack deployment credential-verification-service
     jq '[{op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion}] +
@@ -94,7 +94,7 @@ native_prerequisites() {
         target:{name:$name,creationPolicy:"Owner",deletionPolicy:"Retain"},
         data:[{secretKey:"cassandra-password",remoteRef:{key:"cassandra/cassandra",property:"password"}}]}}' >"$WORKDIR/cassandra-secret-ref-new.json"
     apply_json "$WORKDIR/cassandra-secret-ref-new.json"
-    run "$((TIMEOUT_SECONDS+15))" kubectl -n ocm-wstack wait --for=condition=Ready "externalsecret/$name" "--timeout=${TIMEOUT_SECONDS}s"
+    wait_resource_condition "externalsecret/$name" Ready "$TIMEOUT_SECONDS" ocm-wstack
     emit '{"type":"ocm-prerequisites","cassandraSecret":"esb-credential-verification-cassandra"}'
 }
 
@@ -115,10 +115,7 @@ discover_api_egress() {
 
 install_reconciler() {
     discover_api_egress
-    kube_json "$WORKDIR/dns-service.json" -n kube-system get service kube-dns -o json
-    kube_json "$WORKDIR/dns-slices.json" -n kube-system get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kube-dns -o json
-    json_program 'guard_dns_egress($slices[0])' --slurpfile slices "$WORKDIR/dns-slices.json" \
-        "$WORKDIR/dns-service.json" >"$WORKDIR/guard-dns-egress.json"
+    discover_dns "$WORKDIR/guard-dns-egress.json"
     local checksum
     checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$DEPLOYMENT/filters.jq" | sha256sum | cut -d ' ' -f 1)
     jq -L "$DEPLOYMENT" --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \

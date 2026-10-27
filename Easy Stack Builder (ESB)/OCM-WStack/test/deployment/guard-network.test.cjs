@@ -78,21 +78,38 @@ test('runtime DNS fallback retains default policy on standard or unsupported dis
   }
 });
 
-test('runtime DNS discovery tolerates API failure and writes scoped alternate rules',t=>{
+test('DNS discovery accepts IONOS coredns and Gardener kube-dns without adding unrelated ports',t=>{
  const {bash}=require('./helpers.cjs');
- for(const mode of ['success','unavailable']) {
-  const f=dns(),dir=workspace(t,{'service.json':f.service,'slices.json':f.slices});
+ for(const [name,port] of [['coredns',53],['kube-dns',8053],['dns-custom',1053]]) {
+  const f=dns(port); f.service.metadata.name=name;
+  f.slices.items[0].metadata.labels['kubernetes.io/service-name']=name;
+  const dir=workspace(t,{'services.json':{items:[f.service,{metadata:{name:'monitoring-coredns'},spec:{ports:[{port:9153,protocol:'TCP'}]}}]},'slices.json':f.slices});
   const result=bash(dir,`
-run_capture() {
-  [[ "$MODE" == success ]] || return 1
+kube_json() {
   if [[ "$*" == *endpointslices* ]]; then cp "$WORKDIR/slices.json" "$1";
-  else cp "$WORKDIR/service.json" "$1"; fi
+  else cp "$WORKDIR/services.json" "$1"; fi
 }
 runtime_dns_fallback "$WORKDIR/rules.json"
 cat "$WORKDIR/rules.json"
-`,{MODE:mode});
+`);
   assert.equal(result.status,0,result.stderr);
-  const rules=JSON.parse(result.stdout);assert.equal(rules.length,mode==='success'?1:0);
-  if(rules.length) assert.deepEqual(rules[0].ports,[{port:8053,protocol:'TCP'},{port:8053,protocol:'UDP'}]);
+  const rules=JSON.parse(result.stdout);assert.equal(rules.length,port===53?0:1);
+  if(rules.length) assert.deepEqual(rules[0].ports,[{port,protocol:'TCP'},{port,protocol:'UDP'}]);
  }
+});
+
+test('DNS discovery waits for ready backends and excludes foreign EndpointSlices',t=>{
+ const {bash}=require('./helpers.cjs'),f=dns(8053);
+ const dir=workspace(t,{'services.json':{items:[f.service]},'slices.json':f.slices});
+ const result=bash(dir,`
+sleep() { SECONDS=$((SECONDS+$1)); }
+kube_json() {
+ if [[ "$*" != *endpointslices* ]]; then cp "$WORKDIR/services.json" "$1"; return; fi
+ if [[ ! -f $WORKDIR/seen ]]; then printf '{"items":[]}' >"$1"; touch "$WORKDIR/seen";
+ else cp "$WORKDIR/slices.json" "$1"; fi
+}
+discover_dns "$WORKDIR/rules.json"
+cat "$WORKDIR/rules.json"
+`);
+ assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout)[0].ports[0].port,8053);
 });

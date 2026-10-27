@@ -274,11 +274,12 @@ kube_read() {
 # Only reads are retried here. The caller has already installed the workload.
 # Keep one deadline across all required components, including interrupted reads.
 wait_workloads() {
-    local namespace=$1 resource=$2 selector=$3 expected=${4:-'[]'} budget=${5:-$TIMEOUT_SECONDS}
+    local namespace=$1 resource=$2 selector=${3:-} expected=${4:-'[]'} budget=${5:-$TIMEOUT_SECONDS}
     local deadline=$((SECONDS+budget)) remaining limit delay reason='' attempt=0 directory
     directory=$(mktemp -d "$WORKDIR/workload-wait.XXXXXX") || return 1
     printf '{"ready":false,"missing":[],"workloads":[]}\n' >"$directory/report.json"
     local args=(get "$resource" -n "$namespace" -o json)
+    [[ $resource != */* ]] || args+=(--ignore-not-found)
     [[ -z $selector ]] || args+=(-l "$selector")
     phase "waiting-for-$namespace"
     while ((SECONDS<deadline)); do
@@ -286,6 +287,11 @@ wait_workloads() {
         attempt=$((attempt+1))
         if run_capture "$directory/objects.json" "$limit" kubectl "${args[@]}" "--request-timeout=${limit}s"; then
             reason=''
+            [[ -s $directory/objects.json ]] || printf '{"items":[]}\n' >"$directory/objects.json"
+            if [[ $resource == */* ]]; then
+                jq 'if has("items") then . else {items:[.]} end' "$directory/objects.json" >"$directory/list.json" || return 1
+                mv "$directory/list.json" "$directory/objects.json"
+            fi
             if ! jq -e 'type=="object" and (.items|type=="array") and all(.items[];
                 (.metadata.name|type)=="string" and
                 (.kind=="Pod" or (.metadata.generation|type)=="number"))' "$directory/objects.json" >/dev/null; then

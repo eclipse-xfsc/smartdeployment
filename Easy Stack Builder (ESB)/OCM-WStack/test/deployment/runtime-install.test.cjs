@@ -21,8 +21,8 @@ get_optional() {
   else return 9; fi
 }
 kube_json() { cp "$WORKDIR/service-list.json" "$1"; }
-run() {
-  if [[ $3 == create ]]; then
+create_retained() {
+  if [[ -f $1 ]]; then
     jq '{metadata:.metadata,type:.type,data:{"secrets.json":(.stringData["secrets.json"]|@base64)}}' "$WORKDIR/runtime-secret-new.json" >"$WORKDIR/retained.json"
     printf created >>"$WORKDIR/create-count"
   fi
@@ -32,6 +32,8 @@ gateway_ports() {
   printf '[80,443,10443]'
 }
 helm_upgrade() { cp "$WORKDIR/runtime-values.json" "$WORKDIR/installed-values.json"; }
+runtime_dns_fallback() { printf '[]' >"$1"; }
+wait_workloads() { :; }
 runtime_install
 cat "$WORKDIR/runtime-result.json"
 `;

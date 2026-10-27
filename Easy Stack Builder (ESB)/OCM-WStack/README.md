@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.18
+# OCM W-Stack deployer 12.6.0
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -25,12 +25,21 @@ its saved files private.** This output is intentionally unredacted. The deployer
 does not explicitly dump credential files or enable shell tracing. Log files are
 not automatically deleted. An interrupted command is marked as incomplete in the
 transcript; closing the node retains the log on disk but cannot send to a closed flow.
-An abrupt container or process termination retains the raw files already written,
-but cannot emit a final message. `msg.complete=false` indicates a log write or assembly failure.
+An abrupt process termination cannot emit a final message. On the next trigger,
+the node reconstructs that run from retained files and emits its interrupted log
+on output 3 before starting the requested action. `msg.recovered=true` identifies
+that transcript; `msg.complete=false` indicates an interrupted or incomplete log.
 
-All existing kubeconfig binding, deployment recovery and readiness checks remain
-in place. This release adds execution visibility; successful completion still
-requires the stack checks to pass.
+Set **Log directory** to a persistent mounted directory when the ORCE user
+directory is ephemeral. Files survive a replacement pod only when their storage
+survives it. The node does not modify the hosting ORCE deployment or mount storage.
+
+A deployment records each intended Helm operation in its owned installation marker
+before making the Helm write. After a lost response or a process restart, it reads
+the existing release and confirms the recorded operation before deciding whether
+a write is needed. Successful completion still requires the stack checks to pass.
+See [deployment recovery](docs/DEPLOYMENT-RECOVERY.md) for the state transitions,
+retry budgets, ownership checks and release acceptance matrix.
 
 ## Argo CD installation and workload readiness
 
@@ -95,8 +104,9 @@ Kyverno revision. A successful prior revision stops automatic bootstrap recovery
 The deployer backs up the pending Secret, creates missing prerequisites from its
 stored manifest, and waits for all four Kyverno controllers to become ready.
 A resourceVersion-guarded update then marks the interrupted revision failed,
-retaining history, before the normal Helm upgrade retries. Pending operations for
-other releases remain protected. No Helm record or CRD is deleted.
+retaining history, before the normal Helm upgrade retries. This legacy Kyverno path also supports installations started before operation
+records were introduced. Other pending releases require an exact recorded ESB
+operation. No Helm record or CRD is deleted.
 
 The node saves backups under `ocm-deployer-backups` in the ORCE user directory
 (normally `/data`). Standalone Bash uses `ESB_RECOVERY_BACKUP_DIR` or a private
@@ -119,7 +129,13 @@ can proceed. The uploaded credentials and context remain bound to every call.
 
 Helm transport failures receive up to five attempts, with 5, 15, 30 and 30 second
 pauses. Each write is preceded by readiness, release-state and lease checks.
-Pending Helm operations stop the deployment and retain their release records.
+After a lost response, release reads are retried without repeating a completed
+write. Interrupted operations recorded by this version can resume after their
+original timeout and termination grace. Recovery verifies the owned installation
+marker, active lease, release revision and operation label, saves the release
+Secret, then conditionally marks that revision failed so Helm can retry. Unknown
+pending operations remain untouched. There is a final read-only reconciliation
+after the fifth write attempt.
 
 Failure results include `diagnostics.history`: the step, namespace, release,
 API server, reason, command exit code and attempt count. The bounded history retains the first Helm failure when later readiness
@@ -145,7 +161,7 @@ The runtime, UI and their seed archives remain at 12.5.11 in this deployer relea
 
 ## Build and test
 
-The deployment container needs Bash 5, Node.js, jq, curl, git, Helm 3 or 4, kubectl, OpenSSL and the BusyBox utilities supplied by `ecofacis/xfsc-orce:2.0.15`. Run `bash deploy.sh check` to inspect the available tools. Python 3 with PyYAML and Helm are needed on the development host for recovery and chart tests.
+The deployment container needs Bash 5, Node.js, jq, curl, git, Helm 3.13 or newer, or Helm 4, kubectl, OpenSSL and the BusyBox utilities supplied by `ecofacis/xfsc-orce:2.0.15`. Run `bash deploy.sh check` to inspect the available tools. Python 3 with PyYAML and Helm are needed on the development host for recovery and chart tests.
 
 ```sh
 npm install --ignore-scripts
@@ -161,11 +177,14 @@ The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container ins
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.5.11.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
+Install `orce-esb-ocmwstack-12.6.0.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
-Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`. Its DNS policy includes the discovered resolver backend ports. API requests use the discovered Kubernetes Service address with TLS verification for `kubernetes.default.svc`.
+Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`. Its DNS policy uses the cluster DNS Service selector and ready EndpointSlice
+ports. The Service can be named `coredns`, `kube-dns` or another name. Runtime
+DNS retains standard port 53 and adds only discovered alternate backend ports;
+8053 is not assumed on other clusters. API requests use the discovered Kubernetes Service address with TLS verification for `kubernetes.default.svc`.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.5.11. The runtime, UI and runtime chart are version 12.5.11.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.6.0. The runtime, UI and runtime chart are version 12.5.11.
 
 Verification comparison accepts reordering of the complete expected provider-injected environment block. Missing, duplicate or changed entries remain visible. Signing-key preservation also normalizes an empty `data` map. Failure results are saved before lease cleanup; the node can recover them from its private operation directory and reports termination signals when no result exists.
 

@@ -113,7 +113,7 @@ runtime_install() {
               "mongodb://ocm_ui:"+.mongoPassword+"@ocm-ui-mongodb.ocm-wstack.svc.cluster.local:27017/ocm_ui?authSource=admin" end)' >"$WORKDIR/runtime-secrets.json"
         jq '{apiVersion:"v1",kind:"Secret",metadata:{name:"ocm-orce-runtime",namespace:"ocm-wstack"},type:"Opaque",
              stringData:{"secrets.json":(.|tojson),"mongo-password":.mongoPassword}}' "$WORKDIR/runtime-secrets.json" >"$WORKDIR/runtime-secret-new.json"
-        run 30 kubectl create -f "$WORKDIR/runtime-secret-new.json"
+        create_retained "$WORKDIR/runtime-secret-new.json"
     fi
     runtime_dns_fallback "$WORKDIR/runtime-dns-egress.json"
     gateway_ports >"$WORKDIR/runtime-ports.json"
@@ -129,7 +129,7 @@ runtime_install() {
          mongo:{embedded:(.useExternalMongo|not),externalPorts:$mongo[0]},runtimeConfig:$runtime[0]}' "$CONFIG" >"$WORKDIR/runtime-values.json"
     helm_upgrade ocm-wstack ocm-orce-ui upgrade --install ocm-orce-ui "$ROOT/charts-runtime" \
         -n ocm-wstack -f "$WORKDIR/runtime-values.json" --wait --timeout "${TIMEOUT_SECONDS}s"
-    run "$((TIMEOUT_SECONDS+30))" kubectl -n ocm-wstack rollout status deployment/ocm-orce "--timeout=${TIMEOUT_SECONDS}s"
+    wait_workloads ocm-wstack deployment/ocm-orce
     jq '{enabled:true,url:(.tenantUrl+"/orce/"),editorUrl:(.tenantUrl+"/orce/editor/"),authentication:"mongodb-24h-session"}' \
         "$CONFIG" >"$WORKDIR/runtime-result.json"
 }
@@ -184,7 +184,7 @@ dashboard_install() {
     if ! jq -e '.data["server.insecure"]=="true"' "$WORKDIR/argo-params.json" >/dev/null; then
         run 30 kubectl -n argocd patch configmap argocd-cmd-params-cm --type=merge -p '{"data":{"server.insecure":"true"}}'
         run 30 kubectl -n argocd rollout restart deployment/argocd-server
-        run "$((TIMEOUT_SECONDS+30))" kubectl -n argocd rollout status deployment/argocd-server "--timeout=${TIMEOUT_SECONDS}s"
+        wait_workloads argocd deployment/argocd-server
     fi
     dashboard_admins
     tls_install argocd
@@ -198,21 +198,17 @@ dashboard_install() {
         "$CONFIG" >"$WORKDIR/dashboard-values.json"
     helm_upgrade infrastructure esb-dashboard-routes upgrade --install esb-dashboard-routes "$ROOT/charts-dashboards" \
         -n infrastructure -f "$WORKDIR/dashboard-values.json" --timeout "${TIMEOUT_SECONDS}s"
-    run "$((TIMEOUT_SECONDS+30))" kubectl -n argocd wait --for=condition=Programmed listenerset/esb-argocd "--timeout=${TIMEOUT_SECONDS}s"
-    run "$((TIMEOUT_SECONDS+30))" kubectl -n observability wait --for=condition=Programmed listenerset/esb-grafana "--timeout=${TIMEOUT_SECONDS}s"
+    wait_resource_condition listenerset/esb-argocd Programmed "$TIMEOUT_SECONDS" argocd
+    wait_resource_condition listenerset/esb-grafana Programmed "$TIMEOUT_SECONDS" observability
     jq '{public:true,username:"admin",argocd:("https://argocd."+.domain),grafana:("https://grafana."+.domain)}' "$CONFIG" >"$WORKDIR/dashboard-result.json"
 }
 
-# Optional discovery: standard DNS remains usable when discovery is unavailable.
+# Standard port 53 is always present in the runtime chart. Additional ports
+# are derived from the selected cluster DNS Service and ready EndpointSlices.
 runtime_dns_fallback() {
     local output=$1
-    printf '[]\n' >"$output"
-    if run_capture "$WORKDIR/runtime-dns-service.json" 30 kubectl -n kube-system get service kube-dns -o json &&
-       run_capture "$WORKDIR/runtime-dns-slices.json" 30 kubectl -n kube-system get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kube-dns -o json; then
-        if json_program 'runtime_dns_fallback($slices[0])' --slurpfile slices "$WORKDIR/runtime-dns-slices.json" \
-            "$WORKDIR/runtime-dns-service.json" >"$WORKDIR/runtime-dns-next.json"; then
-            mv "$WORKDIR/runtime-dns-next.json" "$output"
-        fi
-    fi
+    discover_dns "$WORKDIR/runtime-dns-rules.json" || return 1
+    jq 'map(.ports |= map(select(.port != 53))) | map(select(.ports|length>0))' \
+        "$WORKDIR/runtime-dns-rules.json" >"$output"
     emit "$(jq -cn --slurpfile rules "$output" '{type:"runtime-dns",phase:"orce-ui",standardPort:53,additionalRules:$rules[0]}')"
 }

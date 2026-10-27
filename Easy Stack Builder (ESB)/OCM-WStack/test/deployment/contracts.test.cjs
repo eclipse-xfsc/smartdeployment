@@ -141,7 +141,7 @@ test('installed reconciler receives the executable filters and discovered API eg
     kube_json() {
       case "$*" in
         *kube-system*endpointslices*) cp "$WORKDIR/dns-fixture.json" "$1" ;;
-        *kube-system*service*) : ;;
+        *kube-system*service*) jq '{items:[.]}' "$WORKDIR/dns-service.json" >"$1" ;;
         *endpointslices*) cp "$WORKDIR/slices.json" "$1" ;;
         *service*) cp "$WORKDIR/service.json" "$1" ;;
         *) return 1 ;;

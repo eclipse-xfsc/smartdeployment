@@ -576,12 +576,12 @@ def api_egress($backends):
         to:([.[].ip]|unique|map({ipBlock:{cidr:(.+(if contains(":") then "/128" else "/32" end))}}))});
 
 def guard_dns_egress($slices):
-    require_that(.metadata.name=="kube-dns" and .metadata.namespace=="kube-system" and
+    require_that((.metadata.name|type)=="string" and .metadata.namespace=="kube-system" and
         (.spec.selector|type)=="object" and (.spec.selector|length)>0;"GUARD_DNS_SERVICE") |
     . as $service |
     [.spec.ports[] | select(.port==53 and (.protocol|IN("UDP","TCP")))] as $ports |
     [$slices.items[]? | select(.metadata.namespace=="kube-system" and
-        .metadata.labels["kubernetes.io/service-name"]=="kube-dns") |
+        .metadata.labels["kubernetes.io/service-name"]==$service.metadata.name) |
         select(any(.endpoints[]?; .conditions.ready!=false and .conditions.terminating!=true)) |
         .ports[]? | . as $p | select(any($ports[]; .name==$p.name and .protocol==$p.protocol)) |
         {port,protocol}] | unique as $backends |

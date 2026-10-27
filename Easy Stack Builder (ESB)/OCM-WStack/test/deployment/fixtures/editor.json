@@ -104,6 +104,9 @@
     },
     "timeoutSeconds": {
       "value": 1800
+    },
+    "logDirectory": {
+      "value": ""
     }
   },
   "credentials": {

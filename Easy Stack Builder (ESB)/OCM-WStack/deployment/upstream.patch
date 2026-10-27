@@ -389,7 +389,7 @@ index b17b1dc..80eaa0e
 diff --git a/basic-cluster-init.sh b/basic-cluster-init.sh
 old mode 100644
 new mode 100755
-index e377f06..600d49b
+index e377f06..5262a7a
 --- a/basic-cluster-init.sh
 +++ b/basic-cluster-init.sh
 @@ -1,9 +1,11 @@
@@ -435,7 +435,7 @@ index e377f06..600d49b
 -helm repo add kyverno https://kyverno.github.io/kyverno/
 -helm dependency build INFRA/security/kyverno
 -helm install -n security kyverno INFRA/security/kyverno
-+kubectl create namespace observability --dry-run=client -o yaml | kubectl apply -f -
++bash "${ESB_DEPLOY:?}" --internal namespace-create observability
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
@@ -444,7 +444,7 @@ index e377f06..600d49b
 +echo "[ESB_PHASE] observability"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade observability observability upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n observability observability INFRA/observability/opentelemtry -f "$ESB_OBSERVABILITY_VALUES"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready observability deployments app.kubernetes.io/name=grafana,app.kubernetes.io/instance=observability
-+kubectl create namespace security --dry-run=client -o yaml | kubectl apply -f -
++bash "${ESB_DEPLOY:?}" --internal namespace-create security
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] openbao"
@@ -486,7 +486,7 @@ index e377f06..600d49b
 -  kubectl create secret generic external-dns \
 -    -n infrastructure \
 -    --from-literal=token="$DNSTOKEN"
-+  kubectl apply -f "$ESB_DNS_SECRET_FILE"
++  bash "${ESB_DEPLOY:?}" --internal apply-file "$ESB_DNS_SECRET_FILE"
  fi
  
  #helm install -n infrastructure basic XFSC/Applicationsets/chart -f XFSC/Applicationsets/values/02_basic-values.yaml --set storageClass="$STORAGE_CLASS"

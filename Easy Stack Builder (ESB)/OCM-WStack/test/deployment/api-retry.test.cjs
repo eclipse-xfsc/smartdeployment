@@ -142,7 +142,7 @@ test('Helm writes are bounded at five and each retry checks readiness, release a
   assert.equal(error.code, 'API_TRANSPORT');
   assert.equal(error.diagnostics.history.length, 5);
   assert.equal(fs.readFileSync(dir + '/helm-count', 'utf8'), '5');
-  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '5');
+  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '6'); // final read-only reconciliation
   assert.equal(fs.readFileSync(dir + '/delays', 'utf8'), '5\n15\n30\n30\n');
   const calls = fs.readFileSync(dir + '/helm-calls', 'utf8').trim().split('\n');
   for (let i = 0; i < calls.length; i++) if (calls[i].startsWith('upgrade')) {

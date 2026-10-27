@@ -6,7 +6,7 @@ LEASE=esb-ocmwstack-v12
 
 bind_kubeconfig() {
     local variable
-    for variable in ${!HELM_KUBE@} ${!ESB_KUBE@}; do
+    for variable in ${!HELM_KUBE@} ${!ESB_KUBE@} HELM_DRIVER HELM_DRIVER_SQL_CONNECTION_STRING HELM_NAMESPACE; do
         unset "$variable"
     done
     ESB_REAL_KUBECTL=$(command -v kubectl)
@@ -70,7 +70,7 @@ kube_command() {
     [[ $executable == /* ]] || return 1
     for argument in "$@"; do
         case "$argument" in
-            --kubeconfig|--kubeconfig=*|--context|--context=*|--user|--user=*|--cluster|--cluster=*|--server|--server=*|--token|--token=*|--as|--as=*|--as-group|--as-group=*|--as-uid|--as-uid=*|--client-certificate|--client-certificate=*|--client-key|--client-key=*|--kube-context|--kube-context=*|--kube-token|--kube-token=*|--kube-apiserver|--kube-apiserver=*|--kube-as-user|--kube-as-user=*|--kube-as-group|--kube-as-group=*|--kube-ca-file|--kube-ca-file=*|-s|-s?*)
+            --kubeconfig|--kubeconfig=*|--context|--context=*|--user|--user=*|--cluster|--cluster=*|--server|--server=*|--token|--token=*|--as|--as=*|--as-group|--as-group=*|--as-uid|--as-uid=*|--certificate-authority|--certificate-authority=*|--insecure-skip-tls-verify|--insecure-skip-tls-verify=*|--tls-server-name|--tls-server-name=*|--kube-insecure-skip-tls-verify|--kube-insecure-skip-tls-verify=*|--kube-tls-server-name|--kube-tls-server-name=*|--client-certificate|--client-certificate=*|--client-key|--client-key=*|--kube-context|--kube-context=*|--kube-token|--kube-token=*|--kube-apiserver|--kube-apiserver=*|--kube-as-user|--kube-as-user=*|--kube-as-group|--kube-as-group=*|--kube-ca-file|--kube-ca-file=*|-s|-s?*)
                 printf 'Kubernetes credential and context overrides are not allowed.\n' >&2
                 return 1 ;;
         esac
@@ -129,13 +129,24 @@ cluster_preflight() {
     jq -e 'any(.items[]; .spec.unschedulable != true and any(.status.conditions[]?; .type == "Ready" and .status == "True"))' \
         "$WORKDIR/nodes.json" >/dev/null || fail NO_READY_NODES 'No schedulable Ready node was found.'
     run_capture "$WORKDIR/helm-version" 15 helm version --short
-    [[ $(cat "$WORKDIR/helm-version") =~ ^v[34]\. ]] || fail HELM_VERSION 'Use Helm 3 or 4.'
+    local helm_version
+    helm_version=$(cat "$WORKDIR/helm-version")
+    [[ $helm_version =~ ^v([34])\.([0-9]+) ]] &&
+        ((BASH_REMATCH[1]==4 || BASH_REMATCH[2]>=13)) ||
+        { fail HELM_VERSION 'Use Helm 3.13 or newer, or Helm 4.'; return 1; }
     json_program 'resolve_config($nodes[0];$classes[0];$credentials[0])' \
         --slurpfile nodes "$WORKDIR/nodes.json" --slurpfile classes "$WORKDIR/classes.json" \
         --slurpfile credentials "$CREDENTIALS" "$CONFIG" >"$WORKDIR/resolved.json"
     mv "$WORKDIR/resolved.json" "$CONFIG"
     update_config '.clusterUid=$uid' --arg uid "$(jq -er '.metadata.uid' "$WORKDIR/cluster.json")"
     get_optional "$WORKDIR/marker.json" kube-system configmap "$MARKER"
+    case "${ACTION:-}" in
+        deploy|repair-ocm|repair-network|install-ui|teardown)
+            if jq -e '.!=null' "$WORKDIR/marker.json" >/dev/null && ! marker_matches; then
+                ownership_failure
+                return 1
+            fi ;;
+    esac
     local owner
     owner=$(jq -r 'if . == null then empty else .data.dnsOwnerId // "xfsc" end' "$WORKDIR/marker.json")
     update_config '.dnsOwnerId=$owner' --arg owner "${owner:-esb-$(config_value '.clusterUid')}"
@@ -218,7 +229,9 @@ retryable_readiness_reason() {
 # Poll their JSON until the requested condition is True; never infer readiness
 # from creation success or from the absence of a controller response.
 wait_resource_condition() {
-    local resource=$1 condition=$2 budget=$3
+    local resource=$1 condition=$2 budget=$3 namespace=${4:-}
+    local condition_args=()
+    [[ -z $namespace ]] || condition_args=(-n "$namespace")
     local started=$SECONDS remaining request limit delay attempt=0 state=waiting reason=''
     local directory
     directory=$(mktemp -d "$WORKDIR/condition-wait.XXXXXX")
@@ -229,7 +242,7 @@ wait_resource_condition() {
         request=$((remaining<10 ? remaining : 10))
         limit=$((request+2<remaining ? request+2 : remaining))
         attempt=$((attempt+1))
-        if run_capture "$directory/resource.json" "$limit" kubectl get "$resource" \
+        if run_capture "$directory/resource.json" "$limit" kubectl "${condition_args[@]}" get "$resource" \
             --ignore-not-found -o json "--request-timeout=${request}s"; then
             reason=''
             [[ -s $directory/resource.json ]] || printf 'null\n' >"$directory/resource.json"
@@ -291,9 +304,12 @@ wait_resource_condition() {
 
 wait_api_ready() {
     local namespace=$1 release=$2 attempt reason delay retryable remaining
-    local started=$SECONDS budget=${3:-300} attempts=30
+    local started=$SECONDS budget=${3:-300} attempts=30 limit request
     for ((attempt=1; attempt<=attempts; attempt++)); do
-        if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
+        remaining=$((budget-(SECONDS-started)))
+        ((remaining>0)) || break
+        limit=$((remaining<12 ? remaining : 12)); request=$((limit<10 ? limit : 10))
+        if run_capture "$WORKDIR/api-ready" "$limit" kubectl get --raw=/readyz "--request-timeout=${request}s"; then
             return 0
         else
             LAST_STATUS=$?
@@ -318,6 +334,7 @@ wait_api_ready() {
             return 1
         fi
     done
+    fail API_UNREADY "Kubernetes API recovery window exhausted for $namespace/$release after $budget seconds."
 }
 
 lease_valid() {
@@ -334,26 +351,39 @@ verify_lease() {
 }
 
 acquire_lease() {
-    get_optional "$WORKDIR/lease.json" kube-system lease "$LEASE"
-    if jq -e --argjson now "$(date +%s)" '
-        . != null and (.spec.holderIdentity // "") != "" and
-        (((.spec.renewTime // .spec.acquireTime) | sub("\\.[0-9]+Z$";"Z") | fromdateiso8601)
-          + (.spec.leaseDurationSeconds // 180) > $now)' "$WORKDIR/lease.json" >/dev/null; then
-        fail BUSY 'Another deployment holds this cluster lease.'
-        return 1
-    fi
     export ESB_LEASE_HOLDER
     ESB_LEASE_HOLDER=$(openssl rand -hex 16)
-    local operation=create
-    jq -e '. != null' "$WORKDIR/lease.json" >/dev/null && operation=replace
-    jq --arg name "$LEASE" --arg holder "$ESB_LEASE_HOLDER" \
-        --arg now "$(date -u '+%Y-%m-%dT%H:%M:%S.000000Z')" '
-        {apiVersion:"coordination.k8s.io/v1",kind:"Lease",
-         metadata:({name:$name,namespace:"kube-system"} +
-                   (if .metadata.resourceVersion then {resourceVersion:.metadata.resourceVersion} else {} end)),
-         spec:{holderIdentity:$holder,leaseDurationSeconds:180,acquireTime:$now,renewTime:$now}}
-    ' "$WORKDIR/lease.json" >"$WORKDIR/lease-new.json"
-    kube_json "$WORKDIR/lease.json" -n kube-system "$operation" -f "$WORKDIR/lease-new.json" -o json
+    local attempt acquired=false operation reason
+    for attempt in 1 2 3 4 5; do
+        get_optional "$WORKDIR/lease.json" kube-system lease "$LEASE" || return 1
+        if lease_valid "$WORKDIR/lease.json"; then acquired=true; break; fi
+        if jq -e --argjson now "$(date +%s)" '
+            . != null and (.spec.holderIdentity // "") != "" and
+            (((.spec.renewTime // .spec.acquireTime) | sub("\\.[0-9]+Z$";"Z") | fromdateiso8601)
+              + (.spec.leaseDurationSeconds // 180) > $now)' "$WORKDIR/lease.json" >/dev/null; then
+            fail BUSY 'Another deployment holds this cluster lease.'
+            return 1
+        fi
+        operation=create
+        jq -e '. != null' "$WORKDIR/lease.json" >/dev/null && operation=replace
+        jq --arg name "$LEASE" --arg holder "$ESB_LEASE_HOLDER" \
+            --arg now "$(date -u '+%Y-%m-%dT%H:%M:%S.000000Z')" '
+            {apiVersion:"coordination.k8s.io/v1",kind:"Lease",
+             metadata:({name:$name,namespace:"kube-system"} +
+                       (if .metadata.resourceVersion then {resourceVersion:.metadata.resourceVersion} else {} end)),
+             spec:{holderIdentity:$holder,leaseDurationSeconds:180,acquireTime:$now,renewTime:$now}}
+        ' "$WORKDIR/lease.json" >"$WORKDIR/lease-new.json"
+        if kube_json "$WORKDIR/lease.json" -n kube-system "$operation" -f "$WORKDIR/lease-new.json" -o json; then
+            lease_valid "$WORKDIR/lease.json" || { fail LEASE_LOST 'Kubernetes returned an unexpected lease holder.'; return 1; }
+            acquired=true
+            break
+        fi
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        if ! retryable_api_reason "$reason" && ! grep -Eiq 'Conflict|AlreadyExists|object has been modified' "$LAST_ERROR"; then return 1; fi
+        sleep 2
+    done
+    [[ $acquired == true ]] || { fail LEASE_UNAVAILABLE 'Cannot acquire the deployment lease after five attempts.'; return 1; }
+    rm -f "$WORKDIR/error.json"
     local parent=$BASHPID
     (
         trap - EXIT ERR
@@ -386,7 +416,8 @@ renew_lease() {
                 return 0
             fi
         fi
-        transport_failure "$LAST_ERROR" || return 1
+        retryable_readiness_reason "$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")" ||
+            grep -Eiq 'Conflict|object has been modified' "$LAST_ERROR" || return 1
         sleep "$((attempt * 2))"
     done
     return 1
@@ -399,25 +430,31 @@ release_lease() {
     run_capture "$WORKDIR/lease-released.json" 12 kubectl -n kube-system replace -f "$WORKDIR/lease-release-next.json" --request-timeout=10s
 }
 
-release_status() {
+helm_state_read() {
     local namespace=$1 release=$2
-    if ! run_capture "$WORKDIR/helm-state.json" 30 helm status "$release" -n "$namespace" -o json; then
+    if ! read_capture "$WORKDIR/helm-state.json" 30 180 helm status "$release" -n "$namespace" -o json; then
         if grep -qi 'release: not found' "$LAST_ERROR"; then
-            printf 'absent\n'
-            return
+            printf '{"version":0,"info":{"status":"absent"}}\n' >"$WORKDIR/helm-state.json"
+            return 0
         fi
-        fail HELM_STATE_UNAVAILABLE 'Cannot establish the Helm release state.'
+        record_api_failure helm-status "$namespace" "$release" 1 1 "$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")"
+        command_failure HELM_STATE_UNAVAILABLE "Cannot read Helm release $namespace/$release (exit $LAST_STATUS, command ${LAST_COMMAND_ID:-unrecorded}): $(safe_error "$LAST_ERROR"). See output 3."
         return 1
     fi
-    local status
-    status=$(jq -er '.info.status' "$WORKDIR/helm-state.json")
+    jq -e '.info.status|IN("deployed","failed","absent","pending-install","pending-upgrade","pending-rollback","uninstalling","uninstalled","superseded")' \
+        "$WORKDIR/helm-state.json" >/dev/null || { fail HELM_STATE_UNAVAILABLE "Helm returned an invalid state for $namespace/$release."; return 1; }
+}
+
+release_status() {
+    local namespace=$1 release=$2 status
+    helm_state_read "$namespace" "$release" || return 1
+    status=$(jq -r '.info.status' "$WORKDIR/helm-state.json")
     case "$status" in
         deployed|failed|absent) printf '%s\n' "$status" ;;
-        pending-*|uninstalling)
-            if [[ $namespace == security && $release == kyverno ]]; then
-                kyverno_recover_pending "$status"
+        pending-*)
+            if [[ $namespace == security && $release == kyverno ]]; then kyverno_recover_pending "$status"
             else fail HELM_PENDING "Helm release $namespace/$release is $status."; fi ;;
-        *) fail HELM_STATE_UNAVAILABLE 'Helm returned an unsupported release state.' ;;
+        *) fail HELM_STATE_UNAVAILABLE "Helm release $namespace/$release is $status." ;;
     esac
 }
 
@@ -426,49 +463,91 @@ helm_upgrade() {
     shift 2
     [[ ${1:-} == upgrade && " $* " == *' --install '* ]] ||
         { fail HELM_COMMAND 'Expected helm upgrade --install.'; return 1; }
-    local attempt state reason attempts=5
-    printf '[]\n' >"$WORKDIR/api-failures.json"
-    for ((attempt=1; attempt<=attempts; attempt++)); do
-        if ((attempt > 1)); then
-            emit "$(jq -cn --arg phase "$release" --argjson attempt "$attempt" --argjson attempts "$attempts" '{type:"retry",phase:$phase,attempt:$attempt,attempts:$attempts}')"
-            sleep "$((attempt == 2 ? 5 : (attempt == 3 ? 15 : 30)))"
-        fi
+    local attempt state reason attempts=5 digest='' operation='' revision=0 status recovery started=$SECONDS
+    local journal=${ESB_HELM_JOURNAL:-false}
+    local record
+    record=$(mktemp "$WORKDIR/helm-record.XXXXXX")
+    printf null >"$record"
+    if [[ $journal == true ]]; then digest=$(helm_intent "$namespace" "$@") || return 1; fi
+    [[ -f $WORKDIR/api-failures.json ]] || printf '[]\n' >"$WORKDIR/api-failures.json"
+    # One final read-only pass can recognize a lost response to the last write.
+    for ((attempt=1; attempt<=attempts+1; attempt++)); do
+        if ((attempt>1 && attempt<=attempts)); then sleep "$((attempt==2 ? 5 : (attempt==3 ? 15 : 30)))"; fi
         wait_api_ready "$namespace" "$release" || return 1
-        if ! release_status "$namespace" "$release" >"$WORKDIR/release-status"; then
-            transport_failure "$LAST_ERROR" && continue
-            return 1
+        helm_state_read "$namespace" "$release" || return 1
+        state=$(jq -r '.info.status' "$WORKDIR/helm-state.json")
+        revision=$(jq -r '.version // 0' "$WORKDIR/helm-state.json")
+        if [[ $journal == true ]]; then
+            [[ $revision =~ ^[0-9]+$ && ( $state == absent || $revision -gt 0 ) ]] ||
+                { fail HELM_STATE_UNAVAILABLE "Helm revision is unavailable for $namespace/$release."; return 1; }
+            helm_record_read "$namespace" "$release" >"$record" || return 1
+            if [[ $state == deployed ]] && jq -e --arg digest "$digest" --slurpfile current "$WORKDIR/helm-state.json" '
+                .digest==$digest and .state=="applying" and .revision+1==$current[0].version and
+                   $current[0].info.description==("esb-operation:"+.operation)' "$record" >/dev/null; then
+                helm_record_write "$namespace" "$release" "$digest" deployed "$revision" "$(jq -r .operation "$record")" || return 1
+                emit "$(jq -cn --arg namespace "$namespace" --arg release "$release" --argjson revision "$revision" \
+                    '{type:"helm-resumed",namespace:$namespace,release:$release,revision:$revision,message:("Verified existing release "+$namespace+"/"+$release)}')"
+                return 0
+            fi
         fi
-        state=$(cat "$WORKDIR/release-status")
-        if [[ $namespace == security && $release == kyverno ]]; then
-            kyverno_prepare || return 1
+        ((attempt<=attempts)) || break
+        if [[ $state == pending-* ]]; then
+            if [[ $journal == true ]] && jq -e '.state=="applying"' "$record" >/dev/null; then
+                while [[ $state == pending-* ]]; do
+                    recovery=0
+                    helm_recover_recorded "$namespace" "$release" "$record" "$revision" || recovery=$?
+                    ((recovery==0 || recovery==2)) || return 1
+                    ((SECONDS-started < TIMEOUT_SECONDS+240)) || { fail HELM_PENDING "Timed out observing $namespace/$release; its release record is retained."; return 1; }
+                    ((recovery==0)) || sleep 5
+                    helm_state_read "$namespace" "$release" || return 1
+                    state=$(jq -r '.info.status' "$WORKDIR/helm-state.json")
+                    revision=$(jq -r '.version // 0' "$WORKDIR/helm-state.json")
+                done
+                # Re-enter the read/reconcile path if the prior command completed.
+                if [[ $state == deployed ]]; then attempt=$((attempt-1)); continue; fi
+            elif [[ $namespace == security && $release == kyverno ]]; then
+                kyverno_recover_pending "$state" >"$WORKDIR/release-status" || return 1
+                state=$(cat "$WORKDIR/release-status")
+            else fail HELM_PENDING "Helm release $namespace/$release is $state; no matching ESB operation is recorded."; return 1; fi
         fi
-        if ! verify_lease; then
-            transport_failure "$LAST_ERROR" && continue
-            return 1
+        [[ $state == deployed || $state == failed || $state == absent ]] ||
+            { fail HELM_STATE_UNAVAILABLE "Cannot upgrade $namespace/$release in state $state."; return 1; }
+        if [[ $namespace == security && $release == kyverno ]]; then kyverno_prepare || return 1; fi
+        local args=("$@")
+        if [[ $journal == true ]]; then
+            operation=$(openssl rand -hex 16)
+            helm_record_write "$namespace" "$release" "$digest" applying "$revision" "$operation" || return 1
+            args+=(--description "esb-operation:$operation" --labels "esb.xfsc.io/operation=$operation")
         fi
+        verify_lease || return 1
         emit "$(jq -cn --arg namespace "$namespace" --arg release "$release" --arg status "$state" --argjson attempt "$attempt" \
             '{type:"helm-state",namespace:$namespace,release:$release,status:$status,attempt:$attempt}')"
-        if run_capture "$WORKDIR/helm-output" "$((TIMEOUT_SECONDS + 30))" helm "$@"; then
-            if ! release_status "$namespace" "$release" >"$WORKDIR/release-status"; then
-                transport_failure "$LAST_ERROR" && continue
-                return 1
+        status=0
+        run_capture "$WORKDIR/helm-output" "$((TIMEOUT_SECONDS+30))" helm "${args[@]}" || status=$?
+        if ((status==0)); then
+            # A failed read here must never repeat the completed Helm write.
+            helm_state_read "$namespace" "$release" || return 1
+            state=$(jq -r '.info.status' "$WORKDIR/helm-state.json")
+            [[ $state == deployed ]] || { fail HELM_STATE_UNAVAILABLE "Helm did not confirm a deployed release for $namespace/$release."; return 1; }
+            if [[ $journal == true ]]; then
+                local confirmed
+                confirmed=$(jq -er '.version' "$WORKDIR/helm-state.json") || return 1
+                [[ $confirmed == "$((revision+1))" ]] && \
+                    jq -e --arg description "esb-operation:$operation" '.info.description==$description' "$WORKDIR/helm-state.json" >/dev/null ||
+                    { fail HELM_CONCURRENT "Helm revision changed outside this operation for $namespace/$release."; return 1; }
+                helm_record_write "$namespace" "$release" "$digest" deployed "$confirmed" "$operation" || return 1
             fi
-            state=$(cat "$WORKDIR/release-status")
-            [[ $state == deployed ]] || { fail HELM_STATE_UNAVAILABLE 'Helm did not confirm a deployed release.'; return 1; }
             return 0
         fi
         reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
         record_api_failure helm-upgrade "$namespace" "$release" "$attempt" "$attempts" "$reason"
         if ! retryable_api_reason "$reason"; then
-            fail_api_command COMMAND_FAILED "Helm upgrade failed for $namespace/$release: $reason (exit $LAST_STATUS)."
+            fail_api_command COMMAND_FAILED "Helm upgrade failed for $namespace/$release: $reason (exit $LAST_STATUS, command ${LAST_COMMAND_ID:-unrecorded}). See output 3."
             return 1
         fi
+        # The next iteration reads the revision and operation token before writing.
     done
-    if [[ -s $WORKDIR/api-diagnostic.json ]]; then
-        fail_api_command API_TRANSPORT "Kubernetes operation failed for $namespace/$release after $attempts attempts: $(jq -r '.reason' "$WORKDIR/api-diagnostic.json")."
-    else
-        fail API_TRANSPORT "Kubernetes transport failed after $attempts Helm attempts; release records are retained."
-    fi
+    fail_api_command API_TRANSPORT "Kubernetes operation failed for $namespace/$release after $attempts Helm attempts. The recorded operation will be reconciled on the next deployment."
 }
 
 marker_matches() {
@@ -481,12 +560,25 @@ marker_matches() {
     ' "$WORKDIR/marker.json" >/dev/null
 }
 
+ownership_failure() {
+    jq -n --slurpfile config "$CONFIG" --slurpfile marker "$WORKDIR/marker.json" '
+        $config[0] as $c | $marker[0].data as $m |
+        {status:"failed",code:"OWNERSHIP",
+         message:"This cluster installation has a different owner or tenant configuration. Resources are retained.",
+         diagnostics:{installed:{instance:$m.instance,tenantId:$m.tenantId,tenantHost:$m.tenantHost,
+             tenantRelease:$m.tenantRelease,storageClass:$m.storageClass,clusterUid:$m.clusterUid},
+           requested:{instance:$c.instanceName,tenantId:$c.tenantId,tenantHost:$c.tenantHost,
+             tenantRelease:$c.tenantRelease,storageClass:$c.actualStorageClass,clusterUid:$c.clusterUid}}}' >"$WORKDIR/error.json"
+    return 1
+}
+
 ensure_marker() {
     get_optional "$WORKDIR/marker.json" kube-system configmap "$MARKER"
     if jq -e '. != null' "$WORKDIR/marker.json" >/dev/null; then
-        marker_matches || { fail OWNERSHIP 'The installation marker belongs to another cluster or tenant configuration.'; return 1; }
+        marker_matches || { ownership_failure; return 1; }
         jq -e --slurpfile lock "$ROOT/upstream-lock.json" '.data.upstreamCommit as $sha | ($lock[0].compatibleBootstrapCommits + [$lock[0].commit]) | index($sha) != null' \
             "$WORKDIR/marker.json" >/dev/null || { fail UPSTREAM_COMMIT 'The installation uses an incompatible bootstrap revision.'; return 1; }
+        export ESB_HELM_JOURNAL=true
         return
     fi
     kube_json "$WORKDIR/namespaces.json" get namespaces -o json
@@ -501,16 +593,32 @@ ensure_marker() {
         data:{instance:$c.instanceName,fingerprint:$digest,clusterUid:$c.clusterUid,upstreamCommit:$lock[0].commit,
               storageClass:$c.actualStorageClass,packageVersion:$package[0].version,state:"initializing",createdAt:$now,
               tenantRelease:$c.tenantRelease,tenantId:$c.tenantId,tenantHost:$c.tenantHost,dnsOwnerId:$c.dnsOwnerId}}' >"$WORKDIR/marker-new.json"
-    kube_json "$WORKDIR/marker.json" create -f "$WORKDIR/marker-new.json" -o json
+    create_retained "$WORKDIR/marker-new.json"
+    get_optional "$WORKDIR/marker.json" kube-system configmap "$MARKER"
+    export ESB_HELM_JOURNAL=true
 }
 
 update_marker() {
-    local data=$1
-    kube_json "$WORKDIR/marker.json" -n kube-system get configmap "$MARKER" -o json
-    marker_matches || { fail OWNERSHIP 'Installation ownership changed.'; return 1; }
-    jq --argjson data "$data" --arg now "$(timestamp)" '.data += ($data + {updatedAt:$now})' \
-        "$WORKDIR/marker.json" >"$WORKDIR/marker-next.json"
-    kube_json "$WORKDIR/marker.json" replace -f "$WORKDIR/marker-next.json" -o json
+    local data=$1 attempt reason
+    local directory
+    directory=$(mktemp -d "$WORKDIR/marker-update.XXXXXX")
+    for attempt in 1 2 3 4 5; do
+        kube_json "$WORKDIR/marker.json" -n kube-system get configmap "$MARKER" -o json || return 1
+        marker_matches || { fail OWNERSHIP 'Installation ownership changed.'; return 1; }
+        # This also recognizes an earlier replace whose response was lost.
+        if jq -e --argjson data "$data" '.data as $current | $data|to_entries|all(.[]; $current[.key]==.value)' "$WORKDIR/marker.json" >/dev/null; then return 0; fi
+        verify_lease || return 1
+        jq --argjson data "$data" --arg now "$(timestamp)" '.data += ($data + {updatedAt:$now})' \
+            "$WORKDIR/marker.json" >"$directory/next.json"
+        if run_capture "$directory/response.json" 30 kubectl replace -f "$directory/next.json" -o json --request-timeout=20s; then
+            cp "$directory/response.json" "$WORKDIR/marker.json"
+            return 0
+        fi
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        if ! retryable_api_reason "$reason" && ! grep -Eiq 'Conflict|object has been modified' "$LAST_ERROR"; then break; fi
+        sleep 2
+    done
+    command_failure JOURNAL_WRITE 'Cannot persist deployment progress; cluster resources are retained. See output 3.'
 }
 
 checkout_source() {
