@@ -29,6 +29,13 @@ assert args[0]=='kubectl'
 a=args[1:]
 if 'get' in a:
  i=a.index('get');kind=a[i+1]
+ if kind.startswith('crd/'):
+  obj=s['objects'].get('CustomResourceDefinition/'+kind.split('/',1)[1])
+  if obj:
+   s['conditionReads']=s.get('conditionReads',0)+1
+   if s.get('delayedConditions') and s['conditionReads']==1:obj={**obj,'status':{'conditions':None}}
+   else:obj={**obj,'status':{'conditions':[{'type':'Established','status':'True'}]}}
+  finish(obj)
  if kind=='secrets':
   items=[s['secret']]
   if s.get('successful'):items+=[{'metadata':{'labels':{'version':'1','status':'deployed'}}}]
@@ -58,7 +65,7 @@ finish(code=2,error='unknown fixture call')
 export SOURCE="$WORKDIR/source" ESB_RECOVERY_BACKUP_DIR="$WORKDIR/backups"
 verify_lease() { ${options.lostLease ? 'fail LEASE_LOST lost; return 1;' : ':;'} }
 date() { if [[ $* == +%s ]]; then cat "$WORKDIR/clock"; else command date "$@"; fi; }
-sleep() { local n; n=$(cat "$WORKDIR/clock"); printf %s "$((n+$1))" >"$WORKDIR/clock"; }
+sleep() { SECONDS=$((SECONDS+$1)); local n; n=$(cat "$WORKDIR/clock"); printf %s "$((n+$1))" >"$WORKDIR/clock"; }
 run_capture() {
  local output=$1; shift 2
  LAST_ERROR="$WORKDIR/stderr"; LAST_STATUS=0; LAST_TIMEOUT=false
@@ -95,4 +102,10 @@ test('existing resources are preserved while ambiguous creates are reconciled by
 });
 test('prerequisites are created with Helm ownership before an initial install',t=>{
  const {result,state}=scenario(t,{prepare:true});assert.equal(result.status,0,result.stderr);assert.equal(Object.keys(state.objects).length,3);assert.ok(!state.calls.some(c=>c.includes('patch')));
+});
+
+test('Kyverno prerequisite creation tolerates a null initial conditions field',t=>{
+ const {result,state,events}=scenario(t,{prepare:true,delayedConditions:true});
+ assert.equal(result.status,0,result.stderr);assert.match(events,/"status":"waiting"/);
+ assert.ok(state.conditionReads>=3);assert.ok(!state.calls.some(c=>c.includes('wait')));
 });

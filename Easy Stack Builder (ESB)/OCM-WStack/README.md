@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.15
+# OCM W-Stack deployer 12.5.16
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -31,6 +31,23 @@ but cannot emit a final message. `msg.complete=false` indicates a log write or a
 All existing kubeconfig binding, deployment recovery and readiness checks remain
 in place. This release adds execution visibility; successful completion still
 requires the stack checks to pass.
+
+## CRD and policy readiness
+
+Kyverno CRDs and ClusterPolicies are polled through `kubectl get -o json` with
+the uploaded kubeconfig. Missing objects, missing status, null/empty conditions,
+and a False or Unknown required condition remain pending. Deployment proceeds
+only when Established (CRDs) or Ready (ClusterPolicies) becomes True. When an
+observed generation is supplied, it must match or exceed the resource generation.
+
+The configured deployment timeout is the total wait budget. Each API request is
+bounded to at most ten seconds; unsuccessful reads and pending conditions are
+followed by up to three seconds between probes. Connection/readiness failures
+use the existing retry classification and the same budget. A process termination
+has up to three seconds of grace. TLS/configuration errors, malformed responses,
+CRD name conflicts and terminating resources stop with a specific error.
+Timeout results identify the resource, condition, last observed conditions and
+last API failure category. Progress and output 3 retain each attempt.
 
 ## Kyverno bootstrap recovery
 

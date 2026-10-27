@@ -82,7 +82,7 @@ kyverno_complete_prerequisites() {
             sleep "$((attempt*2))"
         done
         if [[ $kind == CustomResourceDefinition ]]; then
-            run 150 kubectl wait --for=condition=Established "crd/$name" --timeout=120s --request-timeout=130s || return 1
+            wait_resource_condition "crd/$name" Established "$TIMEOUT_SECONDS" || return 1
         fi
     done
 }

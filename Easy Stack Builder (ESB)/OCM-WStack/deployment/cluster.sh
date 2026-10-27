@@ -214,6 +214,81 @@ retryable_readiness_reason() {
     retryable_api_reason "$1"
 }
 
+# Newly created CRDs and policies can have no status or a null conditions field.
+# Poll their JSON until the requested condition is True; never infer readiness
+# from creation success or from the absence of a controller response.
+wait_resource_condition() {
+    local resource=$1 condition=$2 budget=$3
+    local started=$SECONDS remaining request limit delay attempt=0 state=waiting reason=''
+    local directory
+    directory=$(mktemp -d "$WORKDIR/condition-wait.XXXXXX")
+    printf '[]\n' >"$directory/conditions.json"
+    phase "waiting-for-$resource"
+    while ((SECONDS-started < budget)); do
+        remaining=$((budget-(SECONDS-started)))
+        request=$((remaining<10 ? remaining : 10))
+        limit=$((request+2<remaining ? request+2 : remaining))
+        attempt=$((attempt+1))
+        if run_capture "$directory/resource.json" "$limit" kubectl get "$resource" \
+            --ignore-not-found -o json "--request-timeout=${request}s"; then
+            reason=''
+            [[ -s $directory/resource.json ]] || printf 'null\n' >"$directory/resource.json"
+            if ! jq -e '(. == null) or (type=="object" and
+                ((.status.conditions // []) | type=="array" and all(.[]; type=="object")))' \
+                "$directory/resource.json" >/dev/null 2>&1; then
+                fail RESOURCE_CONDITION_RESPONSE "Invalid condition response for $resource; see output 3."
+                return 1
+            fi
+            jq '[.status.conditions[]? | {type,status,reason,message,observedGeneration}]' \
+                "$directory/resource.json" >"$directory/conditions.json"
+            state=$(jq -r --arg condition "$condition" --arg resource "$resource" '
+                . as $object |
+                if . == null then "missing"
+                elif .metadata.deletionTimestamp != null or
+                    any(.status.conditions[]?; .type=="Terminating" and .status=="True") then "terminating"
+                elif ($resource|startswith("crd/")) and
+                    any(.status.conditions[]?; .type=="NamesAccepted" and .status=="False") then "name-conflict"
+                elif any(.status.conditions[]?; .type==$condition and .status=="True" and
+                    ((.observedGeneration // $object.status.observedGeneration) as $observed |
+                        if ($observed|type)=="number" and ($object.metadata.generation|type)=="number"
+                        then $observed >= $object.metadata.generation else true end)) then "ready"
+                else "waiting" end' "$directory/resource.json")
+        else
+            reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+            state=api-retry
+            if ! retryable_readiness_reason "$reason"; then
+                fail RESOURCE_CONDITION_READ "Cannot read $resource readiness: $reason (exit $LAST_STATUS); see output 3."
+                return 1
+            fi
+        fi
+        remaining=$((budget-(SECONDS-started)))
+        ((remaining>=0)) || remaining=0
+        emit "$(jq -cn --arg resource "$resource" --arg condition "$condition" --arg status "$state" \
+            --arg reason "$reason" --argjson attempt "$attempt" --argjson remainingSeconds "$remaining" \
+            --slurpfile conditions "$directory/conditions.json" \
+            '{type:"resource-condition",resource:$resource,condition:$condition,status:$status,
+              reason:$reason,attempt:$attempt,remainingSeconds:$remainingSeconds,conditions:$conditions[0],
+              message:($resource+": "+$condition+" "+$status)}')"
+        case "$state" in
+            ready) return 0 ;;
+            terminating|name-conflict)
+                fail RESOURCE_CONDITION_BLOCKED "$resource cannot become $condition: $state; see output 3."
+                return 1 ;;
+        esac
+        ((remaining>0)) || break
+        delay=$((remaining<3 ? remaining : 3))
+        sleep "$delay"
+    done
+    jq -cn --arg resource "$resource" --arg condition "$condition" --arg state "$state" \
+        --arg reason "$reason" --argjson timeoutSeconds "$budget" --argjson attempts "$attempt" \
+        --slurpfile conditions "$directory/conditions.json" \
+        '{status:"failed",code:"RESOURCE_CONDITION_TIMEOUT",
+          message:($resource+" did not reach "+$condition+"=True within "+($timeoutSeconds|tostring)+" seconds."),
+          diagnostics:{resource:$resource,condition:$condition,lastState:$state,lastApiReason:$reason,
+            timeoutSeconds:$timeoutSeconds,attempts:$attempts,conditions:$conditions[0]}}' >"$WORKDIR/error.json"
+    return 1
+}
+
 wait_api_ready() {
     local namespace=$1 release=$2 attempt reason delay retryable remaining
     local started=$SECONDS budget=300 attempts=30

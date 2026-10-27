@@ -118,8 +118,7 @@ gateway_policy() {
         --timeout "${TIMEOUT_SECONDS}s"
     local policy
     for policy in tenant-routing envoy-traffic didcomm-startup retrieval-startup; do
-        run "$((TIMEOUT_SECONDS+30))" kubectl wait "clusterpolicy/esb-ocm-$policy" \
-            --for=condition=Ready "--timeout=${TIMEOUT_SECONDS}s"
+        wait_resource_condition "clusterpolicy/esb-ocm-$policy" Ready "$TIMEOUT_SECONDS"
     done
 }
 

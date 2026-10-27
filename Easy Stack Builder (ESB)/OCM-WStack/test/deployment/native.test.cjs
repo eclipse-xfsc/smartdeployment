@@ -15,6 +15,7 @@ test('Cassandra compatibility patches only native probe timing with a resource-v
 get_optional() { if [[ $3 == clusterpolicy ]]; then printf null >"$1"; else cp "$WORKDIR/native.json" "$1"; fi; }
 apply_json() { :; }
 run() { :; }
+wait_resource_condition() { [[ $1 == clusterpolicy/esb-ocm-cassandra-probes && $2 == Ready ]]; }
 cassandra_compatibility
 cat "$WORKDIR/cassandra-patch.json"
 `;

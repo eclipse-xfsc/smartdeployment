@@ -28,7 +28,7 @@ cassandra_compatibility() {
         .metadata.annotations["meta.helm.sh/release-namespace"]=="security")' "$WORKDIR/cassandra-policy.json" >/dev/null ||
         { fail OWNERSHIP 'Cassandra probe policy belongs to another installation.'; return 1; }
     apply_json "$ROOT/charts-gateway/templates/cassandra-probes.yaml"
-    run "$((TIMEOUT_SECONDS+30))" kubectl wait "clusterpolicy/$name" --for=condition=Ready "--timeout=${TIMEOUT_SECONDS}s"
+    wait_resource_condition "clusterpolicy/$name" Ready "$TIMEOUT_SECONDS"
     get_optional "$WORKDIR/cassandra.json" infrastructure statefulset cassandra
     jq -e '.==null' "$WORKDIR/cassandra.json" >/dev/null && return 0
     jq -e '[.spec.template.spec.containers[]|select(.name=="cassandra")][0] |
