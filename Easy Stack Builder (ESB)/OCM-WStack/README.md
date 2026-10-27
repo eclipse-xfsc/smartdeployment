@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.17
+# OCM W-Stack deployer 12.5.18
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -32,26 +32,37 @@ All existing kubeconfig binding, deployment recovery and readiness checks remain
 in place. This release adds execution visibility; successful completion still
 requires the stack checks to pass.
 
-## Argo CD installation recovery
+## Argo CD installation and workload readiness
 
-The namespace and pinned Argo CD manifest are applied through the deployer recovery
-loop. Before each apply, API readiness and the current deployment lease must pass.
-The local Argo manifest checksum must match its preflight report. A partial apply
-is retried using the same server-side apply operation and uploaded kubeconfig.
+Argo installation uses the checksum-verified pinned manifest. The namespace and
+52 prerequisite resources are applied first. Every prerequisite must be readable
+before the seven Deployment/StatefulSet resources are applied. Missing ConfigMaps
+remain pending and the same prerequisite manifest is reapplied at most once every
+30 seconds within the configured installation budget. Existing generated Secret
+data is retained. Every write checks API readiness and the deployment lease.
+Transport recovery uses at most five attempts for each apply invocation. The
+uploaded kubeconfig is used throughout.
 
-Each manifest has at most five apply attempts within the configured deployment
-time budget. Each apply has an outer limit of at most 120 seconds and individual
-API requests use a 20-second timeout. Retry delays are 5, 10, 15 and 20 seconds.
-Transient transport failures and the specific authorization response reporting
-missing default ClusterRoles are eligible for retry. Ordinary Forbidden responses,
-certificate failures and invalid manifests stop with ARGO_INSTALL diagnostics.
-No cluster-admin or system RBAC is created or changed by recovery. Progress and
-the raw log identify attempts and failures. A persistent control-plane failure
-still prevents completion.
+All seven Argo workloads share one readiness deadline. Grafana, ESO, Kyverno,
+OpenBao and the Kubernetes operator use the same JSON polling checks in bootstrap.
+An earlier ProgressDeadlineExceeded condition is reported while the controllers
+continue reconciling. Completion requires the current generation and all desired,
+updated, ready and available replicas; StatefulSets also require matching revisions.
+A missing component, empty selection, paused Deployment or incomplete rollout
+cannot pass. API interruptions use the same remaining budget. Use a deployment
+timeout of 1800 seconds for clusters with slow provisioning.
 
-Kyverno recovery uses a trailing-X temporary-file template and explicitly checks
-backup creation and copying. If a persistent backup cannot be saved, recovery
-stops before creating prerequisites or changing the pending release record.
+If workload readiness fails, output 3 includes pod conditions, container states,
+previous termination details, recent warning events and bounded current/previous
+container logs, including init containers. Diagnostic collection has a separate
+60-second ceiling and preserves the original failure. Progress reports identify
+blocking workloads and remaining time. The initial Argo admin Secret is not
+required on subsequent runs: a ready existing Argo installation may have had its
+initial password Secret removed after credential setup.
+
+Kyverno recovery checks all four controllers through the same readiness mechanism
+before changing a pending release record. Backup creation/copying and concurrent
+release/lease checks remain in force.
 
 ## CRD and policy readiness
 

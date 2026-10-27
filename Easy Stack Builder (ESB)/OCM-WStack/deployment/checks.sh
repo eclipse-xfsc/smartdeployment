@@ -6,7 +6,7 @@
 # arbitrary commands or alter cluster-admin/system RBAC to make the write pass.
 argo_apply() {
     local manifest=$1 started=$SECONDS attempt reason remaining seconds delay retryable
-    local budget=$TIMEOUT_SECONDS attempts=5
+    local budget=${2:-$TIMEOUT_SECONDS} attempts=5
     [[ -f $WORKDIR/api-failures.json ]] || printf '[]\n' >"$WORKDIR/api-failures.json"
     for ((attempt=1; attempt<=attempts; attempt++)); do
         remaining=$((budget-(SECONDS-started)))
@@ -49,17 +49,77 @@ argo_apply() {
     fail_api_command ARGO_INSTALL "Argo CD manifest application did not recover within its retry budget. See output 3."
 }
 
+argo_prepare_manifest() {
+    # The reviewed upstream manifest contains top-level YAML document separators.
+    # Helm's YAML parser handles each document; no additional runtime is needed.
+    jq -Rs 'split("\n---\n") | to_entries | map({key:(.key|tostring),value:.value}) | from_entries' \
+        "$ESB_ARGO_MANIFEST" >"$WORKDIR/argo-yaml.json" || return 1
+    read_yaml "$WORKDIR/argo-yaml.json" "$WORKDIR/argo-documents.json" || return 1
+    jq '[.[] | select(.apiVersion!=null and .kind!=null)]' "$WORKDIR/argo-documents.json" >"$WORKDIR/argo-objects.json" || return 1
+    jq '{apiVersion:"v1",kind:"List",items:[.[] | select(.kind!="Deployment" and .kind!="StatefulSet")]}' \
+        "$WORKDIR/argo-objects.json" >"$WORKDIR/argo-prerequisites.json" || return 1
+    jq '{apiVersion:"v1",kind:"List",items:[.[] | select(.kind=="Deployment" or .kind=="StatefulSet")]}' \
+        "$WORKDIR/argo-objects.json" >"$WORKDIR/argo-workloads.json" || return 1
+    jq -e '.items|length==7 and all(.[]; .metadata.labels["app.kubernetes.io/part-of"]=="argocd")' \
+        "$WORKDIR/argo-workloads.json" >/dev/null || { fail ARGO_MANIFEST 'Unexpected Argo workload list.'; return 1; }
+    jq -r '.items[] | .kind+"/"+.metadata.name' "$WORKDIR/argo-prerequisites.json" | LC_ALL=C sort >"$WORKDIR/argo-required.txt"
+    [[ -s $WORKDIR/argo-required.txt ]] || { fail ARGO_MANIFEST 'Argo prerequisites are missing from the manifest.'; return 1; }
+}
+
 argo_install() {
     phase argo-install
     [[ ${ESB_ARGO_MANIFEST:-} == "$WORKDIR/argo-install.yaml" && -s $ESB_ARGO_MANIFEST ]] ||
         { fail ARGO_MANIFEST 'The preflight Argo CD manifest is unavailable.'; return 1; }
-    local expected actual
+    local expected actual started=$SECONDS remaining limit reason='' delay missing='[]' next_apply=0
     expected=$(jq -er '.argoManifestSha256' "$WORKDIR/chart-report.json") || return 1
     actual=$(sha256sum "$ESB_ARGO_MANIFEST" | cut -d ' ' -f 1)
     [[ $expected == "$actual" ]] || { fail ARGO_MANIFEST 'The preflight Argo CD manifest changed.'; return 1; }
+    argo_prepare_manifest || return 1
     printf '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"argocd"}}\n' >"$WORKDIR/argo-namespace.json"
-    argo_apply "$WORKDIR/argo-namespace.json" || return 1
-    argo_apply "$ESB_ARGO_MANIFEST"
+    remaining=$((TIMEOUT_SECONDS-(SECONDS-started)))
+    ((remaining>0)) || { fail ARGO_INSTALL 'Argo manifest preparation timed out.'; return 1; }
+    argo_apply "$WORKDIR/argo-namespace.json" "$remaining" || return 1
+    while ((SECONDS-started<TIMEOUT_SECONDS)); do
+        remaining=$((TIMEOUT_SECONDS-(SECONDS-started)))
+        if ((SECONDS>=next_apply)); then
+            argo_apply "$WORKDIR/argo-prerequisites.json" "$remaining" || return 1
+            next_apply=$((SECONDS+30))
+        fi
+        remaining=$((TIMEOUT_SECONDS-(SECONDS-started)))
+        ((remaining>0)) || break
+        limit=$((remaining<30 ? remaining : 30))
+        # Print only names, including for Secrets. A successful partial List is
+        # insufficient: every object from the prerequisite manifest must exist.
+        if run_capture "$WORKDIR/argo-present.txt" "$limit" kubectl get -n argocd \
+            -f "$WORKDIR/argo-prerequisites.json" --ignore-not-found \
+            -o 'jsonpath={range .items[*]}{.kind}{"/"}{.metadata.name}{"\n"}{end}' "--request-timeout=${limit}s"; then
+            reason=''
+            missing=$(jq -Rsc --rawfile present "$WORKDIR/argo-present.txt" \
+                '(split("\n")|map(select(length>0))) - ($present|split("\n"))' "$WORKDIR/argo-required.txt") || return 1
+            if [[ $missing == '[]' ]]; then
+                remaining=$((TIMEOUT_SECONDS-(SECONDS-started)))
+                ((remaining>0)) || break
+                argo_apply "$WORKDIR/argo-workloads.json" "$remaining" || return 1
+                emit '{"type":"argo-prerequisites","ready":true,"missing":[]}'
+                return 0
+            fi
+        else
+            reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+            if ! retryable_readiness_reason "$reason"; then
+                fail ARGO_PREREQUISITES "Cannot verify Argo prerequisites: $reason; see output 3."
+                return 1
+            fi
+        fi
+        remaining=$((TIMEOUT_SECONDS-(SECONDS-started)))
+        ((remaining>0)) || break
+        emit "$(jq -cn --argjson missing "$missing" --arg reason "$reason" --argjson remaining "$remaining" \
+            '{type:"argo-prerequisites",ready:false,missing:$missing,apiReason:$reason,remainingSeconds:$remaining}')"
+        delay=$((remaining<5 ? remaining : 5)); sleep "$delay"
+    done
+    jq -cn --argjson missing "$missing" --arg reason "$reason" \
+        '{status:"failed",code:"ARGO_PREREQUISITES",message:"Argo prerequisites did not become readable within the configured timeout. See output 3.",
+          diagnostics:{missing:$missing,lastApiReason:$reason}}' >"$WORKDIR/error.json"
+    return 1
 }
 
 registry_request() {
@@ -211,26 +271,108 @@ kube_read() {
     fail ARGO_API_UNAVAILABLE 'Argo API readiness exhausted its read budget.'
 }
 
-argo_health() {
-    local diagnose=${1:-false} deadline=$((SECONDS+TIMEOUT_SECONDS)) remaining
-    while ((SECONDS < deadline)); do
-        remaining=$((deadline-SECONDS))
-        [[ $diagnose != true ]] || remaining=10
-        kube_read /api/v1/namespaces/argocd/pods false "$remaining" >"$WORKDIR/argo-pods.json"
-        jq '[.items[] | select(.metadata.deletionTimestamp==null and .status.phase!="Succeeded") |
-            select(.status.phase!="Running" or (.status.containerStatuses|length)==0 or any(.status.containerStatuses[]?;.ready!=true)) |
-            {name:.metadata.name,phase:(.status.phase // "Unknown"),
-             containers:[.status.containerStatuses[]? | select(.ready!=true) | {name,image,reason:(.state.waiting.reason // .state.terminated.reason // "NotReady")}],
-             initContainers:[.status.initContainerStatuses[]? | select(.ready!=true and .state.terminated.exitCode!=0) |
-                {name,image,reason:(.state.waiting.reason // .state.terminated.reason // "NotReady")}]}]' \
-            "$WORKDIR/argo-pods.json" >"$WORKDIR/argo-pending.json"
-        emit "$(jq -cn --slurpfile pending "$WORKDIR/argo-pending.json" '{type:"argo-pods",pods:$pending[0]}')"
-        [[ $diagnose != true ]] || { cat "$WORKDIR/argo-pending.json"; return; }
-        if jq -e 'length==0' "$WORKDIR/argo-pending.json" >/dev/null &&
-            jq -e 'any(.items[];.metadata.deletionTimestamp==null and .status.phase=="Running")' "$WORKDIR/argo-pods.json" >/dev/null; then return; fi
-        sleep 5
+# Only reads are retried here. The caller has already installed the workload.
+# Keep one deadline across all required components, including interrupted reads.
+wait_workloads() {
+    local namespace=$1 resource=$2 selector=$3 expected=${4:-'[]'} budget=${5:-$TIMEOUT_SECONDS}
+    local deadline=$((SECONDS+budget)) remaining limit delay reason='' attempt=0 directory
+    directory=$(mktemp -d "$WORKDIR/workload-wait.XXXXXX") || return 1
+    printf '{"ready":false,"missing":[],"workloads":[]}\n' >"$directory/report.json"
+    local args=(get "$resource" -n "$namespace" -o json)
+    [[ -z $selector ]] || args+=(-l "$selector")
+    phase "waiting-for-$namespace"
+    while ((SECONDS<deadline)); do
+        remaining=$((deadline-SECONDS)); limit=$((remaining<15 ? remaining : 15))
+        attempt=$((attempt+1))
+        if run_capture "$directory/objects.json" "$limit" kubectl "${args[@]}" "--request-timeout=${limit}s"; then
+            reason=''
+            if ! jq -e 'type=="object" and (.items|type=="array") and all(.items[];
+                (.metadata.name|type)=="string" and
+                (.kind=="Pod" or (.metadata.generation|type)=="number"))' "$directory/objects.json" >/dev/null; then
+                fail WORKLOAD_RESPONSE "Invalid workload response for $namespace; see output 3."
+                return 1
+            fi
+            jq -L "$DEPLOYMENT" --argjson expected "$expected" 'include "readiness"; workload_report($expected)' \
+                "$directory/objects.json" >"$directory/report.json" || return 1
+            if jq -e '.ready' "$directory/report.json" >/dev/null; then
+                emit "$(jq -c --arg namespace "$namespace" '.+{type:"workloads-ready",namespace:$namespace}' "$directory/report.json")"
+                return 0
+            fi
+        else
+            reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+            if ! retryable_readiness_reason "$reason"; then
+                fail WORKLOAD_READ "Cannot read workloads in $namespace: $reason; see output 3." || true
+                workload_diagnostics "$namespace" "$selector" || true
+                return 1
+            fi
+        fi
+        remaining=$((deadline-SECONDS)); ((remaining>=0)) || remaining=0
+        emit "$(jq -c --arg namespace "$namespace" --arg reason "$reason" --argjson remaining "$remaining" \
+            --argjson attempt "$attempt" '.+{type:"workload-wait",namespace:$namespace,
+              apiReason:$reason,attempt:$attempt,remainingSeconds:$remaining,
+              message:("Waiting for "+$namespace+" workloads ("+($remaining|tostring)+"s remaining)")}' "$directory/report.json")"
+        ((remaining>0)) || break
+        delay=$((remaining<5 ? remaining : 5)); sleep "$delay"
     done
-    fail ARGO_PODS_UNREADY 'Argo pods did not become Ready within the configured timeout.'
+    jq -cn --arg namespace "$namespace" --arg reason "$reason" --argjson budget "$budget" \
+        --slurpfile report "$directory/report.json" \
+        '{status:"failed",code:"WORKLOAD_TIMEOUT",
+          message:("Workloads in "+$namespace+" did not become Ready within "+($budget|tostring)+" seconds. See output 3 for pod events and logs."),
+          diagnostics:{namespace:$namespace,timeoutSeconds:$budget,lastApiReason:$reason,readiness:$report[0]}}' >"$WORKDIR/error.json"
+    workload_diagnostics "$namespace" "$selector" || true
+    return 1
+}
+
+# Diagnostics use the uploaded kubeconfig through the same command wrapper.
+# An unavailable log must never replace the original failure or extend a wait
+# indefinitely. Secret objects are not requested; raw pod responses stay in
+# the private command log alongside the other unredacted command output.
+workload_diagnostics() {
+    local namespace=$1 selector=${2:-} deadline=$((SECONDS+60)) directory remaining limit pod container previous
+    directory=$(mktemp -d "$WORKDIR/workload-diagnostics.XXXXXX") || return 0
+    local args=(get pods -n "$namespace" -o json)
+    [[ -z $selector ]] || args+=(-l "$selector")
+    printf '\nWorkload diagnostics: %s\n' "$namespace" >&2
+    if run_capture "$directory/pods.json" 10 kubectl "${args[@]}" --request-timeout=8s; then
+        jq -L "$DEPLOYMENT" 'include "readiness"; pod_problems' "$directory/pods.json" >"$directory/problems.json" || printf '[]\n' >"$directory/problems.json"
+        cat "$directory/problems.json" >&2
+    else
+        printf 'Pod diagnostics unavailable (exit %s).\n' "$LAST_STATUS" >&2
+        printf '[]\n' >"$directory/problems.json"
+    fi
+    if run_capture "$directory/events.json" 10 kubectl get events -n "$namespace" \
+        --field-selector=type=Warning -o json --request-timeout=8s; then
+        jq '[.items[]? | {at:(.lastTimestamp // .eventTime // .metadata.creationTimestamp),
+            object:.involvedObject,reason,message,count}] | sort_by(.at) | .[-40:]' "$directory/events.json" >&2 || true
+    fi
+    # Prioritize previous crash logs before current logs; include init containers.
+    while IFS=$'\t' read -r pod container previous; do
+        remaining=$((deadline-SECONDS)); ((remaining>0)) || break
+        limit=$((remaining<8 ? remaining : 8))
+        args=(logs -n "$namespace" "$pod" -c "$container" --timestamps --tail=100 --limit-bytes=32768 "--request-timeout=${limit}s")
+        [[ $previous != true ]] || args+=(--previous)
+        printf '\nContainer log: %s/%s previous=%s\n' "$pod" "$container" "$previous" >&2
+        if run_capture "$directory/container.log" "$limit" kubectl "${args[@]}"; then
+            cat "$directory/container.log" >&2
+        else
+            printf 'Log unavailable (exit %s); command details are recorded.\n' "$LAST_STATUS" >&2
+        fi
+    done < <(jq -r '[.[] | .name as $pod | .containers[] |
+        select(.ready!=true or .restartCount>0) |
+        (if .restartCount>0 then [$pod,.name,"true"] else empty end),[$pod,.name,"false"]] |
+        .[:24][] | @tsv' "$directory/problems.json")
+    return 0
+}
+
+argo_health() {
+    if [[ ${1:-false} == true ]]; then
+        workload_diagnostics argocd app.kubernetes.io/part-of=argocd
+        return
+    fi
+    wait_workloads argocd deployments,statefulsets app.kubernetes.io/part-of=argocd \
+        '["Deployment/argocd-redis","Deployment/argocd-dex-server","Deployment/argocd-server",
+          "Deployment/argocd-repo-server","Deployment/argocd-applicationset-controller",
+          "Deployment/argocd-notifications-controller","StatefulSet/argocd-application-controller"]'
 }
 
 diagnose_api() {

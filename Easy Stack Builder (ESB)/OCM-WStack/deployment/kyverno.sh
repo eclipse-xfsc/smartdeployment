@@ -157,10 +157,10 @@ kyverno_recover_pending() {
     emit "$(jq -cn --arg backup "$backup" '{type:"helm-recovery",phase:"kyverno",status:"restoring-prerequisites",backup:$backup}')"
     kyverno_plan "$WORKDIR/kyverno-stored.yaml" || return 1
     kyverno_complete_prerequisites || return 1
-    for component in admission background cleanup reports; do
-        verify_lease || return 1
-        run "$((TIMEOUT_SECONDS+30))" kubectl -n security rollout status "deployment/kyverno-$component-controller" "--timeout=${TIMEOUT_SECONDS}s" || return 1
-    done
+    verify_lease || return 1
+    wait_workloads security deployments app.kubernetes.io/instance=kyverno \
+        '["Deployment/kyverno-admission-controller","Deployment/kyverno-background-controller",
+          "Deployment/kyverno-cleanup-controller","Deployment/kyverno-reports-controller"]' || return 1
     verify_lease || return 1
     # Compare the live revision set immediately before the conditional update.
     cp "$WORKDIR/kyverno-pending-secret.json" "$WORKDIR/kyverno-original-secret.json"

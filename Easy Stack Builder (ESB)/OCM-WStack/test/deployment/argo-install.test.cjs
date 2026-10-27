@@ -14,6 +14,7 @@ TIMEOUT_SECONDS=${options.budget||60}
 SECONDS=0
 index=0
 wait_api_ready() { printf 'readiness %s\\n' "$3" >>"$WORKDIR/trace"; }
+argo_prepare_manifest() { :; }
 verify_lease() { printf 'lease\\n' >>"$WORKDIR/trace"; ${options.lostLease?'fail LEASE_LOST lost; return 1;':':;'} }
 sleep() { SECONDS=$((SECONDS+$1)); }
 run_capture() {
@@ -31,7 +32,7 @@ run_capture() {
  fi
  printf manifest-applied >"$out"
 }
-argo_install
+${options.changed||options.lostLease?'argo_install':'argo_apply "$WORKDIR/argo-install.yaml"'}
 `);
  return {...r,trace:fs.existsSync(dir+'/trace')?fs.readFileSync(dir+'/trace','utf8'):'',
   error:fs.existsSync(dir+'/error.json')?JSON.parse(fs.readFileSync(dir+'/error.json')):null,
@@ -42,8 +43,8 @@ test('Argo manifest resumes partial apply after EOF and unavailable default RBAC
  const r=scenario(t,[{error:'unexpected EOF'},{error:missingRole},{}]);
  assert.equal(r.status,0,r.stderr);assert.match(r.events,/default-rbac-unavailable/);
  const writes=r.trace.split('\n').filter(x=>x.includes('kubectl apply'));
- assert.equal(writes.length,4);assert.equal(new Set(writes.slice(1)).size,1);
- assert.equal(r.trace.split('\n').filter(x=>x==='lease').length,4);
+ assert.equal(writes.length,3);assert.equal(new Set(writes).size,1);
+ assert.equal(r.trace.split('\n').filter(x=>x==='lease').length,3);
  assert.ok(!r.trace.includes('create clusterrole'));assert.match(r.stdout,/manifest-applied/);
 });
 test('persistent transport failures stop after five manifest attempts',t=>{

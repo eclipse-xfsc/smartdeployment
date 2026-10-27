@@ -274,9 +274,10 @@ index c8ca809..29f8024 100644
 diff --git a/argocd-bootstrap.sh b/argocd-bootstrap.sh
 old mode 100644
 new mode 100755
+index b17b1dc..80eaa0e
 --- a/argocd-bootstrap.sh
 +++ b/argocd-bootstrap.sh
-@@ -5,8 +5,8 @@
+@@ -5,8 +5,8 @@ set -Eeuo pipefail
  # Config
  # =========================
  readonly NAMESPACE="argocd"
@@ -287,7 +288,7 @@ new mode 100755
  
  # Exit Codes
  readonly EXIT_PREREQ_FAILED=10
-@@ -37,29 +37,21 @@
+@@ -37,87 +37,35 @@ command -v kubectl >/dev/null 2>&1 || {
    exit "$EXIT_PREREQ_FAILED"
  }
  
@@ -315,29 +316,32 @@ new mode 100755
  # =========================
  # Wait for Rollouts
  # =========================
+-components=(
+-  "deployment/argocd-server"
+-  "deployment/argocd-repo-server"
+-  "deployment/argocd-applicationset-controller"
+-  "deployment/argocd-notifications-controller"
+-  "statefulset/argocd-application-controller"
+-)
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal kube-read /apis/apiextensions.k8s.io/v1/customresourcedefinitions/applications.argoproj.io established >/dev/null
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal kube-read /apis/apiextensions.k8s.io/v1/customresourcedefinitions/applicationsets.argoproj.io established >/dev/null
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal kube-read /apis/apiextensions.k8s.io/v1/customresourcedefinitions/appprojects.argoproj.io established >/dev/null
-+
- components=(
-+  "deployment/argocd-redis"
-+  "deployment/argocd-dex-server"
-   "deployment/argocd-server"
-   "deployment/argocd-repo-server"
-   "deployment/argocd-applicationset-controller"
-@@ -72,7 +64,7 @@
-   kubectl rollout status "$component" -n "$NAMESPACE" --timeout="$TIMEOUT" \
-     || {
-       err "$component failed rollout"
--      kubectl get pods -n "$NAMESPACE" -o wide
-+      bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal argo-health --diagnose >&2 || true
-       exit "$EXIT_ROLLOUT_FAILED"
-     }
- done
-@@ -82,17 +74,7 @@
- # =========================
- log "Verifying all pods are Running/Ready"
  
+-for component in "${components[@]}"; do
+-  log "Waiting for $component"
+-  kubectl rollout status "$component" -n "$NAMESPACE" --timeout="$TIMEOUT" \
+-    || {
+-      err "$component failed rollout"
+-      kubectl get pods -n "$NAMESPACE" -o wide
+-      exit "$EXIT_ROLLOUT_FAILED"
+-    }
+-done
+-
+-# =========================
+-# Verify Pods Healthy
+-# =========================
+-log "Verifying all pods are Running/Ready"
+-
 -not_ready=$(
 -  kubectl get pods -n "$NAMESPACE" \
 -    --no-headers \
@@ -349,11 +353,21 @@ new mode 100755
 -  echo "$not_ready"
 -  exit "$EXIT_POD_FAILED"
 -fi
-+bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal argo-health || exit "$EXIT_POD_FAILED"
+-
+-# =========================
+-# Verify Initial Secret Exists
+-# =========================
+-if ! kubectl get secret argocd-initial-admin-secret -n "$NAMESPACE" >/dev/null 2>&1; then
+-  err "Initial admin secret missing"
+-  exit "$EXIT_SECRET_FAILED"
+-fi
++# One deadline covers all seven workloads. Existing pods may recover after
++# their Deployment has reported a progress deadline during an earlier attempt.
++log "Waiting for Argo CD workloads"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal argo-health || exit "$EXIT_ROLLOUT_FAILED"
  
  # =========================
- # Verify Initial Secret Exists
-@@ -107,17 +89,13 @@
+ # Success
  # =========================
  log "Argo CD installed successfully"
  
@@ -368,14 +382,14 @@ new mode 100755
  echo "Namespace: $NAMESPACE"
  echo "Admin User: admin"
 -echo "Admin Password: $password"
-+echo "Admin password remains in the argocd-initial-admin-secret Secret."
++echo "Use the configured Argo CD credentials. New installs store the initial password in argocd-initial-admin-secret."
  echo "UI Port-Forward:"
  echo "kubectl port-forward svc/argocd-server -n $NAMESPACE 8080:443"
  echo "=================================="
 diff --git a/basic-cluster-init.sh b/basic-cluster-init.sh
 old mode 100644
 new mode 100755
-index e377f06..69d5122
+index e377f06..600d49b
 --- a/basic-cluster-init.sh
 +++ b/basic-cluster-init.sh
 @@ -1,9 +1,11 @@
@@ -429,23 +443,23 @@ index e377f06..69d5122
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] observability"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade observability observability upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n observability observability INFRA/observability/opentelemtry -f "$ESB_OBSERVABILITY_VALUES"
-+kubectl -n observability rollout status deployment -l app.kubernetes.io/name=grafana,app.kubernetes.io/instance=observability --timeout="${ESB_TIMEOUT_SECONDS}s"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready observability deployments app.kubernetes.io/name=grafana,app.kubernetes.io/instance=observability
 +kubectl create namespace security --dry-run=client -o yaml | kubectl apply -f -
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] openbao"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade security openbao upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n security openbao INFRA/security/openbao
-+kubectl -n security wait --for=condition=Ready pod/openbao-0 --timeout="${ESB_TIMEOUT_SECONDS}s"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready security pods '' '["Pod/openbao-0"]'
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] eso"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade security eso upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n security eso INFRA/security/eso
-+kubectl -n security rollout status deployment -l app.kubernetes.io/instance=eso --timeout="${ESB_TIMEOUT_SECONDS}s"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready security deployments app.kubernetes.io/instance=eso
 +: # Dependencies prepared by ESB chart preflight
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] kyverno"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade security kyverno upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n security kyverno INFRA/security/kyverno
-+kubectl -n security rollout status deployment -l app.kubernetes.io/instance=kyverno --timeout="${ESB_TIMEOUT_SECONDS}s"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready security deployments app.kubernetes.io/instance=kyverno
  ./argocd-bootstrap.sh
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal argo-access
  
@@ -458,7 +472,7 @@ index e377f06..69d5122
 +: # Dependencies prepared by ESB chart preflight
 +echo "[ESB_PHASE] kubernetes-operator"
 +bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal helm-upgrade security kubernetes-operator upgrade --install --timeout "${ESB_TIMEOUT_SECONDS}s" -n security kubernetes-operator INFRA/kubernetes-operator
-+kubectl -n security rollout status deployment -l app.kubernetes.io/instance=kubernetes-operator --timeout="${ESB_TIMEOUT_SECONDS}s"
++bash "${ESB_DEPLOY:?ESB deployment script is required}" --internal workload-ready security deployments app.kubernetes.io/instance=kubernetes-operator
  
 -STORAGE_CLASS=$(kubectl get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}')
 +STORAGE_CLASS="${ESB_STORAGE_CLASS:?ESB selected StorageClass is required}"
@@ -495,7 +509,7 @@ index e377f06..69d5122
 diff --git a/check-applicationset.sh b/check-applicationset.sh
 old mode 100644
 new mode 100755
-index c50a51e..4609194
+index c50a51e..f2936e8
 --- a/check-applicationset.sh
 +++ b/check-applicationset.sh
 @@ -8,6 +8,8 @@ TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-600}"

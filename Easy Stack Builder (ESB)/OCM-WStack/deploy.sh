@@ -54,6 +54,7 @@ internal_action() {
     case "$action" in
         helm-upgrade) helm_upgrade "$@" ;;
         argo-install) argo_install ;;
+        workload-ready) wait_workloads "$@" ;;
         native-compatibility) cassandra_compatibility ;;
         prerequisites) native_prerequisites ;;
         startup) native_startup ;;

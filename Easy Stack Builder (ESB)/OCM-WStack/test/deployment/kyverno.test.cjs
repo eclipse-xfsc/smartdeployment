@@ -36,10 +36,12 @@ if 'get' in a:
    if s.get('delayedConditions') and s['conditionReads']==1:obj={**obj,'status':{'conditions':None}}
    else:obj={**obj,'status':{'conditions':[{'type':'Established','status':'True'}]}}
   finish(obj)
+ if kind=='deployments':
+  finish({'items':[{'kind':'Deployment','metadata':{'name':'kyverno-'+component+'-controller','generation':1},'spec':{'replicas':1},'status':{'observedGeneration':1,'replicas':1,'updatedReplicas':1,'readyReplicas':0 if s.get('notReady') else 1,'availableReplicas':0 if s.get('notReady') else 1}} for component in ['admission','background','cleanup','reports']]})
  if kind=='secrets':
   items=[s['secret']]
   if s.get('successful'):items+=[{'metadata':{'labels':{'version':'1','status':'deployed'}}}]
-  if s.get('changeRecord') and any('rollout' in c for c in s['calls']):items[0]['metadata']['resourceVersion']='43'
+  if s.get('changeRecord') and any('deployments' in c for c in s['calls']):items[0]['metadata']['resourceVersion']='43'
   finish({'items':items})
  finish(s['objects'].get(kind+'/'+a[i+2]))
 if a[0]=='create':
@@ -63,6 +65,7 @@ finish(code=2,error='unknown fixture call')
 `);
  const result=bash(dir,`
 export SOURCE="$WORKDIR/source" ESB_RECOVERY_BACKUP_DIR="$WORKDIR/backups"
+workload_diagnostics() { :; }
 verify_lease() { ${options.lostLease ? 'fail LEASE_LOST lost; return 1;' : ':;'} }
 date() { if [[ $* == +%s ]]; then cat "$WORKDIR/clock"; else command date "$@"; fi; }
 sleep() { SECONDS=$((SECONDS+$1)); local n; n=$(cat "$WORKDIR/clock"); printf %s "$((n+$1))" >"$WORKDIR/clock"; }
@@ -83,7 +86,7 @@ test('stale interrupted bootstrap restores missing CRDs/RBAC, backs up and condi
  const {dir,result,state}=scenario(t);assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),'failed');
  assert.equal(Object.keys(state.objects).length,3);assert.ok(!state.objects['Secret/unrelated']);
  assert.equal(state.secret.metadata.labels.status,'failed');
- const patchIndex=state.calls.findIndex(c=>c.includes('patch'));assert.equal(state.calls.slice(0,patchIndex).filter(c=>c.includes('rollout')).length,4);
+ const patchIndex=state.calls.findIndex(c=>c.includes('patch'));assert.equal(state.calls.slice(0,patchIndex).filter(c=>c.includes('deployments')).length,1);
  assert.equal(fs.readdirSync(dir+'/backups').length,1);
  const backup=JSON.parse(fs.readFileSync(dir+'/backups/'+fs.readdirSync(dir+'/backups')[0]));assert.equal(backup.metadata.labels.status,'pending-upgrade');
  for(const obj of Object.values(state.objects)){assert.equal(obj.metadata.annotations['meta.helm.sh/release-name'],'kyverno');}
