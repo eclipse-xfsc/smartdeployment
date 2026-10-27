@@ -122,25 +122,152 @@ gateway_policy() {
     done
 }
 
+# Read a fresh object within the reconciliation deadline. An empty read is
+# pending: the controller may be recreating its Service.
+gateway_read_object() {
+    local kind=$1 name=$2 output=$3 deadline=$4 remaining limit
+    remaining=$((deadline-SECONDS))
+    ((remaining>0)) || { fail GATEWAY_TIMEOUT "Gateway reconciliation deadline expired for infrastructure/$kind/$name."; return 1; }
+    limit=$((remaining<15 ? remaining : 15))
+    if ! read_capture "$output" "$limit" "$remaining" kubectl -n infrastructure get "$kind" "$name" \
+        --ignore-not-found -o json "--request-timeout=${limit}s"; then
+        command_failure GATEWAY_READ "Cannot read infrastructure/$kind/$name during gateway reconciliation. See output 3."
+        return 1
+    fi
+    [[ -s $output ]] || printf null >"$output"
+}
+
+gateway_policy_matches() {
+    local kind=$1 policy=$2 file=$3
+    jq -e --arg kind "$kind" --arg policy "$policy" '
+        if $kind=="service" then .spec.externalTrafficPolicy==$policy
+        else .spec.provider.kubernetes.envoyService.externalTrafficPolicy==$policy end' "$file" >/dev/null
+}
+
+# Controller-owned Services must still belong to the selected Gateway after
+# each read. Both UID and resourceVersion are tested by every fallback patch.
+gateway_object_valid() {
+    local kind=$1 name=$2 file=$3
+    jq -e --arg kind "$kind" --arg name "$name" '
+        .metadata.name==$name and .metadata.namespace=="infrastructure" and
+        .metadata.deletionTimestamp==null and
+        (.metadata.uid|type)=="string" and (.metadata.uid|length)>0 and
+        (.metadata.resourceVersion|type)=="string" and (.metadata.resourceVersion|length)>0 and
+        if $kind=="service" then
+            .spec.type=="LoadBalancer" and
+            .metadata.labels["gateway.envoyproxy.io/owning-gateway-name"]=="envoy-gateway" and
+            .metadata.labels["gateway.envoyproxy.io/owning-gateway-namespace"]=="infrastructure"
+        else (.spec.provider.kubernetes.envoyService|type)=="object" end' "$file" >/dev/null
+}
+
+gateway_rejection() {
+    local kind=$1 name=$2 policy=$3 directory=$4 reason=$5 id=$6 status=$7
+    jq -cn --arg kind "$kind" --arg name "$name" --arg policy "$policy" --arg reason "$reason" \
+        --arg id "$id" --argjson status "$status" --slurpfile patch "$directory/patch.json" \
+        --slurpfile before "$directory/before.json" --slurpfile after "$directory/current.json" '
+        {status:"failed",code:"GATEWAY_PATCH_REJECTED",
+         message:("Cannot reconcile infrastructure/"+$kind+"/"+$name+" traffic policy. See output 3 for the patch and API response."),
+         diagnostics:{resource:($kind+"/"+$name),namespace:"infrastructure",expectedTrafficPolicy:$policy,
+          reason:$reason,commandId:$id,exitCode:$status,patch:$patch[0],
+          previousResourceVersion:$before[0].metadata.resourceVersion,
+          currentResourceVersion:$after[0].metadata.resourceVersion}}' >"$WORKDIR/error.json"
+    return 1
+}
+
+# Configure the proxy first, then give its controller time to reconcile the
+# Service. Only a still-different object receives a conditional fallback patch.
+gateway_set_policy() {
+    local kind=$1 name=$2 policy=$3 grace=$4
+    local started=$SECONDS budget=$TIMEOUT_SECONDS deadline directory remaining delay
+    ((budget<=180)) || budget=180
+    deadline=$((started+budget))
+    directory=$(mktemp -d "$WORKDIR/gateway-reconcile.XXXXXX") || return 1
+    local attempts=0 reason id status changed retryable
+    while ((SECONDS<deadline)); do
+        gateway_read_object "$kind" "$name" "$directory/current.json" "$deadline" || return 1
+        if jq -e '.!=null' "$directory/current.json" >/dev/null; then
+            gateway_object_valid "$kind" "$name" "$directory/current.json" ||
+                { fail GATEWAY_CONFIG "Gateway object infrastructure/$kind/$name has changed identity, ownership or structure."; return 1; }
+            if gateway_policy_matches "$kind" "$policy" "$directory/current.json"; then
+                emit "$(jq -cn --arg resource "$kind/$name" --arg policy "$policy" \
+                    '{type:"gateway-policy-ready",resource:$resource,externalTrafficPolicy:$policy}')"
+                return 0
+            fi
+            if ((SECONDS-started>=grace)); then
+                ((attempts<5)) || { fail GATEWAY_CONFLICT "Gateway object infrastructure/$kind/$name kept changing across five patch attempts. See output 3."; return 1; }
+                verify_lease || return 1
+                remaining=$((deadline-SECONDS)); ((remaining>0)) || break
+                attempts=$((attempts+1))
+                cp "$directory/current.json" "$directory/before.json"
+                jq --arg kind "$kind" --arg policy "$policy" '
+                    [{op:"test",path:"/metadata/uid",value:.metadata.uid},
+                     {op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
+                     {op:"add",path:(if $kind=="service" then "/spec/externalTrafficPolicy"
+                        else "/spec/provider/kubernetes/envoyService/externalTrafficPolicy" end),value:$policy}]' \
+                    "$directory/before.json" >"$directory/patch.json"
+                emit "$(jq -cn --arg resource "$kind/$name" --argjson attempt "$attempts" \
+                    --slurpfile patch "$directory/patch.json" '{type:"gateway-patch",resource:$resource,attempt:$attempt,patch:$patch[0]}')"
+                status=0
+                run_capture "$directory/response.json" "$((remaining<15 ? remaining : 15))" kubectl -n infrastructure \
+                    patch "$kind" "$name" --type=json --patch-file "$directory/patch.json" -o json \
+                    --request-timeout=10s --v=8 || status=$?
+                if ((status!=0)); then
+                    # Preserve the failed write's evidence before a read changes LAST_*.
+                    reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+                    id=${LAST_COMMAND_ID:-}
+                    cp "$LAST_ERROR" "$directory/rejection.stderr"
+                    retryable=false
+                    retryable_api_reason "$reason" && retryable=true
+                    gateway_read_object "$kind" "$name" "$directory/current.json" "$deadline" || return 1
+                    if jq -e '.!=null' "$directory/current.json" >/dev/null; then
+                        gateway_object_valid "$kind" "$name" "$directory/current.json" ||
+                            { fail GATEWAY_CONFIG "Gateway object infrastructure/$kind/$name changed ownership during reconciliation."; return 1; }
+                        if gateway_policy_matches "$kind" "$policy" "$directory/current.json"; then
+                            emit "$(jq -cn --arg resource "$kind/$name" '{type:"gateway-patch-reconciled",resource:$resource}')"
+                            return 0
+                        fi
+                    fi
+                    changed=false
+                    jq -e --slurpfile before "$directory/before.json" '
+                        .==null or .metadata.uid!=$before[0].metadata.uid or
+                        .metadata.resourceVersion!=$before[0].metadata.resourceVersion' "$directory/current.json" >/dev/null && changed=true
+                    # A generic 422 alone is not a conflict. Retry only when a fresh
+                    # read confirms change, or the failure was a transport problem.
+                    if [[ $changed == true ]] && grep -Eiq 'Conflict|object has been modified|test failed|test operation|request is invalid|NotFound|not found' "$directory/rejection.stderr"; then retryable=true; fi
+                    [[ $retryable == true ]] ||
+                        { gateway_rejection "$kind" "$name" "$policy" "$directory" "$reason" "$id" "$status"; return 1; }
+                    emit "$(jq -cn --arg resource "$kind/$name" --arg reason "$reason" --argjson changed "$changed" \
+                        '{type:"gateway-patch-retry",resource:$resource,reason:$reason,objectChanged:$changed}')"
+                fi
+                # Even a successful patch is followed by a fresh read. Admission
+                # may change the requested value, and controller writes may follow.
+            fi
+        fi
+        remaining=$((deadline-SECONDS)); ((remaining>0)) || break
+        emit "$(jq -cn --arg resource "$kind/$name" --argjson remaining "$remaining" \
+            '{type:"gateway-policy-wait",resource:$resource,remainingSeconds:$remaining,message:("Waiting for "+$resource+" traffic policy")}')"
+        delay=$((remaining<3 ? remaining : 3)); sleep "$delay"
+    done
+    fail GATEWAY_TIMEOUT "Gateway traffic policy did not converge for infrastructure/$kind/$name within $budget seconds. See output 3."
+}
+
 gateway_reconcile() {
-    local policy
+    phase gateway-reconciliation
+    local policy name
     policy=$(config_value '.externalTrafficPolicy')
-    kube_json "$WORKDIR/envoy.json" -n infrastructure get envoyproxy envoy -o json
-    jq -e '.spec.provider.kubernetes.envoyService | type == "object"' "$WORKDIR/envoy.json" >/dev/null ||
-        { fail GATEWAY_CONFIG 'EnvoyProxy has no Kubernetes service configuration.'; return 1; }
-    jq --arg policy "$policy" '[{op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
-        {op:"add",path:"/spec/provider/kubernetes/envoyService/externalTrafficPolicy",value:$policy}]' \
-        "$WORKDIR/envoy.json" >"$WORKDIR/gateway-patch.json"
-    run 30 kubectl -n infrastructure patch envoyproxy envoy --type=json --patch-file "$WORKDIR/gateway-patch.json"
-    gateway_service
-    local name
+    [[ $policy == Cluster || $policy == Local ]] || { fail GATEWAY_CONFIG 'Gateway traffic policy must be Cluster or Local.'; return 1; }
+    gateway_set_policy envoyproxy envoy "$policy" 0 || return 1
+    gateway_service || return 1
+    # Keep the name selection separate from gateway_service's refreshed snapshots.
+    local names
+    names=$(jq -r '.items[] | select(.spec.type=="LoadBalancer") | .metadata.name' "$WORKDIR/gateway-services.json")
     while IFS= read -r name; do
-        jq --arg name "$name" --arg policy "$policy" '.items[] | select(.metadata.name==$name) |
-            [{op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
-             {op:"add",path:"/spec/externalTrafficPolicy",value:$policy}]' \
-            "$WORKDIR/gateway-services.json" >"$WORKDIR/gateway-patch.json"
-        run 30 kubectl -n infrastructure patch service "$name" --type=json --patch-file "$WORKDIR/gateway-patch.json"
-    done < <(jq -r '.items[] | select(.spec.type=="LoadBalancer") | .metadata.name' "$WORKDIR/gateway-services.json")
+        [[ -n $name ]] || continue
+        gateway_set_policy service "$name" "$policy" 30 || return 1
+    done <<< "$names"
+    gateway_service || return 1
+    jq -e --arg policy "$policy" 'all(.items[]|select(.spec.type=="LoadBalancer"); .spec.externalTrafficPolicy==$policy)' \
+        "$WORKDIR/gateway-services.json" >/dev/null || { fail GATEWAY_CONFLICT 'Envoy Service policy changed during final verification.'; return 1; }
     emit "$(jq -c --arg policy "$policy" '{type:"gateway-configured",externalTrafficPolicy:$policy,proxy:"infrastructure/envoy",services:[.items[] | select(.spec.type=="LoadBalancer") | .metadata.name]}' "$WORKDIR/gateway-services.json")"
     emit "$(jq -cn --slurpfile c "$CONFIG" --slurpfile service "$WORKDIR/gateway-service.json" \
         '{type:"dns",automatic:$c[0].externalDns,hostname:$c[0].tenantHost,targets:[$service[0].status.loadBalancer.ingress[]? | .ip // .hostname]}')"

@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.6.0
+# OCM W-Stack deployer 12.6.1
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -40,6 +40,26 @@ the existing release and confirms the recorded operation before deciding whether
 a write is needed. Successful completion still requires the stack checks to pass.
 See [deployment recovery](docs/DEPLOYMENT-RECOVERY.md) for the state transitions,
 retry budgets, ownership checks and release acceptance matrix.
+
+## Envoy traffic-policy reconciliation
+
+The deployer checks the EnvoyProxy and its generated Service before writing.
+Correct traffic-policy settings require no patch. After configuring the proxy,
+it gives Envoy up to 30 seconds to update the Service before using a direct
+fallback patch. Both `Cluster` and `Local` configurations are supported.
+
+Fallback patches test the freshly read object UID and resourceVersion. After a
+rejection, the deployer reads the object again: an already-applied value completes
+the step, a confirmed concurrent change allows a rebuilt patch, and an unchanged
+validation or authorization rejection stops with `GATEWAY_PATCH_REJECTED`.
+Transport failures also require readback before another write. Each object has
+at most five patch attempts and a reconciliation budget of the configured timeout,
+capped at 180 seconds. Service ownership and the deployment lease are checked.
+
+Output 2 reports `gateway-reconciliation`, controller waits and patch attempts.
+Output 3 includes the generated patch and the patch command's verbose API exchange.
+A final fresh Service read verifies traffic policy and refreshes the public DNS
+address. This step does not alter Service ports, addresses, selectors or TLS.
 
 ## Argo CD installation and workload readiness
 
@@ -177,14 +197,14 @@ The deployer uses `ecofacis/xfsc-orce:2.0.15` by default. Its init container ins
 
 ## Install the deployment node
 
-Install `orce-esb-ocmwstack-12.6.0.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
+Install `orce-esb-ocmwstack-12.6.1.tgz` in the deployer's ORCE/Node-RED user directory, restart the deployer and configure the OCM-W-Stack node. Provide the cluster kubeconfig, domain, TLS certificate/key and initial UI/editor credentials. The ORCE base image field can keep its default.
 
 Native startup refreshes missing claim-backed credentials through ESO and waits for current provisioning status. Progress events identify pending workloads and credential references. The guard stores its private state under `/state/guard`. Its DNS policy uses the cluster DNS Service selector and ready EndpointSlice
 ports. The Service can be named `coredns`, `kube-dns` or another name. Runtime
 DNS retains standard port 53 and adds only discovered alternate backend ports;
 8053 is not assumed on other clusters. API requests use the discovered Kubernetes Service address with TLS verification for `kubernetes.default.svc`.
 
-The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.6.0. The runtime, UI and runtime chart are version 12.5.11.
+The configuration schema remains `procedureVersion: 12`. Existing node fields, encrypted credentials, action names and output topics are preserved. The deployer package is version 12.6.1. The runtime, UI and runtime chart are version 12.5.11.
 
 Verification comparison accepts reordering of the complete expected provider-injected environment block. Missing, duplicate or changed entries remain visible. Signing-key preservation also normalizes an empty `data` map. Failure results are saved before lease cleanup; the node can recover them from its private operation directory and reports termination signals when no result exists.
 
