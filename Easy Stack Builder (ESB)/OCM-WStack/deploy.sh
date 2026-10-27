@@ -9,6 +9,7 @@ export ESB_DEPLOY="$ROOT/deploy.sh"
 if [[ ${1:-} != --internal ]]; then exec 3>&2; fi
 source "$DEPLOYMENT/common.sh"
 load_libraries
+trap 'log_shell_error "$?" "$LINENO" "${BASH_SOURCE[0]:-$0}" "$BASH_COMMAND"' ERR
 
 usage() {
     cat <<'HELP'

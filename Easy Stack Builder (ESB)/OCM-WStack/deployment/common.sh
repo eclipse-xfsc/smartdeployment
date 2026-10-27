@@ -19,6 +19,7 @@ emit() {
 }
 
 phase() {
+    if [[ -n ${ESB_LOG_DIR:-} ]]; then printf '%s\n' "$1" >"$ESB_LOG_DIR/phase"; fi
     emit "$(jq -cn --arg phase "$1" '{type:"phase",phase:$phase}')"
 }
 
@@ -60,7 +61,43 @@ safe_error() {
     elif grep -Eiq 'timed out|timeout|context deadline' "$file"; then printf 'request timed out';
     elif grep -Eiq 'Conflict|object has been modified|test failed' "$file"; then printf 'the resource changed during the operation';
     elif grep -Eiq 'not found|NotFound' "$file"; then printf 'the requested resource was not found';
+    elif grep -Eiq 'EOF|connection reset|connection refused|broken pipe' "$file"; then printf 'connection interrupted';
+    elif grep -Eiq 'no such host|could not resolve|EAI_AGAIN' "$file"; then printf 'DNS lookup failed';
     else printf 'command returned an error'; fi
+}
+
+# Commands keep their own files so concurrent hooks and lease renewal cannot
+# overwrite one another. These raw files are outside the disposable WORKDIR.
+command_log_start() {
+    COMMAND_LOG=
+    [[ -n ${ESB_LOG_DIR:-} ]] || return 0
+    local seconds=$1
+    shift
+    COMMAND_LOG=$(mktemp -d "$ESB_LOG_DIR/command.XXXXXX")
+    printf '%q ' "$@" >"$COMMAND_LOG/command.txt"
+    printf '\n' >>"$COMMAND_LOG/command.txt"
+    local current_phase='' tool=${1##*/}
+    [[ ! -f $ESB_LOG_DIR/phase ]] || IFS= read -r current_phase <"$ESB_LOG_DIR/phase" || true
+    jq -cn --arg id "${COMMAND_LOG##*/}" --arg command "$tool" \
+        --arg phase "$current_phase" --arg startedAt "$(timestamp)" \
+        --arg startedEpoch "${EPOCHREALTIME:-}" \
+        --arg cwd "$PWD" --argjson timeoutSeconds "$seconds" \
+        '{id:$id,command:$command,phase:$phase,startedAt:$startedAt,startedEpoch:$startedEpoch,cwd:$cwd,timeoutSeconds:$timeoutSeconds}' \
+        >"$COMMAND_LOG/start.json"
+    emit "$(jq -c '. + {type:"command-start",message:("Running "+.command)} | del(.cwd)' "$COMMAND_LOG/start.json")"
+}
+
+log_shell_error() {
+    local status=$1 line=$2 source=$3 command=$4
+    [[ -n ${ESB_LOG_DIR:-} ]] || return 0
+    local file
+    file=$(mktemp "$ESB_LOG_DIR/shell-error.XXXXXX") || return 0
+    jq -cn --arg timestamp "$(timestamp)" --arg source "$source" \
+        --arg command "$command" --argjson line "$line" --argjson exitCode "$status" \
+        '{timestamp:$timestamp,source:$source,line:$line,command:$command,exitCode:$exitCode}' >"$file" || true
+    emit "$(jq -cn --arg source "${source##*/}" --argjson line "$line" --argjson exitCode "$status" \
+        '{type:"shell-error",source:$source,line:$line,exitCode:$exitCode,message:("Command failed in "+$source+":"+($line|tostring))}')" || true
+    return 0
 }
 
 run_capture() {
@@ -68,10 +105,22 @@ run_capture() {
     shift 2
     local error_file status=0 started=$SECONDS
     error_file=$(mktemp "$WORKDIR/command-error.XXXXXX")
-    timeout -s TERM -k 3 "$seconds" "$@" <&0 >"$output" 2>"$error_file" &
+    command_log_start "$seconds" "$@"
+    local log=$COMMAND_LOG stdout_file=$output stderr_file=$error_file
+    if [[ -n $log ]]; then stdout_file=$log/stdout; stderr_file=$log/stderr; fi
+    timeout -s TERM -k 3 "$seconds" "$@" <&0 >"$stdout_file" 2>"$stderr_file" &
     CURRENT_PID=$!
     wait "$CURRENT_PID" || status=$?
     CURRENT_PID=
+    if [[ -n $log ]]; then
+        cp -- "$stdout_file" "$output"
+        cp -- "$stderr_file" "$error_file"
+        jq -cn --arg finishedAt "$(timestamp)" --argjson exitCode "$status" \
+            --argjson elapsedSeconds "$((SECONDS-started))" \
+            '{finishedAt:$finishedAt,exitCode:$exitCode,elapsedSeconds:$elapsedSeconds}' >"$log/end.json"
+        emit "$(jq -cs '.[0]+.[1]+{type:"command-end",message:("Finished "+.[0].command)} | del(.cwd)' "$log/start.json" "$log/end.json")"
+    fi
+    LAST_COMMAND_ID=${log##*/}
     LAST_ERROR=$error_file
     LAST_STATUS=$status
     # BusyBox returns the terminating signal status; GNU timeout returns 124.
@@ -98,7 +147,7 @@ run() {
             (.code|type)=="string" and (.message|type)=="string"' "$WORKDIR/error.json" >/dev/null; then
             return 1
         fi
-        fail COMMAND_FAILED "${1##*/} failed: $(safe_error "$LAST_ERROR")"
+        fail COMMAND_FAILED "${1##*/} failed (exit $LAST_STATUS${LAST_COMMAND_ID:+, command $LAST_COMMAND_ID}): $(safe_error "$LAST_ERROR"). See output 3 for the full log."
         return 1
     fi
 }

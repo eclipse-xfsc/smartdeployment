@@ -11,8 +11,9 @@ function node(t, script, config = {}) {
   fs.copyFileSync(path.join(ROOT, 'ocmwstack.js'), path.join(dir, 'ocmwstack.cjs'));
   fs.writeFileSync(path.join(dir, 'deploy.sh'), script);
   const handlers = {}, messages = [], statuses = [];
+  const settings = { userDir: dir };
   let Constructor, credentials;
-  require(path.join(dir, 'ocmwstack.cjs'))({ nodes: {
+  require(path.join(dir, 'ocmwstack.cjs'))({ settings, nodes: {
     registerType(name, constructor, options) { assert.equal(name, 'OCM-W-Stack'); Constructor = constructor; credentials = options.credentials; },
     createNode(instance) {
       instance.on = (event, handler) => { handlers[event] = handler; };
@@ -50,7 +51,10 @@ printf '{"status":"ready","tenantId":"demo"}\\n'
   assert.equal(n.messages[1][0].payload.status, 'ready');
   assert.equal(n.messages[1][0]._msgid, 'message-id');
   assert.equal(fs.existsSync(fs.readFileSync(path.join(n.dir, 'private-directory'), 'utf8')), false);
-  assert.ok(!JSON.stringify(n.messages).includes('private'));
+  assert.ok(!JSON.stringify(n.messages.map(m => m.slice(0, 2))).includes('private'));
+  assert.match(n.messages.at(-1)[2].payload, /private raw diagnostic/);
+  assert.equal(n.messages.at(-1)[2].topic, 'ocm-wstack/log');
+  assert.equal(fs.readFileSync(n.messages.at(-1)[2].filename, 'utf8'), n.messages.at(-1)[2].payload);
   assert.equal(n.credentials.kubeconfig.type, 'password');
   await n.close();
 });
@@ -139,7 +143,8 @@ kill -KILL $$
   const result=n.messages.at(-1)[0].payload;
   assert.equal(result.code,'SCRIPT_TERMINATED');
   assert.match(result.message,/native-validation.*SIGKILL/);
-  assert.ok(!JSON.stringify(n.messages).includes('private diagnostic'));
+  assert.ok(!JSON.stringify(n.messages.map(m => m.slice(0, 2))).includes('private diagnostic'));
+  assert.match(n.messages.at(-1)[2].payload, /private diagnostic/);
   await n.close();
 });
 
@@ -152,7 +157,7 @@ printf '%s\n' '{"status":"failed","code":"FIXTURE","message":"fixture failure"}'
 exit 1
 `,{tenantSubdomain:'ocm',publicDashboards:true});
  await n.input({});
- const payloads=n.messages.flat().filter(Boolean).map(m=>m.payload);
+ const payloads=n.messages.flatMap(m => m.slice(0, 2)).filter(Boolean).map(m=>m.payload);
  assert.ok(payloads.length>=4);
  assert.equal(payloads[0].access.dns.status,'pending');
  for(const p of payloads) assert.equal(p.access.urls.ui,'https://ocm.configured.example/orce/');
@@ -168,7 +173,7 @@ test('final node output maps hostname targets to CNAME and omits disabled dashbo
  const n=node(t,`#!/bin/bash
 printf '%s\n' '{"status":"ready","gatewayAddresses":[{"type":"Hostname","value":"lb.example.net"}]}'
 `);
- await n.input({});const p=n.messages.flat().filter(Boolean).at(-1).payload;
+ await n.input({});const p=n.messages.flatMap(m => m.slice(0, 2)).filter(Boolean).at(-1).payload;
  assert.equal(p.access.urls.argocd,undefined);
  assert.deepEqual(p.access.dns.records,[{name:'demo-tenant.configured.example',type:'CNAME',value:'lb.example.net'}]);
 });
@@ -187,5 +192,72 @@ exit 1
   const result = n.messages.at(-1)[0].payload;
   assert.deepEqual(result.diagnostics, diagnostics);
   assert.equal(result.access.urls.tenant, 'https://demo-tenant.configured.example');
+  await n.close();
+});
+
+test('full log includes command output, failure status and retained private files', async t => {
+  const n = node(t, `#!/bin/bash
+set -Eeuo pipefail
+WORKDIR=$(dirname "$3")
+exec 3>&2
+source '${path.join(ROOT, 'deployment/common.sh')}'
+phase installing-fixture
+run_capture "$WORKDIR/output" 5 bash -c 'printf "raw stdout marker\\n"; printf "raw stderr marker\\n" >&2; exit 7' || true
+printf '{"status":"failed","code":"FIXTURE","message":"fixture failed"}'
+exit 1
+`);
+  await n.input({ action: 'deploy' });
+  const [result, , log] = n.messages.at(-1);
+  assert.equal(result.payload.code, 'FIXTURE');
+  assert.equal(log.status, 'failed');
+  assert.equal(log.complete, true);
+  for (const text of ['raw stdout marker', 'raw stderr marker', '"exitCode":7', 'installing-fixture', 'Final result']) assert.ok(log.payload.includes(text), text);
+  assert.equal(fs.statSync(log.filename).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.dirname(log.filename)).mode & 0o777, 0o700);
+  assert.ok(n.messages.some(m => m[1]?.payload.type === 'command-start'));
+  assert.ok(n.messages.some(m => m[1]?.payload.type === 'command-end' && m[1].payload.exitCode === 7));
+  assert.equal(fs.readFileSync(log.filename, 'utf8'), log.payload);
+  await n.close();
+});
+
+test('full log does not truncate stderr larger than the result size limit', async t => {
+  const n = node(t, `#!/bin/bash
+node -e 'process.stderr.write("x".repeat(9*1024*1024)+"END-OF-LARGE-LOG\\n")'
+printf '{"status":"ready"}'
+`);
+  assert.equal(await n.input({}), undefined);
+  const log = n.messages.at(-1)[2];
+  assert.ok(log.payload.length > 9 * 1024 * 1024);
+  assert.ok(log.payload.includes('END-OF-LARGE-LOG'));
+  assert.equal(log.status, 'ready');
+  await n.close();
+});
+
+test('full log survives forced termination with an unfinished command', async t => {
+  const n = node(t, `#!/bin/bash
+mkdir "$ESB_LOG_DIR/command.fixture"
+printf 'partial command output\\n' >"$ESB_LOG_DIR/command.fixture/stdout"
+kill -KILL $$
+`);
+  await n.input({});
+  const log = n.messages.at(-1)[2];
+  assert.match(log.payload, /partial command output/);
+  assert.match(log.payload, /completion was not recorded/);
+  assert.match(log.payload, /SCRIPT_TERMINATED/);
+  await n.close();
+});
+
+test('long operations emit a heartbeat without changing the result or access details', async t => {
+  const n = node(t, `#!/bin/bash
+printf '{"type":"phase","phase":"waiting-for-fixture"}\\n' >&2
+sleep 11
+printf '{"status":"ready"}'
+`);
+  await n.input({});
+  const heartbeat = n.messages.find(m => m[1]?.payload.type === 'heartbeat')?.[1].payload;
+  assert.equal(heartbeat.phase, 'waiting-for-fixture');
+  assert.ok(heartbeat.elapsedSeconds >= 10);
+  assert.ok(heartbeat.access.urls.ui);
+  assert.match(n.messages.at(-1)[2].payload, /heartbeat/);
   await n.close();
 });

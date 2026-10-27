@@ -106,6 +106,9 @@
       ],
       [
         "ocm-v12-progress"
+      ],
+      [
+        "ocm-full-log"
       ]
     ],
     "publicDashboards": false,
@@ -140,6 +143,21 @@
     "targetType": "msg",
     "x": 710,
     "y": 220,
+    "wires": []
+  },
+  {
+    "id": "ocm-full-log",
+    "type": "debug",
+    "z": "ocm-v12-flow",
+    "name": "Full deployment log (private)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 850,
+    "y": 300,
     "wires": []
   }
 ]

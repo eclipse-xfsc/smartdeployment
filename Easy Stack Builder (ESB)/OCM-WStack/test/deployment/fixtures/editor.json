@@ -3,10 +3,11 @@
   "color": "#c7e2e4",
   "icon": "font-awesome/fa-cubes",
   "inputs": 1,
-  "outputs": 2,
+  "outputs": 3,
   "outputLabels": [
     "Result",
-    "Progress"
+    "Progress",
+    "Full log"
   ],
   "defaults": {
     "name": {

@@ -384,7 +384,7 @@
     </div>
   </div>
   <p class="esb-note">
-    Connect an Inject node to start Deploy. Output 1 returns the result; output 2 shows progress, detected settings and DNS targets. An existing matching installation resumes safely.
+    Connect an Inject node to start Deploy. Output 1 returns the result; output 2 shows progress, detected settings and DNS targets; output 3 returns the complete raw log when the operation finishes. An existing matching installation resumes safely.
   </p>
 </div>
 </script>
@@ -405,8 +405,8 @@
     color: '#c7e2e4',
     icon: 'font-awesome/fa-cubes',
     inputs: 1,
-    outputs: 2,
-    outputLabels: ['Result', 'Progress'],
+    outputs: 3,
+    outputLabels: ['Result', 'Progress', 'Full log'],
     label: function () { return this.name || 'OCM W-Stack'; },
     defaults: {
       name: { value: '' },
@@ -540,7 +540,11 @@
     <code>repair-ocm</code> for native services or <code>install-ui</code>
     for the deployed ORCE runtime and UI.</p>
   <p>Output 1 carries the JSON result with topic <code>ocm-wstack/result</code>.
-    Output 2 carries progress with topic <code>ocm-wstack/progress</code>.</p>
+    Output 2 carries progress with topic <code>ocm-wstack/progress</code>.
+    Output 3 carries the complete plain-text log in <code>msg.payload</code>, with topic
+    <code>ocm-wstack/log</code>, on success or failure. Wire it to a File node to keep
+    the full transcript; Debug may shorten its display. <code>msg.filename</code> is
+    the retained log path. Raw logs can contain credentials and Secret data; keep them private.</p>
   <p>With DNS automation off, set the reported A/AAAA or CNAME targets for the
     displayed hostnames. Renew uploaded TLS by replacing both certificate
     and key uploads, then running Deploy.</p>

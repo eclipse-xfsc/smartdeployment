@@ -1,6 +1,36 @@
-# OCM W-Stack deployer 12.5.14
+# OCM W-Stack deployer 12.5.15
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
+
+## Deployment outputs and full log
+
+1. **Result** (`ocm-wstack/result`): the final structured result with access URLs and DNS records.
+2. **Progress** (`ocm-wstack/progress`): phases, command start/end events, exit codes,
+   recovery attempts and a heartbeat every 10 seconds while the operation runs.
+3. **Full log** (`ocm-wstack/log`): one plain-text `msg.payload` on completion,
+   including failures. It contains the command arguments, working directories,
+   time budgets, stdout, stderr, exit codes, progress events and final result.
+   Each captured command has its own ID so nested hooks and lease renewal remain distinguishable.
+   Binary output containing NUL bytes is represented as base64.
+
+Wire output 3 to a File node, or inspect it in Debug. Debug may shorten its display;
+the message itself is not truncated. `msg.filename` points to the retained full log
+under `/data/ocm-deployer-logs/<operation>/deployment.log` (or the configured ORCE
+user directory). Files have mode 0600 and operation directories mode 0700.
+The raw command files are retained alongside the transcript. Existing result and
+progress wires keep their positions; add a third wire after updating the palette node.
+
+**Raw logs may contain credentials and Kubernetes Secret data. Keep output 3 and
+its saved files private.** This output is intentionally unredacted. The deployer
+does not explicitly dump credential files or enable shell tracing. Log files are
+not automatically deleted. An interrupted command is marked as incomplete in the
+transcript; closing the node retains the log on disk but cannot send to a closed flow.
+An abrupt container or process termination retains the raw files already written,
+but cannot emit a final message. `msg.complete=false` indicates a log write or assembly failure.
+
+All existing kubeconfig binding, deployment recovery and readiness checks remain
+in place. This release adds execution visibility; successful completion still
+requires the stack checks to pass.
 
 ## Kyverno bootstrap recovery
 
@@ -45,7 +75,7 @@ Pending Helm operations stop the deployment and retain their release records.
 Failure results include `diagnostics.history`: the step, namespace, release,
 API server, reason, command exit code and attempt count. The bounded history retains the first Helm failure when later readiness
 checks repeatedly fail. Raw response bodies and credentials
-are excluded. `diagnose-api` returns the reason and exit code for each failed
+are excluded from the structured result and progress outputs. Output 3 contains raw command output. `diagnose-api` returns the reason and exit code for each failed
 sample. Every node output retains the configured access URLs and discovered
 DNS targets.
 
@@ -54,7 +84,7 @@ The runtime, UI and their seed archives remain at 12.5.11 in this deployer relea
 ## Source layout
 
 - `ocmwstack.html`: node fields, credential uploads and help.
-- `ocmwstack.js`: Node-RED registration, private input files, process cancellation and the two outputs.
+- `ocmwstack.js`: Node-RED registration, private input files, process cancellation and the three outputs.
 - `deploy.sh`: deployment procedure and standalone command.
 - `deployment/`: Bash helpers, JSON transformations, templates and the continuous native-service reconciler.
 - `runtime/flows/`: domain flows; `runtime/flows.json`: generated deployment flow.
