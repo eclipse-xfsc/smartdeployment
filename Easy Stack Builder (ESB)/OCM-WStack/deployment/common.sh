@@ -66,7 +66,7 @@ safe_error() {
 run_capture() {
     local output=$1 seconds=$2
     shift 2
-    local error_file status=0
+    local error_file status=0 started=$SECONDS
     error_file=$(mktemp "$WORKDIR/command-error.XXXXXX")
     timeout -s TERM -k 3 "$seconds" "$@" <&0 >"$output" 2>"$error_file" &
     CURRENT_PID=$!
@@ -74,6 +74,12 @@ run_capture() {
     CURRENT_PID=
     LAST_ERROR=$error_file
     LAST_STATUS=$status
+    # BusyBox returns the terminating signal status; GNU timeout returns 124.
+    # Treat a signal exit as a deadline only after this command's budget elapsed.
+    LAST_TIMEOUT=false
+    if ((status == 124)) || { ((status == 137 || status == 143)) && ((SECONDS-started >= seconds)); }; then
+        LAST_TIMEOUT=true
+    fi
     if ((status != 0)); then
         return "$status"
     fi

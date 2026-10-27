@@ -116,7 +116,7 @@ function execute(action, directory, onProgress, signal) {
         }
       }
       if ((result.status === 'failed' && result.code) || (code !== 0 && code !== 2)) {
-        finish(Object.assign(new Error(result.message || 'Deployment failed.'), { code: result.code || 'COMMAND_FAILED' }));
+        finish(Object.assign(new Error(result.message || 'Deployment failed.'), { code: result.code || 'COMMAND_FAILED', diagnostics: result.diagnostics }));
       } else {
         finish(null, result);
       }
@@ -203,7 +203,8 @@ module.exports = function register(RED) {
           if (!closed) {
             node.status({ fill: 'red', shape: 'ring', text: error.code || 'Failed' });
             send([{ _msgid: msg._msgid, topic: 'ocm-wstack/result',
-              payload: { action, status: 'failed', code: error.code || 'ERROR', message: error.message, access } }, null]);
+              payload: { action, status: 'failed', code: error.code || 'ERROR', message: error.message,
+                ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}), access } }, null]);
           }
         } finally {
           try {

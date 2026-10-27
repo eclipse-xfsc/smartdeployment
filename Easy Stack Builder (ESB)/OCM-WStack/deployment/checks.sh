@@ -174,15 +174,22 @@ argo_health() {
 
 diagnose_api() {
     printf '[]\n' >"$WORKDIR/api-checks.json"
-    local sample started elapsed ok
+    local sample started elapsed ok reason status
     for sample in 1 2 3 4 5; do
         started=$SECONDS
-        ok=false
-        if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s &&
-            [[ $(cat "$WORKDIR/api-ready") == ok ]]; then ok=true; fi
+        ok=false reason='' status=0
+        if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
+            ok=true
+        else
+            status=$?
+            reason=$(api_failure_reason "$LAST_ERROR" "$status")
+        fi
         elapsed=$(((SECONDS-started)*1000))
         jq --arg at "$(timestamp)" --argjson ok "$ok" --argjson elapsed "$elapsed" \
-            '.+[{at:$at,ok:$ok,elapsedMs:$elapsed}]' "$WORKDIR/api-checks.json" >"$WORKDIR/api-checks-next.json"
+            --arg reason "$reason" --argjson status "$status" \
+            '.+[{at:$at,ok:$ok,elapsedMs:$elapsed,exitCode:$status}
+               + (if $ok then {} else {reason:$reason} end)]' \
+            "$WORKDIR/api-checks.json" >"$WORKDIR/api-checks-next.json"
         mv "$WORKDIR/api-checks-next.json" "$WORKDIR/api-checks.json"
         ((sample == 5)) || sleep 2
     done

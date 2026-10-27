@@ -172,3 +172,20 @@ printf '%s\n' '{"status":"ready","gatewayAddresses":[{"type":"Hostname","value":
  assert.equal(p.access.urls.argocd,undefined);
  assert.deepEqual(p.access.dns.records,[{name:'demo-tenant.configured.example',type:'CNAME',value:'lb.example.net'}]);
 });
+
+test('API failures retain retry history and public access details in the final result', async t => {
+  const diagnostics = { history: [
+    { step: 'helm-upgrade', reason: 'connection', exitCode: 1, attempt: 1 },
+    { step: 'api-readiness', reason: 'process-timeout', exitCode: 124, attempt: 5 },
+  ] };
+  const n = node(t, `#!/bin/bash
+printf '%s' '${JSON.stringify({ status: 'failed', code: 'API_UNREADY', message: 'Readiness timed out.', diagnostics })}'
+exit 1
+`);
+  const error = await n.input({ action: 'deploy' });
+  assert.equal(error.code, 'API_UNREADY');
+  const result = n.messages.at(-1)[0].payload;
+  assert.deepEqual(result.diagnostics, diagnostics);
+  assert.equal(result.access.urls.tenant, 'https://demo-tenant.configured.example');
+  await n.close();
+});

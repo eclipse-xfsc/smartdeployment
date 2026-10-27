@@ -144,12 +144,87 @@ cluster_preflight() {
         providerEvidence,externalTrafficPolicy}' "$CONFIG")"
 }
 
+# Classify command failures without forwarding response bodies or credentials.
+api_failure_reason() {
+    local file=$1 status=${2:-0} timed_out=${3:-${LAST_TIMEOUT:-false}}
+    if grep -Eiq 'unauthorized|authentication required|must be logged in|provide credentials|getting credentials' "$file"; then printf authentication;
+    elif grep -Eiq 'forbidden|access denied' "$file"; then printf authorization;
+    elif grep -Eiq 'x509:|certificate verify|certificate signed by unknown|tls:.*certificate' "$file"; then printf certificate;
+    elif grep -Eiq 'kubeconfig binding is unavailable|credential and context overrides|context .*does not exist' "$file"; then printf kubeconfig;
+    elif grep -Eiq 'another operation|pending-(install|upgrade|rollback)' "$file"; then printf helm-pending;
+    elif grep -Eiq 'invalid:|validation failed|immutable|exceeded quota|nil pointer|template:|parse error' "$file"; then printf validation;
+    elif grep -Eiq 'command not found|unbound variable|bad file descriptor|argument list too long|cannot execute|permission denied' "$file" || [[ $status == 126 || $status == 127 ]]; then printf local-command;
+    elif [[ $status == 124 || $timed_out == true && ( $status == 137 || $status == 143 ) ]]; then printf process-timeout;
+    elif [[ $status == 137 || $status == 143 ]]; then printf process-terminated;
+    elif grep -Eiq 'no such host|temporary failure in name resolution|server misbehaving|resolving timed out' "$file"; then printf dns;
+    elif grep -Eiq 'context deadline exceeded|request canceled.*(timeout|deadline)|timeout exceeded while awaiting headers|client rate limiter.*deadline|i/o timeout|TLS handshake timeout|net/http: request canceled|timed out waiting for the condition|Error from server \(ServerTimeout\)|Error from server \(Timeout\)|Timeout occurred|server was unable to return a response in the time allotted' "$file"; then printf request-timeout;
+    elif grep -Eiq 'connection reset|connection refused|http2: client connection lost|unexpected EOF|(^|[ :])EOF($|[[:space:]])|network is unreachable|no route to host|broken pipe' "$file"; then printf connection;
+    elif grep -Eiq 'too many requests|TooManyRequests' "$file"; then printf rate-limited;
+    elif grep -Eiq 'ServiceUnavailable|server is currently unable to handle|InternalError|Internal Server Error|Bad Gateway|Gateway Timeout' "$file"; then printf api-unavailable;
+    else printf unclassified; fi
+}
+
+retryable_api_reason() {
+    case "$1" in process-timeout|request-timeout|dns|connection|rate-limited|api-unavailable) return 0 ;; *) return 1 ;; esac
+}
+
 transport_failure() {
-    local file=$1
-    if grep -Eiq 'forbidden|unauthorized|invalid:|validation failed|immutable|exceeded quota|nil pointer|template:|parse error|another operation|pending-(install|upgrade|rollback)|x509:' "$file"; then
-        return 1
+    retryable_api_reason "$(api_failure_reason "$1" "${2:-${LAST_STATUS:-0}}")"
+}
+
+# A history entry contains only operation metadata and a classified reason.
+# Keep the Helm failure even when a later readiness check also fails.
+record_api_failure() {
+    local step=$1 namespace=$2 release=$3 attempt=$4 attempts=$5 reason=$6 retryable=false
+    retryable_api_reason "$reason" && retryable=true
+    [[ -f $WORKDIR/api-failures.json ]] || printf '[]\n' >"$WORKDIR/api-failures.json"
+    local server=''
+    if [[ -f $WORKDIR/selection.json ]]; then
+        server=$(jq -r '.server // ""' "$WORKDIR/selection.json")
     fi
-    grep -Eiq '(Get|Post|Put|Patch|Delete|Head) "https?://.*(EOF|connection reset by peer|connection refused|TLS handshake timeout|i/o timeout|http2: client connection lost)|unable to connect to the server:.*(EOF|connection reset|TLS handshake timeout|i/o timeout)|the server is currently unable to handle the request|too many requests|ServiceUnavailable' "$file"
+    # Server authority comes from the uploaded kubeconfig; omit URL credentials.
+    server=$(node -e 'try { const u=new URL(process.argv[1]); console.log(u.origin); } catch {}' "$server")
+    jq -cn --arg step "$step" --arg namespace "$namespace" --arg release "$release" \
+        --arg apiServer "$server" --arg reason "$reason" --arg at "$(timestamp)" \
+        --argjson exitCode "${LAST_STATUS:-1}" --argjson attempt "$attempt" \
+        --argjson attempts "$attempts" --argjson retryable "$retryable" \
+        '{step:$step,namespace:$namespace,release:$release,apiServer:$apiServer,reason:$reason,
+          exitCode:$exitCode,attempt:$attempt,attempts:$attempts,retryable:$retryable,at:$at}
+         + (if $step=="api-readiness" then {path:"/readyz"} else {} end)' >"$WORKDIR/api-diagnostic.json"
+    jq --slurpfile entry "$WORKDIR/api-diagnostic.json" '. + $entry | .[-20:]' \
+        "$WORKDIR/api-failures.json" >"$WORKDIR/api-failures-next.json"
+    mv "$WORKDIR/api-failures-next.json" "$WORKDIR/api-failures.json"
+    emit "$(jq -c '{type:"command-failure",phase:.release,diagnostic:.}' "$WORKDIR/api-diagnostic.json")"
+}
+
+fail_api_command() {
+    local code=$1 message=$2
+    jq -cn --arg code "$code" --arg message "$message" \
+        --slurpfile history "$WORKDIR/api-failures.json" \
+        '{status:"failed",code:$code,message:$message,diagnostics:{history:$history[0]}}' >"$WORKDIR/error.json"
+    return 1
+}
+
+wait_api_ready() {
+    local namespace=$1 release=$2 attempt reason delay
+    for attempt in 1 2 3 4 5; do
+        if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
+            # kubectl returns success for HTTP 2xx; readiness is an HTTP contract.
+            return 0
+        else
+            LAST_STATUS=$?
+        fi
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        record_api_failure api-readiness "$namespace" "$release" "$attempt" 5 "$reason"
+        if ! retryable_api_reason "$reason" || ((attempt == 5)); then
+            fail_api_command API_UNREADY "Kubernetes API readiness failed for $namespace/$release: $reason (exit $LAST_STATUS, check $attempt/5)."
+            return 1
+        fi
+        delay=$((attempt < 4 ? 2**attempt : 8))
+        emit "$(jq -cn --arg phase "$release" --arg reason "$reason" --argjson attempt "$((attempt+1))" \
+            --argjson delay "$delay" '{type:"retry",phase:$phase,step:"api-readiness",reason:$reason,attempt:$attempt,attempts:5,delaySeconds:$delay}')"
+        sleep "$delay"
+    done
 }
 
 lease_valid() {
@@ -255,18 +330,14 @@ helm_upgrade() {
     shift 2
     [[ ${1:-} == upgrade && " $* " == *' --install '* ]] ||
         { fail HELM_COMMAND 'Expected helm upgrade --install.'; return 1; }
-    local attempt state
+    local attempt state reason
+    printf '[]\n' >"$WORKDIR/api-failures.json"
     for attempt in 1 2 3; do
         if ((attempt > 1)); then
             emit "$(jq -cn --arg phase "$release" --argjson attempt "$attempt" '{type:"retry",phase:$phase,attempt:$attempt,attempts:3}')"
             sleep "$((attempt == 2 ? 5 : 15))"
         fi
-        if ! run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
-            transport_failure "$LAST_ERROR" && continue
-            fail API_UNREADY 'Kubernetes API readiness could not be established.'
-            return 1
-        fi
-        [[ $(cat "$WORKDIR/api-ready") == ok ]] || { fail API_UNREADY 'Kubernetes API is not ready.'; return 1; }
+        wait_api_ready "$namespace" "$release" || return 1
         if ! release_status "$namespace" "$release" >"$WORKDIR/release-status"; then
             transport_failure "$LAST_ERROR" && continue
             return 1
@@ -287,9 +358,18 @@ helm_upgrade() {
             [[ $state == deployed ]] || { fail HELM_STATE_UNAVAILABLE 'Helm did not confirm a deployed release.'; return 1; }
             return 0
         fi
-        transport_failure "$LAST_ERROR" || { fail COMMAND_FAILED "Helm failed: $(safe_error "$LAST_ERROR")"; return 1; }
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        record_api_failure helm-upgrade "$namespace" "$release" "$attempt" 3 "$reason"
+        if ! retryable_api_reason "$reason"; then
+            fail_api_command COMMAND_FAILED "Helm upgrade failed for $namespace/$release: $reason (exit $LAST_STATUS)."
+            return 1
+        fi
     done
-    fail API_TRANSPORT 'Kubernetes transport failed after three Helm attempts; release records are retained.'
+    if [[ -s $WORKDIR/api-diagnostic.json ]]; then
+        fail_api_command API_TRANSPORT "Kubernetes operation failed for $namespace/$release after three attempts: $(jq -r '.reason' "$WORKDIR/api-diagnostic.json")."
+    else
+        fail API_TRANSPORT 'Kubernetes transport failed after three Helm attempts; release records are retained.'
+    fi
 }
 
 marker_matches() {
