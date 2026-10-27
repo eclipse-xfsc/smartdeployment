@@ -30,7 +30,7 @@ function stopProcess(child, signal) {
 }
 
 /** Execute one Bash action; stdout is a result and stderr carries JSON progress. */
-function execute(action, directory, onProgress, signal) {
+function execute(action, directory, onProgress, signal, backupDirectory) {
   return new Promise((resolve, reject) => {
     const resultFile = path.join(directory, 'result.json');
     let lastPhase;
@@ -39,7 +39,7 @@ function execute(action, directory, onProgress, signal) {
       '--config', path.join(directory, 'config.json'),
       '--credentials', path.join(directory, 'credentials.json'),
     ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ESB_RESULT_FILE: resultFile } });
+      env: { ...process.env, ESB_RESULT_FILE: resultFile, ...(backupDirectory ? { ESB_RECOVERY_BACKUP_DIR: backupDirectory } : {}) } });
 
     let output = '';
     let killTimer;
@@ -190,7 +190,7 @@ module.exports = function register(RED) {
             JSON.stringify({ ...config, confirm: msg.confirm }), { mode: 0o600 });
           await fs.writeFile(path.join(directory, 'credentials.json'),
             JSON.stringify(node.credentials || {}), { mode: 0o600 });
-          const result = await execute(action, directory, progress, controller.signal);
+          const result = await execute(action, directory, progress, controller.signal, path.join(RED.settings?.userDir || os.tmpdir(), 'ocm-deployer-backups'));
           if (Array.isArray(result.gatewayAddresses)) access = accessDetails(config, result.gatewayAddresses);
           if (!closed) {
             const ready = READY_STATUSES.has(result.status);

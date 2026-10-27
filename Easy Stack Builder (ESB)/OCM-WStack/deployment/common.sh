@@ -193,7 +193,7 @@ cancel() {
 
 load_libraries() {
     local name
-    for name in cluster network services runtime checks; do
+    for name in cluster kyverno network services runtime checks; do
         # shellcheck source=/dev/null
         source "$DEPLOYMENT/$name.sh"
     done

@@ -1,6 +1,28 @@
-# OCM W-Stack deployer 12.5.13
+# OCM W-Stack deployer 12.5.14
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
+
+## Kyverno bootstrap recovery
+
+Before installing Kyverno, the deployer renders the pinned wrapper chart and
+creates missing CRDs, service accounts and RBAC objects with Helm ownership.
+Existing objects are preserved. CRDs must be established before Helm proceeds.
+
+For a pending Kyverno bootstrap operation, recovery waits until the configured
+operation timeout plus 30 seconds has elapsed. It requires the current deployment
+lease, the expected wrapper and chart version, and no deployed or superseded
+Kyverno revision. A successful prior revision stops automatic bootstrap recovery.
+
+The deployer backs up the pending Secret, creates missing prerequisites from its
+stored manifest, and waits for all four Kyverno controllers to become ready.
+A resourceVersion-guarded update then marks the interrupted revision failed,
+retaining history, before the normal Helm upgrade retries. Pending operations for
+other releases remain protected. No Helm record or CRD is deleted.
+
+The node saves backups under `ocm-deployer-backups` in the ORCE user directory
+(normally `/data`). Standalone Bash uses `ESB_RECOVERY_BACKUP_DIR` or a private
+directory under `/tmp`. Progress identifies the backup path, resources created
+and remaining pending-operation wait. Failed recovery preserves the pending state.
 
 ## API readiness and retries
 

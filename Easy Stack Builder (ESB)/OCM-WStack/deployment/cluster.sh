@@ -338,7 +338,10 @@ release_status() {
     status=$(jq -er '.info.status' "$WORKDIR/helm-state.json")
     case "$status" in
         deployed|failed|absent) printf '%s\n' "$status" ;;
-        pending-*|uninstalling) fail HELM_PENDING "Helm release $namespace/$release is $status." ;;
+        pending-*|uninstalling)
+            if [[ $namespace == security && $release == kyverno ]]; then
+                kyverno_recover_pending "$status"
+            else fail HELM_PENDING "Helm release $namespace/$release is $status."; fi ;;
         *) fail HELM_STATE_UNAVAILABLE 'Helm returned an unsupported release state.' ;;
     esac
 }
@@ -361,6 +364,9 @@ helm_upgrade() {
             return 1
         fi
         state=$(cat "$WORKDIR/release-status")
+        if [[ $namespace == security && $release == kyverno ]]; then
+            kyverno_prepare || return 1
+        fi
         if ! verify_lease; then
             transport_failure "$LAST_ERROR" && continue
             return 1
