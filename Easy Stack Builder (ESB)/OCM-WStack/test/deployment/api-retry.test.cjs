@@ -43,7 +43,7 @@ if transport_failure "$WORKDIR/failure" "$TEST_STATUS"; then printf retry; else 
 
 // Exercise the actual timeout runner and credential/context wrapper. The fake
 // kubectl has no network access and checks every invocation's supplied identity.
-function scenario(t, readyResults, helmResults = [0], releaseState = 'deployed') {
+function scenario(t, readyResults, helmResults = [0], releaseState = 'deployed', advanceClock = false) {
   const dir = workspace(t, {
     'selection.json': { server: 'https://user:private-url-password@api.example:15778/path?private-query' },
     'kubeconfig': 'fixture-only',
@@ -86,7 +86,7 @@ esac
 export ESB_DEPLOY="$ROOT/deploy.sh" ESB_KUBECONFIG="$WORKDIR/kubeconfig"
 export ESB_KUBE_CONTEXT=fixture-context ESB_REAL_KUBECTL="$WORKDIR/real-kubectl"
 export PATH="$WORKDIR/bin:$PATH"
-sleep() { printf '%s\\n' "$1" >>"$WORKDIR/delays"; }
+sleep() { printf '%s\\n' "$1" >>"$WORKDIR/delays"; ${advanceClock ? 'SECONDS=$((SECONDS+$1));' : ''} }
 verify_lease() { printf 'lease\\n' >>"$WORKDIR/helm-calls"; }
 helm_upgrade observability observability upgrade --install observability chart -n observability
 `);
@@ -114,18 +114,18 @@ test('readiness timeouts recover before Helm runs, with an explicit uploaded ide
 });
 
 test('a Helm failure remains in the final result when readiness fails during retry', t => {
-  const { dir, r, error } = scenario(t, [{ status: 0, body: 'ok' }, ...Array(5).fill({ status: 124 })], [1]);
+  const { dir, r, error } = scenario(t, [{ status: 0, body: 'ok' }, ...Array(30).fill({ status: 124 })], [1]);
   assert.notEqual(r.status, 0);
   assert.equal(error.code, 'API_UNREADY');
-  assert.match(error.message, /process-timeout.*check 5\/5/);
+  assert.match(error.message, /process-timeout.*check 30\/30/);
   assert.equal(error.diagnostics.history[0].step, 'helm-upgrade');
   assert.equal(error.diagnostics.history[0].reason, 'request-timeout');
-  assert.equal(error.diagnostics.history.length, 6);
+  assert.equal(error.diagnostics.history.length, 20);
   assert.equal(fs.readFileSync(dir + '/helm-count', 'utf8'), '1');
-  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '6');
+  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '31');
 });
 
-for (const message of ['Forbidden', 'Unauthorized', 'x509: certificate expired', 'Unknown local error']) {
+for (const message of ['x509: certificate expired', 'Unknown local error']) {
   test(`readiness stops immediately for ${message}`, t => {
     const { dir, r, error } = scenario(t, [{ status: 1, message }]);
     assert.notEqual(r.status, 0);
@@ -136,14 +136,14 @@ for (const message of ['Forbidden', 'Unauthorized', 'x509: certificate expired',
   });
 }
 
-test('Helm writes are bounded at three and each retry checks readiness, release and lease', t => {
-  const { dir, r, error } = scenario(t, [], [1, 1, 1]);
+test('Helm writes are bounded at five and each retry checks readiness, release and lease', t => {
+  const { dir, r, error } = scenario(t, [], [1, 1, 1, 1, 1]);
   assert.notEqual(r.status, 0);
   assert.equal(error.code, 'API_TRANSPORT');
-  assert.equal(error.diagnostics.history.length, 3);
-  assert.equal(fs.readFileSync(dir + '/helm-count', 'utf8'), '3');
-  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '3');
-  assert.equal(fs.readFileSync(dir + '/delays', 'utf8'), '5\n15\n');
+  assert.equal(error.diagnostics.history.length, 5);
+  assert.equal(fs.readFileSync(dir + '/helm-count', 'utf8'), '5');
+  assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '5');
+  assert.equal(fs.readFileSync(dir + '/delays', 'utf8'), '5\n15\n30\n30\n');
   const calls = fs.readFileSync(dir + '/helm-calls', 'utf8').trim().split('\n');
   for (let i = 0; i < calls.length; i++) if (calls[i].startsWith('upgrade')) {
     assert.equal(calls[i - 1], 'lease'); assert.match(calls[i - 2], /^status/);
@@ -202,3 +202,32 @@ if transport_failure "$LAST_ERROR"; then exit 98; fi
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'process-terminated');
 });
+
+for (const message of ['Forbidden', 'Unauthorized']) {
+  test(`readiness recovers from temporary ${message} with the uploaded identity`, t => {
+    const { dir, r, events } = scenario(t, [
+      { status: 1, message }, { status: 1, message: 'connection reset by peer' },
+      { status: 0, body: 'ok' },
+    ]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.readFileSync(dir + '/ready-count', 'utf8'), '3');
+    assert.equal(fs.readFileSync(dir + '/helm-count', 'utf8'), '1');
+    const retries = events.filter(e => e.type === 'retry');
+    assert.equal(retries.length, 2);
+    assert.equal(retries[0].attempts, 30);
+    assert.equal(retries[0].remainingSeconds, 300);
+    assert.equal(events.find(e => e.type === 'command-failure').diagnostic.retryable, true);
+  });
+  test(`persistent ${message} exhausts the recovery window without a Helm write`, t => {
+    const { dir, r, error, events } = scenario(t, Array(30).fill({status: 1, message}), [0], 'deployed', true);
+    assert.notEqual(r.status, 0);
+    assert.equal(error.code, 'API_UNREADY');
+    assert.match(error.message, /recovery window exhausted after 300s/);
+    assert.equal(fs.existsSync(dir + '/helm-count'), false);
+    const delays = fs.readFileSync(dir + '/delays', 'utf8').trim().split('\n').map(Number);
+    const paused = delays.reduce((a,b) => a+b, 0);
+    assert.ok(paused > 270 && paused <= 300); // Probe execution also consumes the budget.
+    assert.ok(delays.every(x => x <= 15));
+    assert.ok(events.filter(e => e.type === 'retry').every(e => e.remainingSeconds > 0));
+  });
+}

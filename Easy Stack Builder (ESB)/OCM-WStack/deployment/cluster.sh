@@ -175,7 +175,7 @@ transport_failure() {
 # A history entry contains only operation metadata and a classified reason.
 # Keep the Helm failure even when a later readiness check also fails.
 record_api_failure() {
-    local step=$1 namespace=$2 release=$3 attempt=$4 attempts=$5 reason=$6 retryable=false
+    local step=$1 namespace=$2 release=$3 attempt=$4 attempts=$5 reason=$6 retryable=${7:-false}
     retryable_api_reason "$reason" && retryable=true
     [[ -f $WORKDIR/api-failures.json ]] || printf '[]\n' >"$WORKDIR/api-failures.json"
     local server=''
@@ -191,7 +191,9 @@ record_api_failure() {
         '{step:$step,namespace:$namespace,release:$release,apiServer:$apiServer,reason:$reason,
           exitCode:$exitCode,attempt:$attempt,attempts:$attempts,retryable:$retryable,at:$at}
          + (if $step=="api-readiness" then {path:"/readyz"} else {} end)' >"$WORKDIR/api-diagnostic.json"
-    jq --slurpfile entry "$WORKDIR/api-diagnostic.json" '. + $entry | .[-20:]' \
+    jq --slurpfile entry "$WORKDIR/api-diagnostic.json" '(. + $entry) as $history | if ($history|length)>20 then
+        (($history | map(select(.step=="helm-upgrade")) | .[0]) // $history[0]) as $keep |
+        [$keep] + ($history[-19:] | map(select(. != $keep))) else $history end' \
         "$WORKDIR/api-failures.json" >"$WORKDIR/api-failures-next.json"
     mv "$WORKDIR/api-failures-next.json" "$WORKDIR/api-failures.json"
     emit "$(jq -c '{type:"command-failure",phase:.release,diagnostic:.}' "$WORKDIR/api-diagnostic.json")"
@@ -205,25 +207,41 @@ fail_api_command() {
     return 1
 }
 
+# Readiness is read-only. A denied probe may recover after a control-plane
+# interruption; retry it without changing credentials or treating it as ready.
+retryable_readiness_reason() {
+    case "$1" in authentication|authorization) return 0 ;; esac
+    retryable_api_reason "$1"
+}
+
 wait_api_ready() {
-    local namespace=$1 release=$2 attempt reason delay
-    for attempt in 1 2 3 4 5; do
+    local namespace=$1 release=$2 attempt reason delay retryable remaining
+    local started=$SECONDS budget=300 attempts=30
+    for ((attempt=1; attempt<=attempts; attempt++)); do
         if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
-            # kubectl returns success for HTTP 2xx; readiness is an HTTP contract.
             return 0
         else
             LAST_STATUS=$?
         fi
         reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
-        record_api_failure api-readiness "$namespace" "$release" "$attempt" 5 "$reason"
-        if ! retryable_api_reason "$reason" || ((attempt == 5)); then
-            fail_api_command API_UNREADY "Kubernetes API readiness failed for $namespace/$release: $reason (exit $LAST_STATUS, check $attempt/5)."
+        retryable=false
+        retryable_readiness_reason "$reason" && retryable=true
+        record_api_failure api-readiness "$namespace" "$release" "$attempt" "$attempts" "$reason" "$retryable"
+        remaining=$((budget - (SECONDS - started)))
+        if [[ $retryable != true ]] || ((attempt == attempts || remaining <= 0)); then
+            fail_api_command API_UNREADY "Kubernetes API readiness failed for $namespace/$release: $reason (exit $LAST_STATUS, check $attempt/$attempts, elapsed $((SECONDS-started))s)."
             return 1
         fi
-        delay=$((attempt < 4 ? 2**attempt : 8))
+        delay=$((attempt < 4 ? 2**attempt : 15))
+        ((delay < remaining)) || delay=$remaining
         emit "$(jq -cn --arg phase "$release" --arg reason "$reason" --argjson attempt "$((attempt+1))" \
-            --argjson delay "$delay" '{type:"retry",phase:$phase,step:"api-readiness",reason:$reason,attempt:$attempt,attempts:5,delaySeconds:$delay}')"
+            --argjson attempts "$attempts" --argjson delay "$delay" --argjson remaining "$remaining" \
+            '{type:"retry",phase:$phase,step:"api-readiness",reason:$reason,attempt:$attempt,attempts:$attempts,delaySeconds:$delay,remainingSeconds:$remaining}')"
         sleep "$delay"
+        if ((SECONDS-started >= budget)); then
+            fail_api_command API_UNREADY "Kubernetes API readiness failed for $namespace/$release: $reason (recovery window exhausted after $((SECONDS-started))s)."
+            return 1
+        fi
     done
 }
 
@@ -330,12 +348,12 @@ helm_upgrade() {
     shift 2
     [[ ${1:-} == upgrade && " $* " == *' --install '* ]] ||
         { fail HELM_COMMAND 'Expected helm upgrade --install.'; return 1; }
-    local attempt state reason
+    local attempt state reason attempts=5
     printf '[]\n' >"$WORKDIR/api-failures.json"
-    for attempt in 1 2 3; do
+    for ((attempt=1; attempt<=attempts; attempt++)); do
         if ((attempt > 1)); then
-            emit "$(jq -cn --arg phase "$release" --argjson attempt "$attempt" '{type:"retry",phase:$phase,attempt:$attempt,attempts:3}')"
-            sleep "$((attempt == 2 ? 5 : 15))"
+            emit "$(jq -cn --arg phase "$release" --argjson attempt "$attempt" --argjson attempts "$attempts" '{type:"retry",phase:$phase,attempt:$attempt,attempts:$attempts}')"
+            sleep "$((attempt == 2 ? 5 : (attempt == 3 ? 15 : 30)))"
         fi
         wait_api_ready "$namespace" "$release" || return 1
         if ! release_status "$namespace" "$release" >"$WORKDIR/release-status"; then
@@ -359,16 +377,16 @@ helm_upgrade() {
             return 0
         fi
         reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
-        record_api_failure helm-upgrade "$namespace" "$release" "$attempt" 3 "$reason"
+        record_api_failure helm-upgrade "$namespace" "$release" "$attempt" "$attempts" "$reason"
         if ! retryable_api_reason "$reason"; then
             fail_api_command COMMAND_FAILED "Helm upgrade failed for $namespace/$release: $reason (exit $LAST_STATUS)."
             return 1
         fi
     done
     if [[ -s $WORKDIR/api-diagnostic.json ]]; then
-        fail_api_command API_TRANSPORT "Kubernetes operation failed for $namespace/$release after three attempts: $(jq -r '.reason' "$WORKDIR/api-diagnostic.json")."
+        fail_api_command API_TRANSPORT "Kubernetes operation failed for $namespace/$release after $attempts attempts: $(jq -r '.reason' "$WORKDIR/api-diagnostic.json")."
     else
-        fail API_TRANSPORT 'Kubernetes transport failed after three Helm attempts; release records are retained.'
+        fail API_TRANSPORT "Kubernetes transport failed after $attempts Helm attempts; release records are retained."
     fi
 }
 

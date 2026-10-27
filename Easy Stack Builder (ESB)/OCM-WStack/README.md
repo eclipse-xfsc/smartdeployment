@@ -1,27 +1,28 @@
-# OCM W-Stack deployer 12.5.12
+# OCM W-Stack deployer 12.5.13
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
 ## API readiness and retries
 
 The deployer uses the uploaded kubeconfig for every Kubernetes and Helm command.
-Before a Helm install or upgrade it checks `/readyz`. Temporary DNS, connection,
-API timeout, throttling and service-unavailable errors receive up to five checks,
-with 2, 4, 8 and 8 second pauses. Each check has a 10 second request timeout and
-an outer 12 second process timeout (with a 3 second termination grace).
-GNU and BusyBox deadline exits are recognized; early signal termination stops
-the operation.
-Authentication, authorization, certificate, configuration and unknown errors
-stop with their category and exit code. A successful HTTP request is accepted
-without requiring one particular response body.
+Before a Helm install or upgrade it checks `/readyz`. DNS, connection,
+API timeout, throttling, service-unavailable and readiness authentication or
+authorization failures are retried for up to five minutes, capped at 30 probes.
+Pauses increase from 2 to 4 to 8 seconds, then stay at 15 seconds. Progress events
+report the next attempt, failure category and remaining recovery time.
+Each probe has a 10 second request timeout and an outer 12 second process timeout
+with a 3 second termination grace; an in-flight probe may finish after the window.
+Certificate, configuration, local command and unclassified errors stop immediately.
+A denied or failed probe must recover to a successful HTTP response before Helm
+can proceed. The uploaded credentials and context remain bound to every call.
 
-Helm operations retain their three-attempt limit and 5/15 second retry delays.
-Each write is preceded by readiness, release-state and lease checks. Pending
-Helm operations stop the deployment and retain their release records.
+Helm transport failures receive up to five attempts, with 5, 15, 30 and 30 second
+pauses. Each write is preceded by readiness, release-state and lease checks.
+Pending Helm operations stop the deployment and retain their release records.
 
 Failure results include `diagnostics.history`: the step, namespace, release,
-API server, reason, command exit code and attempt count. A later readiness
-failure retains the preceding Helm failure. Raw response bodies and credentials
+API server, reason, command exit code and attempt count. The bounded history retains the first Helm failure when later readiness
+checks repeatedly fail. Raw response bodies and credentials
 are excluded. `diagnose-api` returns the reason and exit code for each failed
 sample. Every node output retains the configured access URLs and discovered
 DNS targets.
