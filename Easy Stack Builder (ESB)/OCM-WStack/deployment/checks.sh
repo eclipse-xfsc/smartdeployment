@@ -1,6 +1,67 @@
 #!/usr/bin/env bash
 # Readiness, registry access and explicit credential lifecycle checks.
 
+# A server-side apply can install part of a manifest before a transport failure.
+# Reapply the same local manifest after readiness and lease checks; never replay
+# arbitrary commands or alter cluster-admin/system RBAC to make the write pass.
+argo_apply() {
+    local manifest=$1 started=$SECONDS attempt reason remaining seconds delay retryable
+    local budget=$TIMEOUT_SECONDS attempts=5
+    [[ -f $WORKDIR/api-failures.json ]] || printf '[]\n' >"$WORKDIR/api-failures.json"
+    for ((attempt=1; attempt<=attempts; attempt++)); do
+        remaining=$((budget-(SECONDS-started)))
+        ((remaining>0)) || break
+        seconds=$((remaining<300 ? remaining : 300))
+        wait_api_ready argocd argocd "$seconds" || return 1
+        verify_lease || return 1
+        remaining=$((budget-(SECONDS-started)))
+        ((remaining>0)) || break
+        seconds=$((remaining<120 ? remaining : 120))
+        emit "$(jq -cn --argjson attempt "$attempt" --argjson attempts "$attempts" \
+            --arg manifest "${manifest##*/}" '{type:"argo-install",phase:"argo-install",manifest:$manifest,attempt:$attempt,attempts:$attempts}')"
+        if run_capture "$WORKDIR/argo-apply-output" "$seconds" kubectl apply -n argocd \
+            --server-side --force-conflicts -f "$manifest" --request-timeout=20s; then
+            cat "$WORKDIR/argo-apply-output"
+            return 0
+        fi
+        reason=$(api_failure_reason "$LAST_ERROR" "$LAST_STATUS")
+        retryable=false
+        retryable_api_reason "$reason" && retryable=true
+        if [[ $reason == authorization ]] && grep -Eq \
+            'clusterrole\.rbac\.authorization\.k8s\.io "(cluster-admin|system:(basic-user|discovery|public-info-viewer|service-account-issuer-discovery))" not found' "$LAST_ERROR"; then
+            reason=default-rbac-unavailable
+            retryable=true
+        fi
+        record_api_failure argo-install argocd argocd "$attempt" "$attempts" "$reason" "$retryable"
+        if [[ $retryable != true ]]; then
+            fail_api_command ARGO_INSTALL "Argo CD manifest application failed: $reason. See output 3."
+            return 1
+        fi
+        remaining=$((budget-(SECONDS-started)))
+        ((attempt<attempts && remaining>0)) || break
+        delay=$((attempt*5))
+        ((delay<=remaining)) || delay=$remaining
+        emit "$(jq -cn --arg reason "$reason" --argjson delaySeconds "$delay" \
+            --argjson remainingSeconds "$remaining" '{type:"argo-install-retry",phase:"argo-install",
+                reason:$reason,delaySeconds:$delaySeconds,remainingSeconds:$remainingSeconds}')"
+        sleep "$delay"
+    done
+    fail_api_command ARGO_INSTALL "Argo CD manifest application did not recover within its retry budget. See output 3."
+}
+
+argo_install() {
+    phase argo-install
+    [[ ${ESB_ARGO_MANIFEST:-} == "$WORKDIR/argo-install.yaml" && -s $ESB_ARGO_MANIFEST ]] ||
+        { fail ARGO_MANIFEST 'The preflight Argo CD manifest is unavailable.'; return 1; }
+    local expected actual
+    expected=$(jq -er '.argoManifestSha256' "$WORKDIR/chart-report.json") || return 1
+    actual=$(sha256sum "$ESB_ARGO_MANIFEST" | cut -d ' ' -f 1)
+    [[ $expected == "$actual" ]] || { fail ARGO_MANIFEST 'The preflight Argo CD manifest changed.'; return 1; }
+    printf '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"argocd"}}\n' >"$WORKDIR/argo-namespace.json"
+    argo_apply "$WORKDIR/argo-namespace.json" || return 1
+    argo_apply "$ESB_ARGO_MANIFEST"
+}
+
 registry_request() {
     local method=$1 url=$2 token_request=${3:-false}
     local args=(--disable --silent --show-error --max-time 30 --max-filesize 4194304

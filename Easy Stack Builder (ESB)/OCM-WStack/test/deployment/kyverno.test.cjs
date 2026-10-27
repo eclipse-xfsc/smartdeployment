@@ -72,6 +72,9 @@ run_capture() {
  python3 "$WORKDIR/fake.py" "$@" >"$output" 2>"$LAST_ERROR" || LAST_STATUS=$?
  return "$LAST_STATUS"
 }
+${options.backupFailure ? `mktemp() { if [[ $* == *kyverno-before-recovery* ]]; then return 1; else command mktemp "$@"; fi; }` : ''}
+${options.copyFailure ? `cp() { if [[ $2 == *kyverno-before-recovery* ]]; then return 1; else command cp "$@"; fi; }` : ''}
+${options.portableTemp ? `mktemp() { if [[ $* == *kyverno-before-recovery* && $* != *XXXXXX ]]; then return 1; else command mktemp "$@"; fi; }` : ''}
 ${options.prepare ? 'kyverno_prepare' : 'release_status security kyverno'}
 `);
  return {dir,result,state:JSON.parse(fs.readFileSync(dir+'/state.json')),events:fs.readFileSync(dir+'/events.jsonl','utf8')};
@@ -108,4 +111,14 @@ test('Kyverno prerequisite creation tolerates a null initial conditions field',t
  const {result,state,events}=scenario(t,{prepare:true,delayedConditions:true});
  assert.equal(result.status,0,result.stderr);assert.match(events,/"status":"waiting"/);
  assert.ok(state.conditionReads>=3);assert.ok(!state.calls.some(c=>c.includes('wait')));
+});
+
+for(const name of ['backupFailure','copyFailure']) test(`Kyverno recovery stops before changes when ${name}`,t=>{
+ const {dir,result,state}=scenario(t,{[name]:true});
+ assert.notEqual(result.status,0);assert.equal(JSON.parse(fs.readFileSync(dir+'/error.json')).code,'KYVERNO_BACKUP');
+ assert.ok(!state.calls.some(c=>c.includes('patch')||(c.includes('create')&&!c.includes('--dry-run=client'))));
+ assert.equal(state.secret.metadata.labels.status,'pending-upgrade');
+});
+test('Kyverno backup uses a trailing-X template supported by target mktemp',t=>{
+ const {result,state}=scenario(t,{portableTemp:true});assert.equal(result.status,0,result.stderr);assert.equal(state.secret.metadata.labels.status,'failed');
 });

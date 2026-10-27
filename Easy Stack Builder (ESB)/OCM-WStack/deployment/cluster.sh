@@ -291,7 +291,7 @@ wait_resource_condition() {
 
 wait_api_ready() {
     local namespace=$1 release=$2 attempt reason delay retryable remaining
-    local started=$SECONDS budget=300 attempts=30
+    local started=$SECONDS budget=${3:-300} attempts=30
     for ((attempt=1; attempt<=attempts; attempt++)); do
         if run_capture "$WORKDIR/api-ready" 12 kubectl get --raw=/readyz --request-timeout=10s; then
             return 0

@@ -142,10 +142,18 @@ kyverno_recover_pending() {
         fi
     done
     directory=${ESB_RECOVERY_BACKUP_DIR:-${TMPDIR:-/tmp}/esb-ocmwstack-recovery}
-    mkdir -p "$directory"
-    chmod 700 "$directory"
-    backup=$(mktemp "$directory/kyverno-before-recovery.XXXXXX.json")
-    cp "$WORKDIR/kyverno-pending-secret.json" "$backup"
+    if ! mkdir -p "$directory" || ! chmod 700 "$directory"; then
+        fail KYVERNO_BACKUP 'Cannot prepare the Kyverno backup directory; release state is unchanged.'
+        return 1
+    fi
+    backup=$(mktemp "$directory/kyverno-before-recovery.XXXXXX") || {
+        fail KYVERNO_BACKUP 'Cannot create the Kyverno backup file; release state is unchanged.'
+        return 1
+    }
+    if ! cp "$WORKDIR/kyverno-pending-secret.json" "$backup"; then
+        fail KYVERNO_BACKUP 'Cannot save the Kyverno backup; release state is unchanged.'
+        return 1
+    fi
     emit "$(jq -cn --arg backup "$backup" '{type:"helm-recovery",phase:"kyverno",status:"restoring-prerequisites",backup:$backup}')"
     kyverno_plan "$WORKDIR/kyverno-stored.yaml" || return 1
     kyverno_complete_prerequisites || return 1

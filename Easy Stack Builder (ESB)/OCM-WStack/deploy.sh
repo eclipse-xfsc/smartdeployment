@@ -53,6 +53,7 @@ internal_action() {
         { printf 'Deployment operation context is unavailable.\n' >&2; return 1; }
     case "$action" in
         helm-upgrade) helm_upgrade "$@" ;;
+        argo-install) argo_install ;;
         native-compatibility) cassandra_compatibility ;;
         prerequisites) native_prerequisites ;;
         startup) native_startup ;;

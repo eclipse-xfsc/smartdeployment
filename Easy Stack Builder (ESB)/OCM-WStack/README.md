@@ -1,4 +1,4 @@
-# OCM W-Stack deployer 12.5.16
+# OCM W-Stack deployer 12.5.17
 
 The ESB node deploys the XFSC native services and the OCM W-Stack UI. ORCE routes UI requests to native credential, issuance, verification, status and relationship services. MongoDB stores UI accounts, roles, sessions, preferences and operation metadata.
 
@@ -31,6 +31,27 @@ but cannot emit a final message. `msg.complete=false` indicates a log write or a
 All existing kubeconfig binding, deployment recovery and readiness checks remain
 in place. This release adds execution visibility; successful completion still
 requires the stack checks to pass.
+
+## Argo CD installation recovery
+
+The namespace and pinned Argo CD manifest are applied through the deployer recovery
+loop. Before each apply, API readiness and the current deployment lease must pass.
+The local Argo manifest checksum must match its preflight report. A partial apply
+is retried using the same server-side apply operation and uploaded kubeconfig.
+
+Each manifest has at most five apply attempts within the configured deployment
+time budget. Each apply has an outer limit of at most 120 seconds and individual
+API requests use a 20-second timeout. Retry delays are 5, 10, 15 and 20 seconds.
+Transient transport failures and the specific authorization response reporting
+missing default ClusterRoles are eligible for retry. Ordinary Forbidden responses,
+certificate failures and invalid manifests stop with ARGO_INSTALL diagnostics.
+No cluster-admin or system RBAC is created or changed by recovery. Progress and
+the raw log identify attempts and failures. A persistent control-plane failure
+still prevents completion.
+
+Kyverno recovery uses a trailing-X temporary-file template and explicitly checks
+backup creation and copying. If a persistent backup cannot be saved, recovery
+stops before creating prerequisites or changing the pending release record.
 
 ## CRD and policy readiness
 
