@@ -1,7 +1,0 @@
-signer:
-  image:  
-    tag: 2.3.8
-  podAnnotations: 
-    inject.xfsc.io/enabled: "true"
-  log: 
-    level: info

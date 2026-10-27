@@ -86,6 +86,7 @@ read_options() {
     export WORKDIR CONFIG="$WORKDIR/config.json" CREDENTIALS="$WORKDIR/credentials.json"
     trap cleanup EXIT
     trap cancel INT TERM
+    prepare_deployment_assets
     CONFIRM=''
     printf '{}\n' >"$CREDENTIALS"
     local input='' option key file

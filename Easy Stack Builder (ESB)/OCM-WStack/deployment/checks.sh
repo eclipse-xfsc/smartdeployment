@@ -298,7 +298,7 @@ wait_workloads() {
                 fail WORKLOAD_RESPONSE "Invalid workload response for $namespace; see output 3."
                 return 1
             fi
-            jq -L "$DEPLOYMENT" --argjson expected "$expected" 'include "readiness"; workload_report($expected)' \
+            jq -L "$JSON_LIB_DIR" --argjson expected "$expected" 'include "readiness"; workload_report($expected)' \
                 "$directory/objects.json" >"$directory/report.json" || return 1
             if jq -e '.ready' "$directory/report.json" >/dev/null; then
                 emit "$(jq -c --arg namespace "$namespace" '.+{type:"workloads-ready",namespace:$namespace}' "$directory/report.json")"
@@ -340,7 +340,7 @@ workload_diagnostics() {
     [[ -z $selector ]] || args+=(-l "$selector")
     printf '\nWorkload diagnostics: %s\n' "$namespace" >&2
     if run_capture "$directory/pods.json" 10 kubectl "${args[@]}" --request-timeout=8s; then
-        jq -L "$DEPLOYMENT" 'include "readiness"; pod_problems' "$directory/pods.json" >"$directory/problems.json" || printf '[]\n' >"$directory/problems.json"
+        jq -L "$JSON_LIB_DIR" 'include "readiness"; pod_problems' "$directory/pods.json" >"$directory/problems.json" || printf '[]\n' >"$directory/problems.json"
         cat "$directory/problems.json" >&2
     else
         printf 'Pod diagnostics unavailable (exit %s).\n' "$LAST_STATUS" >&2
@@ -444,7 +444,7 @@ inspect_stack() {
     get_optional "$WORKDIR/inspect-policy.json" '' clusterpolicy esb-ocm-envoy-traffic
     kube_json "$WORKDIR/inspect-services.json" -n infrastructure get services \
         -l gateway.envoyproxy.io/owning-gateway-name=envoy-gateway,gateway.envoyproxy.io/owning-gateway-namespace=infrastructure -o json
-    jq -n -L "$DEPLOYMENT" --slurpfile c "$CONFIG" --slurpfile lock "$ROOT/upstream-lock.json" \
+    jq -n -L "$JSON_LIB_DIR" --slurpfile c "$CONFIG" --slurpfile lock "$ROOT/upstream-lock.json" \
         --slurpfile apps "$WORKDIR/inspect-apps.json" --slurpfile pods "$WORKDIR/inspect-pods.json" \
         --slurpfile pvcs "$WORKDIR/inspect-pvcs.json" --slurpfile jobs "$WORKDIR/inspect-jobs.json" \
         --slurpfile gateway "$WORKDIR/inspect-gateway.json" --slurpfile certificate "$WORKDIR/inspect-cert.json" \
@@ -531,8 +531,14 @@ wait_validation() {
 
 storage_diagnostics() {
     kube_json "$WORKDIR/storage-pods.json" -n ocm-wstack get pods -o json || return 1
-    run_capture "$WORKDIR/storage-diagnostics.json" 45 kubectl -n ocm-wstack exec -i deployment/ocm-orce -c orce -- node - \
-        <"$ROOT/runtime/tools/diagnose-storage.cjs" || return 1
+    run_capture "$WORKDIR/storage-diagnostics.json" 45 kubectl -n ocm-wstack exec deployment/ocm-orce -c orce -- node -e '
+        const http=require("node:http");
+        const req=http.get("http://127.0.0.1:1880/_ocm/storage-diagnostics",res=>{
+            if(res.statusCode!==200){res.resume();process.exitCode=1;return;}
+            res.pipe(process.stdout);
+        });
+        req.setTimeout(40000,()=>req.destroy());
+        req.on("error",()=>{process.stderr.write("STORAGE_DIAGNOSTIC_FAILED\n");process.exitCode=1;});' || return 1
     jq -e 'type=="object"' "$WORKDIR/storage-diagnostics.json" >/dev/null || return 1
     jq --slurpfile pods "$WORKDIR/storage-pods.json" '.+{images:[$pods[0].items[] |
         select((.metadata.name|startswith("storage-service-")) and .metadata.deletionTimestamp==null) |

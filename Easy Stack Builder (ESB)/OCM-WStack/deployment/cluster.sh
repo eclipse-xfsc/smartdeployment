@@ -586,12 +586,12 @@ ensure_marker() {
         "$WORKDIR/namespaces.json" >/dev/null || { fail NOT_FRESH 'Upstream namespaces already exist without this installation marker.'; return 1; }
     local digest
     digest=$(jq -Sc 'del(.dnsSecret,.timeoutSeconds)' "$CONFIG" | sha256sum | cut -d ' ' -f 1)
-    jq -n --slurpfile c "$CONFIG" --slurpfile package "$ROOT/package.json" --slurpfile lock "$ROOT/upstream-lock.json" \
+    jq -n --slurpfile c "$CONFIG" --arg packageVersion "12.6.2" --slurpfile lock "$ROOT/upstream-lock.json" \
         --arg name "$MARKER" --arg digest "$digest" --arg now "$(timestamp)" '
         $c[0] as $c | {apiVersion:"v1",kind:"ConfigMap",
         metadata:{name:$name,namespace:"kube-system",labels:{"app.kubernetes.io/managed-by":"esb-ocmwstack"}},
         data:{instance:$c.instanceName,fingerprint:$digest,clusterUid:$c.clusterUid,upstreamCommit:$lock[0].commit,
-              storageClass:$c.actualStorageClass,packageVersion:$package[0].version,state:"initializing",createdAt:$now,
+              storageClass:$c.actualStorageClass,packageVersion:$packageVersion,state:"initializing",createdAt:$now,
               tenantRelease:$c.tenantRelease,tenantId:$c.tenantId,tenantHost:$c.tenantHost,dnsOwnerId:$c.dnsOwnerId}}' >"$WORKDIR/marker-new.json"
     create_retained "$WORKDIR/marker-new.json"
     get_optional "$WORKDIR/marker.json" kube-system configmap "$MARKER"
@@ -641,8 +641,8 @@ checkout_source() {
         actual=$(sha256sum "$SOURCE/$name" | cut -d ' ' -f 1)
         [[ $actual == "$expected" ]] || { fail UPSTREAM_CONTRACT "Upstream file changed: $name"; return 1; }
     done < <(jq -r '.sha256 | to_entries[] | [.key,.value] | @tsv' "$ROOT/upstream-lock.json")
-    run 30 git -C "$SOURCE" apply --check "$DEPLOYMENT/upstream.patch"
-    run 30 git -C "$SOURCE" apply "$DEPLOYMENT/upstream.patch"
+    run 30 git -C "$SOURCE" apply --check "$JSON_LIB_DIR/upstream.patch"
+    run 30 git -C "$SOURCE" apply "$JSON_LIB_DIR/upstream.patch"
 }
 
 # Helm parses YAML for both preflight and installation. The reader chart has no
@@ -897,7 +897,7 @@ prepare_charts() {
         mv "$WORKDIR/chart-results-next.json" "$WORKDIR/chart-results.json"
     done
     local provider_errors
-    provider_errors=$(jq -c -L "$DEPLOYMENT" 'include "filters"; provider_contract_errors' "$WORKDIR/provider-documents.json")
+    provider_errors=$(jq -c -L "$JSON_LIB_DIR" 'include "filters"; provider_contract_errors' "$WORKDIR/provider-documents.json")
     [[ $provider_errors == '[]' ]] || { fail CHART_PROVIDERS "Unresolved chart providers: $provider_errors"; return 1; }
     policy_image_preflight
     export ESB_ARGO_MANIFEST="$WORKDIR/argo-install.yaml"
@@ -943,11 +943,11 @@ validate_chart_manifests() {
     esac
     if [[ $chart == 'OCM W-Stack/Credential Verification Service Chart' || $chart == 'OCM W-Stack/Policy Chart' ]]; then
         local failed_checks
-        failed_checks=$(jq -r -L "$DEPLOYMENT" --arg chart "$chart" 'include "filters"; (if $chart=="OCM W-Stack/Policy Chart" then policy_chart_checks else verification_chart_checks end) |
+        failed_checks=$(jq -r -L "$JSON_LIB_DIR" --arg chart "$chart" 'include "filters"; (if $chart=="OCM W-Stack/Policy Chart" then policy_chart_checks else verification_chart_checks end) |
             to_entries | map(select(.value!=true)|.key) | join(", ")' "$WORKDIR/manifests.json")
         [[ -z $failed_checks ]] || { fail CHART_CONTRACT "$chart checks failed: $failed_checks."; return 1; }
     else
-        jq -L "$DEPLOYMENT" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
+        jq -L "$JSON_LIB_DIR" -e --arg chart "$chart" 'include "filters"; validate_chart($chart)' \
             "$WORKDIR/manifests.json" >/dev/null || { fail CHART_CONTRACT "Rendered contract changed for $chart."; return 1; }
     fi
     if [[ $release == observability ]]; then
@@ -956,7 +956,7 @@ validate_chart_manifests() {
                         (.stringData // {} | to_entries[])) | select(.key|test("\\.ya?ml$")) |
             {key:($doc.metadata.name+"/"+.key),value:.value}] | from_entries' "$WORKDIR/manifests.json" >"$WORKDIR/datasource-yaml.json"
         read_yaml "$WORKDIR/datasource-yaml.json" "$WORKDIR/datasources.json"
-        jq -L "$DEPLOYMENT" -e 'include "filters"; validate_datasources' "$WORKDIR/datasources.json" >/dev/null ||
+        jq -L "$JSON_LIB_DIR" -e 'include "filters"; validate_datasources' "$WORKDIR/datasources.json" >/dev/null ||
             fail GRAFANA_DATASOURCES 'Grafana datasource names, UIDs or defaults are inconsistent.'
     fi
 }

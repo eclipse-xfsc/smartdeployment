@@ -48,7 +48,7 @@ update_config() {
 json_program() {
     local expression=$1
     shift
-    jq -L "$DEPLOYMENT" "include \"filters\"; $expression" "$@"
+    jq -L "$JSON_LIB_DIR" "include \"filters\"; $expression" "$@"
 }
 
 safe_error() {
@@ -201,7 +201,7 @@ apply_json() {
 check_tools() {
     local command missing=0
     local report='[]'
-    for command in bash node jq curl git helm kubectl openssl base64 sha256sum timeout setsid nc busybox; do
+    for command in bash node npm jq curl git helm kubectl openssl base64 sha256sum timeout setsid nc busybox; do
         local available=false
         if command -v "$command" >/dev/null 2>&1; then
             available=true
@@ -261,7 +261,21 @@ cancel() {
     exit 130
 }
 
+prepare_deployment_assets() {
+    export JSON_LIB_DIR="$WORKDIR/json-lib"
+    mkdir -p "$JSON_LIB_DIR"
+    local name source temporary
+    for name in filters.jq readiness.jq upstream.patch; do
+        [[ -s $JSON_LIB_DIR/$name ]] && continue
+        case $name in filters.jq) source=filters ;; readiness.jq) source=readiness ;; *) source=upstream-patch ;; esac
+        temporary=$(mktemp "$JSON_LIB_DIR/.asset.XXXXXX")
+        bash "$DEPLOYMENT/assets.sh" "$source" >"$temporary"
+        mv -f "$temporary" "$JSON_LIB_DIR/$name"
+    done
+}
+
 load_libraries() {
+    if [[ -n ${WORKDIR:-} ]]; then prepare_deployment_assets; fi
     local name
     for name in cluster recovery kyverno network services runtime checks; do
         # shellcheck source=/dev/null

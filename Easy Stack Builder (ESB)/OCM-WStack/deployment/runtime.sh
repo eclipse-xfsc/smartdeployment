@@ -69,7 +69,7 @@ runtime_preflight() {
 
 password_hash() {
     local name=$1 output=$2
-    jq -jr --arg name "$name" '.[$name]' "$CREDENTIALS" | node "$ROOT/ocmwstack.js" --hash-password >"$output"
+    jq -jr --arg name "$name" '.[$name]' "$CREDENTIALS" | bash "$DEPLOYMENT/hash-password.sh" >"$output"
 }
 
 runtime_install() {

@@ -1,3 +1,0 @@
-# Preserve whitespace in patch context and archived command output.
-deployment/upstream.patch -whitespace
-docs/evidence/12.3.18/*.log -whitespace

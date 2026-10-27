@@ -14,6 +14,63 @@ metadata:
 data:
   seed.sh: |
 {{ .Files.Get "files/seed.sh" | indent 4 }}
-binaryData:
-  runtime.tgz: {{ .Files.Get "files/runtime.tgz" | b64enc | quote }}
-  ui.tgz: {{ .Files.Get "files/ui.tgz" | b64enc | quote }}
+  flows.json: |
+{{ .Files.Get "files/flows.json" | indent 4 }}
+  index.html: |
+{{ .Files.Get "files/ui/index.html" | indent 4 }}
+  index.js: |
+{{ .Files.Get "files/ui/index.js" | indent 4 }}
+  index.css: |
+{{ .Files.Get "files/ui/index.css" | indent 4 }}
+  facis-logo.svg: |
+{{ .Files.Get "files/ui/facis-logo.svg" | indent 4 }}
+  settings.js: |
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const data = process.env.OCM_DATA_DIR || '/data';
+    const config = JSON.parse(fs.readFileSync(process.env.OCM_RUNTIME_CONFIG || '/data/config.json', 'utf8'));
+    const secrets = JSON.parse(fs.readFileSync(process.env.OCM_RUNTIME_SECRETS || '/run/ocm-secrets/secrets.json', 'utf8'));
+    const bridge = { app: null, parseApiBody: null, socketMiddleware: null };
+    module.exports = {
+      uiPort: 1880,
+      flowFile: 'flows.json',
+      userDir: data,
+      credentialSecret: secrets.credentialSecret,
+      httpAdminRoot: '/orce/editor',
+      httpNodeRoot: '/',
+      adminAuth: {type: 'credentials', users: [{username: secrets.editorUsername, password: secrets.editorHash, permissions: '*'}]},
+      editorTheme: {projects: {enabled: false}},
+      functionExternalModules: false,
+      externalModules: {autoInstall: false},
+      contextStorage: {default: {module: 'memory'}},
+      functionGlobalContext: {
+        ocmBridge: bridge,
+        ocmPlatform: {
+          crypto: require('node:crypto'), events: require('node:events'),
+          fs, fsPromises: require('node:fs/promises'),
+          http: require('node:http'), https: require('node:https'),
+          dns: require('node:dns'), net: require('node:net'), timers: require('node:timers'),
+          URL, URLSearchParams, AbortController,
+          mongodb: require('mongodb'), nats: require('nats'),
+          bcrypt: require('bcryptjs'), qrcode: require('qrcode'),
+          vueRuntime: path.join(path.dirname(require.resolve('vue/package.json')), 'dist/vue.runtime.esm-browser.prod.js')
+        }
+      },
+      httpNodeMiddleware(req, res, next) {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+        res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+        if (!/^\/orce\/ui-api\/v1(?:\/|$)/.test(req.originalUrl || req.url)) return next();
+        if (!bridge.parseApiBody) return res.status(503).json({error:{code:'COORDINATION_UNAVAILABLE'}});
+        bridge.parseApiBody(req, res, next);
+      },
+      apiMaxLength: '1mb',
+      uibuilder: {
+        uibRoot: path.join(data, 'uibuilder'),
+        socketOptions: {path:'/orce/socket.io', serveClient:true, maxHttpBufferSize:65536,
+          connectionStateRecovery:{maxDisconnectionDuration:0,skipMiddlewares:false},
+          cors:{origin:config.publicOrigin,credentials:true}}
+      },
+      logging: {console:{level:'warn',metrics:false,audit:false}}
+    };

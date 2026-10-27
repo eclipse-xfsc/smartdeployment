@@ -36,7 +36,7 @@ spec:
     metadata:
       labels: {app: ocm-orce}
       annotations:
-        checksum/seed: {{ printf "%s%s%s" (.Files.Get "files/seed.sh") (.Files.Get "files/runtime.tgz") (.Files.Get "files/ui.tgz") | sha256sum }}
+        checksum/seed: {{ printf "%s%s" ((.Files.Glob "files/**").AsConfig) (include (print $.Template.BasePath "/config.yaml") .) | sha256sum }}
         checksum/config: {{ .Values.runtimeConfig | toJson | sha256sum }}
         checksum/secret: {{ .Values.secretChecksum | quote }}
     spec:

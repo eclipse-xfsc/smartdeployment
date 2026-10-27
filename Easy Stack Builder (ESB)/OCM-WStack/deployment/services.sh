@@ -102,14 +102,14 @@ discover_api_egress() {
     kube_json "$WORKDIR/api-service.json" -n default get service kubernetes -o json
     kube_json "$WORKDIR/api-slices.json" -n default get endpointslices.discovery.k8s.io -l kubernetes.io/service-name=kubernetes -o json
     printf 'null\n' >"$WORKDIR/api-endpoints.json"
-    jq -L "$DEPLOYMENT" --slurpfile slices "$WORKDIR/api-slices.json" 'include "filters"; api_backends($slices[0];null)' \
+    jq -L "$JSON_LIB_DIR" --slurpfile slices "$WORKDIR/api-slices.json" 'include "filters"; api_backends($slices[0];null)' \
         "$WORKDIR/api-service.json" >"$WORKDIR/api-backends.json"
     if jq -e 'length==0' "$WORKDIR/api-backends.json" >/dev/null; then
         kube_json "$WORKDIR/api-endpoints.json" -n default get endpoints kubernetes -o json
-        jq -L "$DEPLOYMENT" --slurpfile slices "$WORKDIR/api-slices.json" --slurpfile endpoints "$WORKDIR/api-endpoints.json" \
+        jq -L "$JSON_LIB_DIR" --slurpfile slices "$WORKDIR/api-slices.json" --slurpfile endpoints "$WORKDIR/api-endpoints.json" \
             'include "filters"; api_backends($slices[0];$endpoints[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-backends.json"
     fi
-    jq -L "$DEPLOYMENT" --slurpfile backends "$WORKDIR/api-backends.json" \
+    jq -L "$JSON_LIB_DIR" --slurpfile backends "$WORKDIR/api-backends.json" \
         'include "filters"; api_egress($backends[0])' "$WORKDIR/api-service.json" >"$WORKDIR/api-egress.json"
 }
 
@@ -117,9 +117,9 @@ install_reconciler() {
     discover_api_egress
     discover_dns "$WORKDIR/guard-dns-egress.json"
     local checksum
-    checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$DEPLOYMENT/filters.jq" | sha256sum | cut -d ' ' -f 1)
-    jq -L "$DEPLOYMENT" --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \
-        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile filters "$DEPLOYMENT/filters.jq" --slurpfile egress "$WORKDIR/api-egress.json" \
+    checksum=$(cat "$DEPLOYMENT/reconcile.sh" "$JSON_LIB_DIR/filters.jq" | sha256sum | cut -d ' ' -f 1)
+    jq -L "$JSON_LIB_DIR" --arg image "$(config_value '.runtimeImage')" --arg checksum "$checksum" \
+        --rawfile script "$DEPLOYMENT/reconcile.sh" --rawfile filters "$JSON_LIB_DIR/filters.jq" --slurpfile egress "$WORKDIR/api-egress.json" \
         --slurpfile dns "$WORKDIR/guard-dns-egress.json" --slurpfile api "$WORKDIR/api-service.json" '
         include "filters";
         .items |= map(if .kind=="ConfigMap" then .data={"reconcile.sh":$script,"filters.jq":$filters}
@@ -153,7 +153,7 @@ guard_status() {
     kube_json "$WORKDIR/guard-deployments.json" -n ocm-wstack get deployments -o json
     kube_json "$WORKDIR/guard-pods.json" -n ocm-wstack get pods -o json
     kube_json "$WORKDIR/guard-replicasets.json" -n ocm-wstack get replicasets -o json
-    jq -L "$DEPLOYMENT" --slurpfile deployments "$WORKDIR/guard-deployments.json" \
+    jq -L "$JSON_LIB_DIR" --slurpfile deployments "$WORKDIR/guard-deployments.json" \
         --slurpfile pods "$WORKDIR/guard-pods.json" --slurpfile replicasets "$WORKDIR/guard-replicasets.json" --argjson now "$(date +%s)" '
         include "filters"; validate_guard_status($deployments[0].items;$pods[0].items;$replicasets[0].items;$now)' \
         "$WORKDIR/guard-response.json" >"$WORKDIR/guard-status.json"
@@ -170,7 +170,7 @@ save_recovery_evidence() {
 }
 
 retrieval_recovery_contract() {
-    jq -L "$DEPLOYMENT" --slurpfile pods "$WORKDIR/retrieval-pods.json" \
+    jq -L "$JSON_LIB_DIR" --slurpfile pods "$WORKDIR/retrieval-pods.json" \
         'include "filters"; retrieval_recovery_contract($pods[0])' "$WORKDIR/retrieval-deployment.json"
 }
 
@@ -183,14 +183,16 @@ repair_retrieval() {
     kube_json "$WORKDIR/cassandra-pods.json" -n infrastructure get pods -l app.kubernetes.io/name=cassandra -o json
     pod=$(jq -er '[.items[] | select(.metadata.deletionTimestamp==null and any(.status.containerStatuses[]?; .name=="cassandra" and .ready))][0].metadata.name // empty' "$WORKDIR/cassandra-pods.json") ||
         { fail RETRIEVAL_RECOVERY_DATABASE 'No ready Cassandra container is available.'; return 1; }
+    bash "$DEPLOYMENT/retrieval-recovery.sh" schema >"$WORKDIR/retrieval-v001.cql"
+    bash "$DEPLOYMENT/retrieval-recovery.sh" schema >"$WORKDIR/retrieval-v001.cql"
     checksum=8968c7a3719d337d84846d35aa370462e9977641cb2a876046ee82ade7bbb864
-    [[ $(sha256sum "$ROOT/scripts/retrieval-v001.cql" | cut -d ' ' -f 1) == "$checksum" ]] ||
+    [[ $(sha256sum "$WORKDIR/retrieval-v001.cql" | cut -d ' ' -f 1) == "$checksum" ]] ||
         { fail RETRIEVAL_MIGRATION_CHECKSUM 'Packaged native migration checksum changed.'; return 1; }
-    jq --arg checksum "$checksum" --rawfile cql "$ROOT/scripts/retrieval-v001.cql" \
+    jq --arg checksum "$checksum" --rawfile cql "$WORKDIR/retrieval-v001.cql" \
         '{username:(.data.username|@base64d),password:(.data.password|@base64d),host:"cassandra.infrastructure.svc.cluster.local",port:9042,cql:$cql,checksum:$checksum,mode:"inspect"}' \
         "$WORKDIR/retrieval-secret.json" >"$WORKDIR/recovery-input.json"
     local program
-    program=$(cat "$ROOT/scripts/retrieval-recovery.py")
+    program=$(bash "$DEPLOYMENT/retrieval-recovery.sh" program)
     if ! run_capture "$WORKDIR/recovery-inspection.json" 180 kubectl -n infrastructure exec -i "$pod" -c cassandra \
         -- python3 -c "$program" <"$WORKDIR/recovery-input.json"; then
         fail RETRIEVAL_RECOVERY 'Native migration inspection failed.'
@@ -285,7 +287,7 @@ native_startup() {
             sleep 1
             continue
         fi
-        jq -L "$DEPLOYMENT" --args 'include "filters"; [.items[]|select(.metadata.name as $name | $ARGS.positional|index($name)!=null)|
+        jq -L "$JSON_LIB_DIR" --args 'include "filters"; [.items[]|select(.metadata.name as $name | $ARGS.positional|index($name)!=null)|
             {name:.metadata.name,ready:ready_workload,available:(.status.availableReplicas // 0)}]' \
             "${targets[@]}" <"$WORKDIR/startup-deployments.json" >"$WORKDIR/startup-status.json"
         if jq -e --argjson count "${#targets[@]}" 'length==$count and all(.[];.ready)' "$WORKDIR/startup-status.json" >/dev/null &&

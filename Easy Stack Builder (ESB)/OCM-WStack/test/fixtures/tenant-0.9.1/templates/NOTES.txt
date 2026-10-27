@@ -1,3 +1,0 @@
-Tenant host: {{ include "xfsc-tenant-gateway.hostname" . }}
-ListenerSet: {{ include "xfsc-tenant-gateway.fullname" . }} -> infrastructure/envoy-gateway
-TLS secret: {{ include "xfsc-tenant-gateway.tlsSecretName" . }}
