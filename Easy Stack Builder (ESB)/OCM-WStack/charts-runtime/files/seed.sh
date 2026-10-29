@@ -10,12 +10,23 @@ if [ -f "$DATA/flows.json" ] && [ ! -f "$DATA/OCM-UI-V3-MANAGED" ]; then
     echo 'The existing flow volume is not managed by this OCM deployment.' >&2
     exit 1
 fi
-for entry in current node_modules lib uibuilder; do
+for entry in current node_modules uibuilder; do
     if [ -e "$DATA/$entry" ] && [ ! -L "$DATA/$entry" ]; then
         echo "The existing $entry path is not an OCM release link." >&2
         exit 1
     fi
 done
+# Node-RED owns a persistent user library. Older ESB releases linked this path
+# to current/lib; newer installs may already have a real directory here.
+if [ -L "$DATA/lib" ]; then
+    [ "$(readlink "$DATA/lib")" = "current/lib" ] || {
+        echo 'The existing lib link is not an OCM library link.' >&2
+        exit 1
+    }
+elif [ -e "$DATA/lib" ] && [ ! -d "$DATA/lib" ]; then
+    echo 'The existing lib path is not a directory.' >&2
+    exit 1
+fi
 
 node -e 'const [a,b]=process.versions.node.split(".").map(Number); if (!((a===20&&b>=19)||(a===22&&b>=12)||a>22)) { console.error("Runtime setup requires Node 20.19+ or 22.12+."); process.exit(1); }'
 RUNTIME=$(node -p 'process.versions.node+"/"+process.platform+"/"+process.arch')
@@ -31,7 +42,7 @@ mkdir -p "$DATA/releases"
 if [ ! -f "$RELEASE/.ready" ]; then
     STAGE=$(mktemp -d "$DATA/releases/.prepare.XXXXXX")
     trap 'rm -rf "$STAGE"' EXIT HUP INT TERM
-    mkdir -p "$STAGE/uibuilder/orce/src" "$STAGE/uibuilder/.config"
+    mkdir -p "$STAGE/lib" "$STAGE/uibuilder/orce/src" "$STAGE/uibuilder/.config"
     cp "$SEED/flows.json" "$STAGE/flows.json"
     cp "$SEED/settings.js" "$STAGE/settings.js"
     for file in index.html index.js index.css facis-logo.svg; do
@@ -65,6 +76,14 @@ JS
     trap - EXIT HUP INT TERM
 fi
 
+# Keep the legacy library link valid, including when selecting a cached release.
+# Copy saved library entries before publication; never delete a real /data/lib.
+mkdir -p "$RELEASE/lib"
+if [ -L "$DATA/lib" ] && [ -d "$DATA/lib" ] &&
+    [ "$(readlink -f "$DATA/lib")" != "$(readlink -f "$RELEASE/lib")" ]; then
+    cp -a "$DATA/lib/." "$RELEASE/lib/"
+fi
+
 # Publish the fully prepared release. Retain database volumes, Secrets and prior releases.
 ln -sfn "$RELEASE" "$DATA/current-new"
 mv -Tf "$DATA/current-new" "$DATA/current"
@@ -72,6 +91,8 @@ for entry in node_modules uibuilder; do
     ln -sfn "current/$entry" "$DATA/$entry-new"
     mv -Tf "$DATA/$entry-new" "$DATA/$entry"
 done
+# Fresh installs use a real persistent library; managed legacy links remain valid.
+mkdir -p "$DATA/lib"
 cp "$RELEASE/flows.json" "$DATA/flows.json.new"
 mv -f "$DATA/flows.json.new" "$DATA/flows.json"
 cp "$RELEASE/package.json" "$DATA/package.json"
