@@ -116,7 +116,7 @@ restartPolicy: Always
 #hostAliases:
 #  - ip: "100.64.19.66" #use ClusterIP of your Ingress Controller here
 #    hostnames:
-#      - newfcservice.leanea.com
+#      - newfcservice.ecofacis.com
 
 storage:
   enabled: false

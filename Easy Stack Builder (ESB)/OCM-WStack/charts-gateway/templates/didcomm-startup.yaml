@@ -1,0 +1,30 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: esb-ocm-didcomm-startup
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  background: false
+  failurePolicy: Fail
+  rules:
+    - name: allow-native-database-migration
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [ocm-wstack]
+              operations: [CREATE]
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: didcomm-connector
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): didcomm-connector
+                startupProbe:
+                  httpGet: {path: /health, port: 9090}
+                  periodSeconds: 5
+                  timeoutSeconds: 2
+                  failureThreshold: 120

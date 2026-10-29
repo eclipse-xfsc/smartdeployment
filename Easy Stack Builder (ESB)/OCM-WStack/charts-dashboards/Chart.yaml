@@ -1,0 +1,4 @@
+apiVersion: v2
+name: esb-dashboard-routes
+version: 12.4.0
+description: Optional HTTPS access to existing upstream Argo CD and Grafana

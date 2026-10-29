@@ -1,0 +1,24 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: esb-ocm-retrieval-startup
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  background: false
+  failurePolicy: Fail
+  rules:
+    - name: serialize-native-retrieval-rollouts
+      match:
+        any:
+          - resources:
+              kinds: [Deployment]
+              namespaces: [ocm-wstack]
+              names: [credential-retrieval-service]
+              operations: [CREATE, UPDATE]
+      mutate:
+        patchesJson6902: |-
+          - op: add
+            path: /spec/strategy
+            value:
+              type: Recreate

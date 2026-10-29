@@ -1,35 +1,41 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "10.1.8",
-  "description": "OCM-W-Stack deployer node",
-  "dependencies": {
-    "tmp": "^0.2.1"
+  "version": "12.6.3",
+  "description": "Node-RED deployer for OCM W-Stack and its dedicated ORCE wallet runtime",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.17.0",
+    "node-red": ">=3.0.0"
   },
-  "scripts": {
-    "test": "./test/static-validate.sh",
-    "test:runtime": "./test/runtime-health.sh",
-    "test:bdd": "./test/bdd/run.sh",
-    "test:evidence": "./test/evidence/collect-runtime-evidence.sh"
-  },
-  "keywords": [
-    "ocm",
-    "ocm-w-stack",
-    "easy",
-    "stack",
-    "builder",
-    "xfsc",
-    "faps",
-    "fap",
-    "kubernetes",
-    "k8s"
-  ],
   "node-red": {
     "nodes": {
       "ocmwstack": "ocmwstack.js"
     }
   },
-  "engines": {
-    "node": ">=14.0.0",
-    "node-red": ">=3.0.0"
+  "files": [
+    "ocmwstack.js",
+    "ocmwstack.html",
+    "deploy.sh",
+    "deployment",
+    "upstream-lock.json",
+    "README.md",
+    "charts-runtime",
+    "charts-gateway",
+    "charts-dashboards",
+    "pack.sh"
+  ],
+  "scripts": {
+    "check": "bash deploy.sh check",
+    "pack:check": "npm pack --dry-run --ignore-scripts"
+  },
+  "keywords": [
+    "node-red",
+    "xfsc",
+    "esb",
+    "ocm-wstack",
+    "kubernetes"
+  ],
+  "dependencies": {
+    "bcryptjs": "2.4.3"
   }
 }

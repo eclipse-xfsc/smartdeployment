@@ -1,864 +1,272 @@
-#! /bin/bash
+#!/usr/bin/env bash
+# OCM W-Stack deployment node and standalone deployment command.
+set -Eeuo pipefail
+shopt -s inherit_errexit
 
-set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+DEPLOYMENT="$ROOT/deployment"
+export ESB_DEPLOY="$ROOT/deploy.sh"
+if [[ ${1:-} != --internal ]]; then exec 3>&2; fi
+source "$DEPLOYMENT/common.sh"
+load_libraries
+trap 'log_shell_error "$?" "$LINENO" "${BASH_SOURCE[0]:-$0}" "$BASH_COMMAND"' ERR
 
-# BusyBox and GNU coreutils both support the short decode flag.
-# Keep the short decode option; ORCE images use BusyBox base64.
-decode_base64() {
-  base64 -d
+usage() {
+    cat <<'HELP'
+Usage: bash deploy.sh ACTION --config deployment.json --kubeconfig cluster.yaml [OPTIONS]
+
+Actions:
+  check              Check tools in the deployment container
+  preflight          Validate configuration, certificates, sources and charts
+  deploy             Install or resume the OCM W-Stack deployment
+  repair-ocm         Reconcile native OCM services
+  repair-network     Reconcile gateway configuration
+  install-ui         Install the ORCE runtime and OCM W-Stack UI
+  inspect            Read cluster state
+  validate           Check cluster state and public endpoints
+  diagnose-auth      Check the uploaded Kubernetes identity
+  diagnose-api       Sample Kubernetes API readiness
+  diagnose-storage   Check native Storage through the deployed runtime
+  test-credentials   Exercise native issuance, retrieval and storage
+  teardown           Remove this installation's tenant Helm release
+
+Options:
+  --credentials FILE              Node credential object (JSON)
+  --runtime-credentials-file FILE Initial runtime credentials (JSON)
+  --tls-cert-file FILE            TLS certificate chain (PEM)
+  --tls-key-file FILE             Matching private key (PEM)
+  --dns-token-file FILE           DNS provider API token
+  --dns-secret-file FILE          Custom DNS provider Secret data (JSON)
+  --confirm TEXT                 Explicit confirmation for test-credentials or teardown
+
+Results are JSON on stdout. Progress events are JSON lines on stderr.
+HELP
 }
 
-# ./deploy.sh ocmnamespace domain CERT keypath email KUBECONFIG USE_CUSTOM_CA_BUNDLE [CA_BUNDLE] [ENABLE_INGRESS_NGINX_CLUSTER_CONFIG] [DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK]
-
-NAMESPACE="$1"
-DOMAIN="$2"
-CERT_PATH="$3"
-KEY_PATH="$4"
-EMAIL="$5"
-KUBE="$6"
-USE_CUSTOM_CA_BUNDLE="${7:-false}"
-CA_BUNDLE_PATH="${8:-}"
-ENABLE_INGRESS_NGINX_CLUSTER_CONFIG="${9:-false}"
-DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK="${10:-false}"
-TLS_SECRET="xfsc-wildcard"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="$(mktemp -d /tmp/ocm-w-stack-XXXXXX)"
-START_TS="$(date +%s)"
-STATUS_CONFIGMAP="ocm-deployment-status"
-KEYCLOAK_REALM="$NAMESPACE"
-KEYCLOAK_CLIENT_ID="bridge"
-ROLLBACK_IN_PROGRESS=0
-LAST_PHASE="init"
-
-export KUBECONFIG="$KUBE"
-
-case "$USE_CUSTOM_CA_BUNDLE" in
-  true|false) ;;
-  *) echo "USE_CUSTOM_CA_BUNDLE must be true or false." >&2; exit 1 ;;
-esac
-
-case "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" in
-  true|false) ;;
-  *) echo "ENABLE_INGRESS_NGINX_CLUSTER_CONFIG must be true or false." >&2; exit 1 ;;
-esac
-
-case "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" in
-  true|false) ;;
-  *) echo "DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK must be true or false." >&2; exit 1 ;;
-esac
-
-cleanup_workdir() {
-  rm -rf "$WORKDIR" 2>/dev/null || true
+internal_action() {
+    local action=${1:-}
+    shift || true
+    # Hooks inherit only the private operation directory and credential binding.
+    # They never create a second deployment lease or remove the parent's files.
+    if [[ $action == kube-command ]]; then kube_command "$@"; return; fi
+    [[ -d ${WORKDIR:-} && -f ${CONFIG:-} && -f ${CREDENTIALS:-} ]] ||
+        { printf 'Deployment operation context is unavailable.\n' >&2; return 1; }
+    case "$action" in
+        helm-upgrade) helm_upgrade "$@" ;;
+        namespace-create)
+            [[ ${1:-} == observability || ${1:-} == security ]] || return 1
+            jq -n --arg name "$1" '{apiVersion:"v1",kind:"Namespace",metadata:{name:$name}}' >"$WORKDIR/namespace-$1.json"
+            apply_json "$WORKDIR/namespace-$1.json" ;;
+        apply-file) apply_json "${1:?}" ;;
+        argo-install) argo_install ;;
+        workload-ready) wait_workloads "$@" ;;
+        native-compatibility) cassandra_compatibility ;;
+        prerequisites) native_prerequisites ;;
+        startup) native_startup ;;
+        argo-access) argo_access ;;
+        gateway)
+            case "${1:-}" in policy) gateway_policy ;; reconcile) gateway_reconcile ;; *) return 1 ;; esac ;;
+        kube-read) kube_read "${1:?}" "$([[ ${2:-} == established ]] && printf true || printf false)" "${ESB_READ_TIMEOUT_SECONDS:-120}" ;;
+        argo-health) argo_health "$([[ ${1:-} == --diagnose ]] && printf true || printf false)" ;;
+        *) printf 'Unknown internal operation.\n' >&2; return 1 ;;
+    esac
 }
 
-emit_event() {
-  local phase="$1"
-  local status="$2"
-  local detail="${3:-}"
-  local ts
-  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  jq -cn --arg phase "$phase" --arg status "$status" --arg detail "$detail" --arg timestamp "$ts" \
-    '{phase:$phase,status:$status,detail:$detail,timestamp:$timestamp}' | sed 's/^/EVENT_JSON=/'
+read_options() {
+    ACTION=${1:-}
+    [[ -n $ACTION ]] || { usage; exit 0; }
+    shift
+    if [[ $ACTION == --help || $ACTION == -h ]]; then usage; exit 0; fi
+    if [[ $ACTION == check ]]; then check_tools; exit $?; fi
+    case "$ACTION" in preflight|deploy|repair-ocm|repair-network|install-ui|inspect|validate|diagnose-auth|diagnose-api|diagnose-storage|test-credentials|teardown) ;;
+        *) printf 'Unknown action: %s\n' "$ACTION" >&2; exit 1 ;; esac
+    WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/esb-ocmwstack.XXXXXX")
+    chmod 700 "$WORKDIR"
+    OWNS_WORKDIR=true
+    export WORKDIR CONFIG="$WORKDIR/config.json" CREDENTIALS="$WORKDIR/credentials.json"
+    trap cleanup EXIT
+    trap cancel INT TERM
+    prepare_deployment_assets
+    CONFIRM=''
+    printf '{}\n' >"$CREDENTIALS"
+    local input='' option key file
+    local overlays=()
+    while (($#)); do
+        option=$1
+        shift
+        [[ $# -gt 0 ]] || { fail OPTIONS "Missing value for $option."; return 1; }
+        case "$option" in
+            --config) input=$1 ;;
+            --credentials|--runtime-credentials-file)
+                jq -e 'type=="object"' "$1" >/dev/null
+                jq -s '.[0]+.[1]' "$CREDENTIALS" "$1" >"$WORKDIR/credentials-next.json"
+                mv "$WORKDIR/credentials-next.json" "$CREDENTIALS" ;;
+            --kubeconfig) overlays+=(kubeconfig "$1") ;;
+            --tls-cert-file) overlays+=(tlsCertificate "$1") ;;
+            --tls-key-file) overlays+=(tlsPrivateKey "$1") ;;
+            --dns-token-file) overlays+=(dnsToken "$1") ;;
+            --dns-secret-file) overlays+=(dnsSecretData "$1") ;;
+            --confirm) CONFIRM=$1 ;;
+            *) fail OPTIONS "Unknown option: $option"; return 1 ;;
+        esac
+        shift
+    done
+    [[ -f $input ]] || { fail CONFIG 'Supply --config with a deployment JSON file.'; return 1; }
+    if [[ -z $CONFIRM ]]; then CONFIRM=$(jq -r '.confirm // empty' "$input"); fi
+    while ((${#overlays[@]})); do
+        key=${overlays[0]} file=${overlays[1]}
+        jq --arg key "$key" --rawfile value "$file" '.[$key]=$value | if $key=="dnsToken" then .[$key]|=rtrimstr("\n") else . end' \
+            "$CREDENTIALS" >"$WORKDIR/credentials-next.json"
+        mv "$WORKDIR/credentials-next.json" "$CREDENTIALS"
+        overlays=("${overlays[@]:2}")
+    done
+    if ! json_program normalize_config "$input" >"$CONFIG" 2>"$WORKDIR/config-error"; then
+        fail CONFIG 'Deployment configuration is invalid; check the field requirements in README.md.'
+        return 1
+    fi
+    TIMEOUT_SECONDS=$(config_value '.timeoutSeconds')
+    export TIMEOUT_SECONDS ESB_TIMEOUT_SECONDS="$TIMEOUT_SECONDS" GIT_TERMINAL_PROMPT=0
+    export HELM_QPS=5 HELM_BURST_LIMIT=10 HELM_CACHE_HOME="$WORKDIR/helm/cache"
+    export HELM_CONFIG_HOME="$WORKDIR/helm/config" HELM_DATA_HOME="$WORKDIR/helm/data"
+    check_tools >"$WORKDIR/tools.json" || { fail TOOLS 'A required deployment tool is unavailable; run deploy.sh check.'; return 1; }
 }
 
-emit_warning() {
-  local message="$1"
-  local ts
-  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  jq -cn --arg message "$message" --arg timestamp "$ts" '{message:$message,timestamp:$timestamp}' | sed 's/^/WARN_JSON=/'
+wait_application_set() {
+    (cd "$SOURCE" && run "$((TIMEOUT_SECONDS+30))" bash check-applicationset.sh "$1" argocd)
 }
 
-persist_status() {
-  local phase="$1"
-  local status="$2"
-  local detail="${3:-}"
+install_application_set() {
+    local release=$1 file=$2 values=$3 namespace=${4:-infrastructure}
+    local args=(upgrade --install "$release" "$SOURCE/XFSC/Applicationsets/chart"
+        -f "$SOURCE/XFSC/Applicationsets/values/$file-values.yaml" -f "$values"
+        --set-string "storageClass=$(config_value '.actualStorageClass')" -n "$namespace" --timeout "${TIMEOUT_SECONDS}s")
+    if [[ $release == network ]]; then
+        args+=(--set-string "profile=$(config_value '.profile')" --set-string "domain=$(config_value '.domain')" --set-string "email=$(config_value '.email')")
+    fi
+    helm_upgrade "$namespace" "$release" "${args[@]}"
+}
 
-  if ! kubectl get ns "$NAMESPACE" >/dev/null 2>&1; then
+operation() {
+    bind_kubeconfig
+    if [[ $ACTION == diagnose-api ]]; then diagnose_api; return; fi
+    kube_identity
+    if [[ $ACTION == diagnose-storage ]]; then storage_diagnostics; return; fi
+    if [[ $ACTION == diagnose-auth ]]; then
+        jq -n --slurpfile selection "$WORKDIR/selection.json" --slurpfile identity "$WORKDIR/identity.json" \
+            '$selection[0]+{status:"authentication-checked",identity:$identity[0].status.userInfo}|del(.type)'
+        return
+    fi
+    cluster_preflight
+    case "$ACTION" in
+        inspect) inspect_stack; return ;;
+        validate) validate_stack; return ;;
+        test-credentials) test_credentials; return ;;
+        teardown)
+            [[ $CONFIRM == "REMOVE TENANT $(config_value '.tenantRelease')" ]] ||
+                { fail CONFIRM 'Confirm teardown with REMOVE TENANT followed by the tenant release name.'; return 1; }
+            marker_matches || { fail OWNERSHIP 'Tenant removal requires this installation’s ownership marker.'; return 1; }
+            acquire_lease
+            verify_lease
+            run "$((TIMEOUT_SECONDS+30))" helm uninstall "$(config_value '.tenantRelease')" -n ocm-wstack --ignore-not-found --timeout "${TIMEOUT_SECONDS}s"
+            update_marker '{"state":"tenant-removed"}'
+            jq '{status:"tenant-removed",tenantRelease,retained:["OCM services","Argo CD","shared infrastructure","credential data","OpenBao tenant keys","signer registration"]}' "$CONFIG"
+            return ;;
+    esac
+    tls_preflight
+    [[ $ACTION == repair-network ]] || runtime_preflight
+    checkout_source
+    prepare_charts
+    if [[ $ACTION == preflight ]]; then cat "$WORKDIR/chart-report.json"; return; fi
+    if [[ $ACTION == repair-* || $ACTION == install-ui ]]; then
+        marker_matches || { fail OWNERSHIP 'This action requires the matching installation marker.'; return 1; }
+    fi
+    acquire_lease
+    ensure_marker
+    update_marker "$(jq '{validatedArgoRevision:.argoRevision,validatedChartCount:(.charts|length|tostring),argoManifestSha256}' "$WORKDIR/chart-report.json")"
+    write_values
+    if [[ $ACTION == install-ui ]]; then
+        jq -e '.data.bootstrapComplete=="true"' "$WORKDIR/marker.json" >/dev/null ||
+            { fail OWNERSHIP 'Complete the native bootstrap before installing the UI.'; return 1; }
+        tls_install
+        native_routing
+        wait_tenant_tls
+        runtime_install
+        validate_stack
+        return
+    fi
+    if [[ $ACTION == repair-network ]] || jq -e '.data.bootstrapComplete=="true"' "$WORKDIR/marker.json" >/dev/null; then
+        phase gateway-compatibility
+        permit_dns_repository
+        [[ -z $ESB_DNS_SECRET_FILE ]] || apply_json "$ESB_DNS_SECRET_FILE"
+        gateway_policy
+        install_application_set network 04_network "$WORKDIR/network-values.json"
+        wait_application_set network
+        gateway_reconcile
+        if [[ $ACTION == repair-network ]]; then inspect_stack; return; fi
+        install_application_set storage 03_storage "$WORKDIR/core-values.json"
+        wait_application_set storage
+        install_application_set core 05_core "$WORKDIR/core-values.json"
+        wait_application_set core
+    fi
+    if [[ $ACTION == repair-ocm ]] || jq -e '.data.bootstrapComplete=="true"' "$WORKDIR/marker.json" >/dev/null; then
+        local state name
+        state=$(release_status ocm-wstack ocm-wstack)
+        [[ $state == deployed || $state == failed ]] || { fail HELM_STATE_UNAVAILABLE 'OCM release is unavailable.'; return 1; }
+        for name in storage network core; do wait_application_set "$name"; done
+        phase repair-ocm
+        native_prerequisites
+        install_application_set ocm-wstack 06_ocm_wstack "$WORKDIR/ocm-values.json" ocm-wstack
+        native_startup
+        wait_application_set ocm-wstack
+    else
+        phase bootstrap
+        update_marker '{"state":"bootstrapping"}'
+        local args=(ocm-wstack-init.sh --profile "$(config_value '.profile')" --domain "$(config_value '.domain')" --email "$(config_value '.email')")
+        [[ $(config_value '.externalDns') == true ]] || args+=(--disable-external-dns)
+        (cd "$SOURCE" && run "$((TIMEOUT_SECONDS*12<86400 ? TIMEOUT_SECONDS*12 : 86400))" bash "${args[@]}")
+    fi
+    verify_lease
+    update_marker '{"bootstrapComplete":"true","ocmCompatibility":"12.4.0","state":"tenant"}'
+    native_routing
+    phase tenant
+    tls_install
+    helm_upgrade ocm-wstack "$(config_value '.tenantRelease')" upgrade --install "$(config_value '.tenantRelease')" \
+        "$SOURCE/XFSC/tenant/chart" -f "$SOURCE/XFSC/tenant/values/tenant-ocm-wstack-values.yaml" -f "$WORKDIR/tenant-values.json" \
+        -n ocm-wstack --timeout "${TIMEOUT_SECONDS}s"
+    update_marker '{"state":"installed"}'
+    native_routing
+    wait_tenant_tls
+    runtime_install
+    dashboard_install
+    phase native-validation
+    wait_validation >"$WORKDIR/result.json"
+    if jq -e 'any(.ui.checks[0].dependencies[]?;.name=="storage" and .ok==false)' "$WORKDIR/result.json" >/dev/null; then
+        if storage_diagnostics >"$WORKDIR/diagnostics.json"; then
+            jq --slurpfile diagnostic "$WORKDIR/diagnostics.json" '.storageDiagnostics=$diagnostic[0]' "$WORKDIR/result.json" >"$WORKDIR/result-next.json"
+            mv "$WORKDIR/result-next.json" "$WORKDIR/result.json"
+        fi
+    fi
+    update_marker "$(jq '{state:.status}' "$WORKDIR/result.json")"
+    cat "$WORKDIR/result.json"
+}
+
+main() {
+    if [[ ${1:-} == --internal ]]; then
+        shift
+        internal_action "$@"
+        return
+    fi
+    # Keep the result channel outside operation and hook output redirections.
+    exec 4>&1
+    RESULT_FD=4
+    read_options "$@"
+    operation >"$WORKDIR/final-result.json"
+    jq -e -s 'length==1 and (.[0]|type=="object")' "$WORKDIR/final-result.json" >/dev/null ||
+        { fail ACTION_RESULT "Deployment action ended without exactly one JSON result."; return 1; }
+    cat "$WORKDIR/final-result.json"
+    RESULT_WRITTEN=true
+    if jq -e '.status|IN("failed","action-required","api-unreliable")' "$WORKDIR/final-result.json" >/dev/null; then return 2; fi
     return 0
-  fi
-
-  kubectl create configmap "$STATUS_CONFIGMAP" \
-    -n "$NAMESPACE" \
-    --from-literal=phase="$phase" \
-    --from-literal=status="$status" \
-    --from-literal=detail="$detail" \
-    --from-literal=updatedAt="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
 }
 
-record_phase() {
-  local phase="$1"
-  local status="$2"
-  local detail="${3:-}"
-  LAST_PHASE="$phase"
-  emit_event "$phase" "$status" "$detail"
-  persist_status "$phase" "$status" "$detail"
-}
-
-ensure_namespace() {
-  kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE" >/dev/null
-}
-
-apply_namespace_guardrails() {
-  ensure_namespace
-  kubectl label namespace "$NAMESPACE" app.kubernetes.io/part-of=ocm-w-stack --overwrite >/dev/null 2>&1 || true
-
-  cat <<YAML | kubectl apply -f - >/dev/null
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ocm-runtime
-  namespace: ${NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: ocm-observer
-  namespace: ${NAMESPACE}
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "secrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: ocm-observer-binding
-  namespace: ${NAMESPACE}
-subjects:
-  - kind: ServiceAccount
-    name: ocm-runtime
-    namespace: ${NAMESPACE}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: ocm-observer
----
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: ocm-resource-quota
-  namespace: ${NAMESPACE}
-spec:
-  hard:
-    pods: "80"
-    requests.cpu: "8"
-    requests.memory: 16Gi
-    limits.cpu: "16"
-    limits.memory: 32Gi
-    persistentvolumeclaims: "20"
----
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: ocm-default-limits
-  namespace: ${NAMESPACE}
-spec:
-  limits:
-    - type: Container
-      defaultRequest:
-        cpu: 100m
-        memory: 128Mi
-      default:
-        cpu: 500m
-        memory: 512Mi
-YAML
-}
-
-ensure_postgres_database() {
-  local database_name="$1"
-  local exists
-
-  exists="$(kubectl exec -i -n "$NAMESPACE" "$POSTGRES_POD" -- \
-    env PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" \
-    psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${database_name}'" | tr -d '[:space:]' || true)"
-
-  if [[ "$exists" != "1" ]]; then
-    kubectl exec -i -n "$NAMESPACE" "$POSTGRES_POD" -- \
-      env PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" \
-      psql -U postgres -c "CREATE DATABASE ${database_name};"
-  fi
-}
-
-ensure_vault_key() {
-  local path="$1"
-  if ! kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault read -format=json ${path} >/dev/null 2>&1"; then
-    kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault write -f ${path} type=ecdsa-p256"
-  fi
-}
-
-repair_didcomm_dirty_migration() {
-  local state_file="$WORKDIR/didcomm-migration-state.txt"
-  local cqlsh="/opt/bitnami/cassandra/bin/cqlsh"
-
-  if ! kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
-    "$cqlsh" 127.0.0.1 9042 -u cassandra -p "$CASSANDRA_PASSWORD" \
-    -e "SELECT version, dirty FROM didcomm_space.schema_migrations;" \
-    >"$state_file" 2>/dev/null; then
-    return 0
-  fi
-
-  if ! grep -Eq '^[[:space:]]*1[[:space:]]*\|[[:space:]]*(True|true)[[:space:]]*$' "$state_file"; then
-    return 0
-  fi
-
-  emit_warning "DIDComm migration version 1 is marked dirty; stopping only the DIDComm workload and clearing its migration marker for an idempotent retry."
-
-  if kubectl -n "$NAMESPACE" get deployment didcomm-connector >/dev/null 2>&1; then
-    kubectl -n "$NAMESPACE" scale deployment didcomm-connector --replicas=0 >/dev/null
-    kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=2m >/dev/null
-  fi
-
-  kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
-    "$cqlsh" 127.0.0.1 9042 -u cassandra -p "$CASSANDRA_PASSWORD" \
-    -e "DELETE FROM didcomm_space.schema_migrations WHERE version = 1;" \
-    >/dev/null
-}
-
-collect_external_ip() {
-  local external
-  external="$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
-  if [[ -z "$external" ]]; then
-    external="$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
-  fi
-  if [[ -z "$external" ]]; then
-    external="cloud-wallet.${DOMAIN}"
-  fi
-  printf '%s' "$external"
-}
-
-post_deploy_smoke_checks() {
-  kubectl -n "$NAMESPACE" get ingress >/dev/null
-  kubectl -n "$NAMESPACE" get ingress -o json \
-    | jq -e --arg host "cloud-wallet.${DOMAIN}" 'any(.items[]?; any(.spec.rules[]?; .host == $host))' >/dev/null
-
-  kubectl -n "$NAMESPACE" exec "$KC_POD" -- sh -lc "HOME='${KCADM_DIR}' /opt/bitnami/keycloak/bin/kcadm.sh get realms/${KEYCLOAK_REALM} --config '${KCADM_CFG}' >/dev/null"
-  kubectl -n "$NAMESPACE" get secret ocm-keycloak-client >/dev/null
-}
-
-handle_error() {
-  local exit_code=$?
-  local line="$1"
-
-  set +e
-  record_phase "$LAST_PHASE" "failed" "Deployment failed at line ${line}; starting rollback"
-
-  if [[ "$ROLLBACK_IN_PROGRESS" -eq 0 ]]; then
-    ROLLBACK_IN_PROGRESS=1
-    emit_event "rollback" "running" "Executing uninstall rollback for namespace ${NAMESPACE}"
-    bash "$SCRIPT_DIR/uninstall.sh" "$NAMESPACE" "$KUBE" >/dev/null 2>&1 || true
-    emit_event "rollback" "done" "Rollback completed"
-  fi
-
-  exit "$exit_code"
-}
-
-trap cleanup_workdir EXIT
-trap 'handle_error $LINENO' ERR
-
-cp -R "$SCRIPT_DIR"/. "$WORKDIR"/
-cd "$WORKDIR"
-
-for cmd in kubectl helm jq openssl curl node; do
-  command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
-done
-
-record_phase "preflight" "running" "Validating kubeconfig, domain, namespace, and TLS material"
-bash "$SCRIPT_DIR/preflight.sh" \
-  "$NAMESPACE" "$DOMAIN" "$CERT_PATH" "$KEY_PATH" "$EMAIL" "$KUBE" \
-  "$USE_CUSTOM_CA_BUNDLE" "$CA_BUNDLE_PATH" \
-  "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK"
-record_phase "preflight" "done" "Input validation completed"
-
-record_phase "helm-bootstrap" "running" "Preparing Helm repositories and ingress controller"
-helm repo add jetstack https://charts.jetstack.io
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo add codecentric https://codecentric.github.io/helm-charts
-helm repo add hashicorp https://helm.releases.hashicorp.com
-helm repo update
-
-# ingress-nginx is shared cluster infrastructure. Installation, reconciliation,
-# controller ConfigMap changes, and restarts are performed only with explicit opt-in.
-NGINX_ING_VER="controller-v1.11.1"
-ING_URL="https://raw.githubusercontent.com/kubernetes/ingress-nginx/${NGINX_ING_VER}/deploy/static/provider/cloud/deploy.yaml"
-
-if [[ "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" == "true" ]]; then
-  emit_warning "Cluster-wide ingress-nginx admission webhook deletion is enabled by operator opt-in."
-  if kubectl get namespace ingress-nginx >/dev/null 2>&1; then
-    kubectl -n ingress-nginx delete job -l app.kubernetes.io/component=admission-webhook --ignore-not-found
-  fi
-else
-  emit_warning "Skipped ingress-nginx admission webhook deletion; opt-in is disabled."
-fi
-
-if [[ "$ENABLE_INGRESS_NGINX_CLUSTER_CONFIG" == "true" ]]; then
-  emit_warning "Cluster-wide ingress-nginx installation/reconciliation and controller changes are enabled by operator opt-in."
-  kubectl get namespace ingress-nginx >/dev/null 2>&1 || kubectl create namespace ingress-nginx
-  curl -fsSL "$ING_URL" | kubectl apply -f -
-
-  for i in {1..30}; do
-    kubectl -n ingress-nginx get deployment/ingress-nginx-controller >/dev/null 2>&1 && break
-    sleep 2
-  done
-  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
-
-  kubectl -n ingress-nginx create configmap ingress-nginx-controller --dry-run=client -o yaml | kubectl apply -f -
-  kubectl -n ingress-nginx patch configmap ingress-nginx-controller \
-    --type merge \
-    -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical","ssl-protocols":"TLSv1.3"}}'
-  kubectl -n ingress-nginx rollout restart deployment/ingress-nginx-controller
-  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
-else
-  emit_warning "Ingress controller management is disabled; validating the existing shared controller without modifying it."
-  kubectl get namespace ingress-nginx >/dev/null 2>&1 || {
-    echo "Existing ingress-nginx namespace was not found. Enable Ingress controller changes only with cluster-owner approval to install it." >&2
-    exit 1
-  }
-  kubectl -n ingress-nginx get deployment/ingress-nginx-controller >/dev/null
-  kubectl -n ingress-nginx get service/ingress-nginx-controller >/dev/null
-  kubectl get ingressclass nginx >/dev/null
-  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=5m
-fi
-
-# Webhook deletion remains an independent, explicit cluster-wide opt-in.
-# It is intentionally performed after an opted-in controller reconciliation so
-# the applied ingress-nginx manifest cannot recreate it afterward.
-if [[ "$DELETE_INGRESS_NGINX_ADMISSION_WEBHOOK" == "true" ]]; then
-  kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found
-fi
-record_phase "helm-bootstrap" "done" "Ingress controller prerequisites are ready"
-
-record_phase "namespace" "running" "Creating namespace, TLS secret, and guardrails"
-ensure_namespace
-apply_namespace_guardrails
-TLS_CERT_SOURCE="$CERT_PATH"
-TLS_SECRET_ARGS=(
-  kubectl create secret generic "$TLS_SECRET"
-  --type=kubernetes.io/tls
-  --from-file=tls.key="$KEY_PATH"
-  -n "$NAMESPACE"
-)
-
-if [[ "$USE_CUSTOM_CA_BUNDLE" == "true" ]]; then
-  TLS_CERT_SOURCE="$WORKDIR/tls-fullchain.crt"
-  cat "$CERT_PATH" > "$TLS_CERT_SOURCE"
-  printf '\n' >> "$TLS_CERT_SOURCE"
-  cat "$CA_BUNDLE_PATH" >> "$TLS_CERT_SOURCE"
-  TLS_SECRET_ARGS+=(--from-file=ca.crt="$CA_BUNDLE_PATH")
-  emit_event "namespace" "running" "Custom CA bundle enabled; adding ca.crt and full certificate chain"
-fi
-
-TLS_SECRET_ARGS+=(--from-file=tls.crt="$TLS_CERT_SOURCE")
-"${TLS_SECRET_ARGS[@]}" --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic signing \
-  --from-file=signing-key="$KEY_PATH" \
-  -n "$NAMESPACE" \
-  --dry-run=client -o yaml | kubectl apply -f -
-record_phase "namespace" "done" "Namespace guardrails and TLS materials applied (custom CA bundle: ${USE_CUSTOM_CA_BUNDLE})"
-
-record_phase "nats" "running" "Deploying NATS"
-helm dependency build "./Nats Chart"
-helm upgrade --install nats "./Nats Chart" --namespace "$NAMESPACE"
-record_phase "nats" "done" "NATS deployed"
-
-record_phase "cert-manager" "running" "Deploying cert-manager and cluster issuer"
-# Apply CRDs once (idempotent)
-kubectl apply --validate=false -f https://github.com/jetstack/cert-manager/releases/download/v1.11.0/cert-manager.crds.yaml
-kubectl get clusterrole,clusterrolebinding,validatingwebhookconfiguration,mutatingwebhookconfiguration,apiservice,crd -o name \
-  | grep -E '(^|/)(cert-?manager|cm-)' \
-  | while read -r resource; do
-      kubectl annotate "$resource" \
-        meta.helm.sh/release-name=cert-manager \
-        meta.helm.sh/release-namespace="$NAMESPACE" \
-        --overwrite || true
-      kubectl label "$resource" app.kubernetes.io/managed-by=Helm \
-        --overwrite || true
-    done || true
-
-# Re-own kube-system leader-election RBAC (namespaced) so Helm can adopt them
-for kind in role rolebinding; do
-  kubectl -n kube-system get "$kind" -o name \
-    | grep -E '(^|/)(cert-?manager|cm-).*(leaderelection|dynamic-serving)' \
-    | while read -r resource; do
-        kubectl -n kube-system annotate "$resource" \
-          meta.helm.sh/release-name=cert-manager \
-          meta.helm.sh/release-namespace="$NAMESPACE" \
-          --overwrite || true
-        kubectl -n kube-system label "$resource" app.kubernetes.io/managed-by=Helm \
-          --overwrite || true
-      done || true
-done
-# Install/upgrade cert-manager WITHOUT CRDs (already applied above)
-helm upgrade --install cert-manager jetstack/cert-manager \
-  --namespace "$NAMESPACE" \
-  --version v1.11.0 \
-  --set installCRDs=false
-
-### Cluster Issuer
-kubectl annotate clusterissuer letsencrypt-prod \
-  meta.helm.sh/release-namespace="$NAMESPACE" \
-  meta.helm.sh/release-name=cluster-issuer --overwrite || true
-helm dependency build "./Cluster-Issuer"
-helm upgrade --install cluster-issuer "./Cluster-Issuer" --set email="$EMAIL" --namespace "$NAMESPACE"
-record_phase "cert-manager" "done" "cert-manager and cluster issuer deployed"
-
-record_phase "cassandra" "running" "Deploying Cassandra"
-helm upgrade --install cassandra \
-  oci://registry-1.docker.io/bitnamicharts/cassandra \
-  --namespace "$NAMESPACE" --wait \
-  --set image.registry=docker.io \
-  --set image.repository=bitnamilegacy/cassandra \
-  --set image.tag=5.0.5-debian-12-r7 \
-  --set global.security.allowInsecureImages=true
-
-CASSANDRA_PASSWORD="$(kubectl -n "$NAMESPACE" get secret cassandra -o jsonpath='{.data.cassandra-password}' | decode_base64)"
-kubectl -n "$NAMESPACE" wait --for=condition=ready pod cassandra-0 --timeout=10m
-ok=""
-for i in {1..60}; do
-  if kubectl -n "$NAMESPACE" exec cassandra-0 -c cassandra -- \
-    bash -lc "/opt/bitnami/cassandra/bin/cqlsh 127.0.0.1 9042 -u cassandra -p '$CASSANDRA_PASSWORD' -e 'SHOW VERSION'" >/dev/null 2>&1; then
-    ok="y"
-    break
-  fi
-  sleep 5
-done
-[ -n "$ok" ] || { echo "Cassandra auth not ready"; exit 1; }
-kubectl -n "$NAMESPACE" exec -i cassandra-0 -c cassandra -- \
-  bash -lc "/opt/bitnami/cassandra/bin/cqlsh 127.0.0.1 9042 -u cassandra -p '$CASSANDRA_PASSWORD'" <<'CQL'
-CREATE KEYSPACE IF NOT EXISTS tenant_space
-  WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
-
-CREATE TABLE IF NOT EXISTS tenant_space.offerings (
-  partition text,
-  region text,
-  country text,
-  groupId text,
-  requestId text,
-  last_update_timestamp timestamp,
-  type text,
-  metadata text,
-  offerParams text,
-  status text,
-  PRIMARY KEY ((partition, region, country), groupId, requestId)
-) WITH default_time_to_live = 17800;
-
-CREATE TABLE IF NOT EXISTS tenant_space.credentials (
-  accountPartition text,
-  region text,
-  country text,
-  account text,
-  last_update_timestamp timestamp,
-  metadata map<text,text>,
-  credentials map<text,text>,
-  presentations map<text,text>,
-  id text,
-  recovery_nonce text,
-  device_key text,
-  nonce text,
-  locked boolean,
-  signature text,
-  PRIMARY KEY ((accountPartition, region, country), account)
-);
-
-CREATE INDEX IF NOT EXISTS credentials_locked_idx ON tenant_space.credentials (locked);
-CREATE INDEX IF NOT EXISTS credentials_id_idx ON tenant_space.credentials (id);
-CQL
-record_phase "cassandra" "done" "Cassandra initialized"
-
-record_phase "redis" "running" "Deploying Redis"
-REDIS_PASSWORD="$(openssl rand -hex 16)"
-kubectl create secret generic preauthbridge-redis \
-  --from-literal=redis-password="$REDIS_PASSWORD" \
-  --from-literal=redis-user="default" \
-  -n "$NAMESPACE" \
-  --dry-run=client -o yaml | kubectl apply -f -
-helm upgrade --install redis \
-  oci://registry-1.docker.io/bitnamicharts/redis \
-  --namespace "$NAMESPACE" -f ./Redis/values.yaml \
-  --set image.registry=docker.io \
-  --set image.repository=bitnamilegacy/redis \
-  --set global.security.allowInsecureImages=true
-record_phase "redis" "done" "Redis deployed"
-
-record_phase "postgres" "running" "Deploying PostgreSQL"
-helm upgrade --install postgres \
-  oci://registry-1.docker.io/bitnamicharts/postgresql \
-  --namespace "$NAMESPACE" --wait \
-  --set image.registry=docker.io \
-  --set image.repository=bitnamilegacy/postgresql \
-  --set global.security.allowInsecureImages=true
-
-POSTGRES_ADMIN_PASSWORD="$({
-  kubectl get secret -n "$NAMESPACE" postgres-postgresql \
-    -o jsonpath='{.data.postgres-password}' | decode_base64
-})"
-POSTGRES_POD="$({
-  kubectl get pod -n "$NAMESPACE" \
-    -l app.kubernetes.io/instance=postgres,app.kubernetes.io/component=primary \
-    -o jsonpath='{.items[0].metadata.name}'
-})"
-record_phase "postgres" "done" "PostgreSQL deployed"
-
-record_phase "policy" "running" "Deploying policy service"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Policy Chart/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Policy Chart/values.yaml"
-helm dependency build "./Policy Chart"
-helm upgrade --install policy-service "./Policy Chart" --namespace "$NAMESPACE"
-mv ./Policy\ Chart/values.yaml.bak ./Policy\ Chart/values.yaml
-record_phase "policy" "done" "Policy service deployed"
-
-record_phase "keycloak" "running" "Deploying Keycloak and provisioning realm/client"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' ./Keycloak/values.yaml
-helm dependency build "./Keycloak"
-helm upgrade --install keycloak "./Keycloak" \
-  --namespace "$NAMESPACE" \
-  -f "./Keycloak/values.yaml" \
-  --set keycloak.auth.adminUser=admin \
-  --set keycloak.image.registry=docker.io \
-  --set keycloak.image.repository=bitnamilegacy/keycloak \
-  --set global.security.allowInsecureImages=true \
-  --set keycloak.resources.requests.cpu=500m \
-  --set keycloak.resources.requests.memory=768Mi \
-  --set keycloak.resources.limits.cpu=1500m \
-  --set keycloak.resources.limits.memory=1536Mi \
-  --wait \
-  --timeout 20m
-mv ./Keycloak/values.yaml.bak ./Keycloak/values.yaml
-
-KC_POD="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')"
-PASS="$(kubectl -n "$NAMESPACE" get secret keycloak-init-secrets -o jsonpath='{.data.password}' | decode_base64)"
-KCADM_DIR="/tmp/kcadm"
-KCADM_CFG="$KCADM_DIR/kcadm.config"
-ok=""
-for i in {1..60}; do
-  if kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "
-    mkdir -p '$KCADM_DIR' &&
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh config credentials \
-      --config '$KCADM_CFG' \
-      --server http://localhost:8080/ \
-      --realm master \
-      --user admin \
-      --password '$PASS'
-  " >/dev/null 2>&1; then
-    ok="y"
-    break
-  fi
-  sleep 5
-done
-[ -n "$ok" ] || { echo 'Keycloak admin not ready'; exit 1; }
-
-if ! kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh get realms/${KEYCLOAK_REALM} --config '$KCADM_CFG' >/dev/null 2>&1"; then
-  kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh create realms \
-      --config '$KCADM_CFG' \
-      -s realm='${KEYCLOAK_REALM}' \
-      -s enabled=true
-  " >/dev/null
-else
-  kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh update realms/${KEYCLOAK_REALM} \
-      --config '$KCADM_CFG' \
-      -s enabled=true
-  " >/dev/null
-fi
-
-CID="$({
-  kubectl -n "$NAMESPACE" exec "$KC_POD" -- sh -lc "
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh get clients -r ${KEYCLOAK_REALM} -q clientId=${KEYCLOAK_CLIENT_ID} --config '$KCADM_CFG'
-  " | jq -r '.[0].id // empty'
-})"
-if [[ -z "$CID" ]]; then
-  kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh create clients -r ${KEYCLOAK_REALM} \
-      --config '$KCADM_CFG' \
-      -s clientId='${KEYCLOAK_CLIENT_ID}' \
-      -s enabled=true \
-      -s protocol='openid-connect' \
-      -s publicClient=false \
-      -s clientAuthenticatorType='client-secret' \
-      -s serviceAccountsEnabled=true
-  " >/dev/null
-  CID="$({
-    kubectl -n "$NAMESPACE" exec "$KC_POD" -- sh -lc "
-      HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh get clients -r ${KEYCLOAK_REALM} -q clientId=${KEYCLOAK_CLIENT_ID} --config '$KCADM_CFG'
-    " | jq -r '.[0].id // empty'
-  })"
-fi
-kubectl -n "$NAMESPACE" exec -i "$KC_POD" -- sh -lc "
-  HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh update clients/${CID} -r ${KEYCLOAK_REALM} \
-    --config '$KCADM_CFG' \
-    -s enabled=true \
-    -s protocol='openid-connect' \
-    -s publicClient=false \
-    -s clientAuthenticatorType='client-secret' \
-    -s serviceAccountsEnabled=true
-" >/dev/null
-SECRET="$({
-  kubectl -n "$NAMESPACE" exec "$KC_POD" -- sh -lc "
-    HOME='$KCADM_DIR' /opt/bitnami/keycloak/bin/kcadm.sh get clients/${CID}/client-secret -r ${KEYCLOAK_REALM} --config '$KCADM_CFG'
-  " | jq -r '.value'
-})"
-BRIDGE_CLIENT_SECRET="$SECRET"
-
-kubectl create secret generic ocm-keycloak-client \
-  -n "$NAMESPACE" \
-  --from-literal=realm="$KEYCLOAK_REALM" \
-  --from-literal=clientId="$KEYCLOAK_CLIENT_ID" \
-  --from-literal=clientSecret="$BRIDGE_CLIENT_SECRET" \
-  --from-literal=keycloakUrl="https://auth-cloud-wallet.${DOMAIN}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-record_phase "keycloak" "done" "Keycloak realm and client are provisioned"
-
-record_phase "vault" "running" "Deploying Vault and transit keys"
-kubectl delete clusterrolebinding vault-agent-injector-binding || true
-kubectl delete clusterrolebinding vault-server-binding || true
-kubectl delete mutatingwebhookconfiguration vault-agent-injector-cfg || true
-kubectl delete clusterrole vault-agent-injector-clusterrole || true
-
-VAULT_ROOT_TOKEN=""
-VAULT_TOKEN_B64="$(kubectl -n "$NAMESPACE" get secret vault -o jsonpath='{.data.token}' 2>/dev/null || true)"
-if [[ -n "$VAULT_TOKEN_B64" ]]; then
-  VAULT_ROOT_TOKEN="$(printf '%s' "$VAULT_TOKEN_B64" | decode_base64)"
-fi
-
-# Reuse only a token generated by this deployer. Rotate legacy fixed/default values.
-if [[ ! "$VAULT_ROOT_TOKEN" =~ ^[0-9a-f]{64}$ ]]; then
-  VAULT_ROOT_TOKEN="$(openssl rand -hex 32)"
-  kubectl create secret generic vault --namespace "$NAMESPACE" \
-    --from-literal=token="$VAULT_ROOT_TOKEN" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  emit_event "vault" "running" "Generated and persisted a new Vault root token in Kubernetes Secret vault"
-else
-  emit_event "vault" "running" "Reusing the persisted generated Vault root token"
-fi
-
-VAULT_RUNTIME_VALUES="$WORKDIR/vault-runtime-values.yaml"
-( umask 077; cat > "$VAULT_RUNTIME_VALUES" <<YAML
-server:
-  dev:
-    enabled: true
-    devRootToken: "${VAULT_ROOT_TOKEN}"
-YAML
-)
-
-helm upgrade --install vault hashicorp/vault --namespace "$NAMESPACE" \
-  -f "./Vault/values.yaml" -f "$VAULT_RUNTIME_VALUES" --wait
-kubectl -n "$NAMESPACE" wait --for=condition=ready pod vault-0 --timeout=10m
-VAULT_ENV="VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=${VAULT_ROOT_TOKEN}"
-# enable a TRANSIT engine at path 'tenant_space' and also the default 'transit' engine
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable -path=tenant_space transit || true"
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "$VAULT_ENV vault secrets enable transit || true"
-ensure_vault_key tenant_space/keys/DeveloperCredential
-ensure_vault_key tenant_space/keys/SDJWTCredential
-ensure_vault_key tenant_space/keys/signerkey
-ensure_vault_key transit/keys/DeveloperCredential
-ensure_vault_key transit/keys/SDJWTCredential
-kubectl -n "$NAMESPACE" exec vault-0 -- sh -lc "
-  cat > /tmp/crypto-engine.hcl <<'POLICY'
-path \"transit/sign/DeveloperCredential\" { capabilities = [\"update\"] }
-path \"transit/verify/DeveloperCredential\" { capabilities = [\"update\"] }
-path \"transit/keys/DeveloperCredential\" { capabilities = [\"read\",\"list\"] }
-path \"transit/sign/SDJWTCredential\" { capabilities = [\"update\"] }
-path \"transit/verify/SDJWTCredential\" { capabilities = [\"update\"] }
-path \"transit/keys/SDJWTCredential\" { capabilities = [\"read\",\"list\"] }
-POLICY
-  $VAULT_ENV vault policy write crypto-engine-policy /tmp/crypto-engine.hcl
-"
-record_phase "vault" "done" "Vault transit keys are ready"
-
-record_phase "storage" "running" "Deploying storage service"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Storage Service/values.yaml"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Storage Service/values.yaml"
-helm dependency build "./Storage Service"
-helm upgrade --install storage-service "./Storage Service" --namespace "$NAMESPACE" -f "./Storage Service/values.yaml"
-mv ./Storage\ Service/values.yaml.bak ./Storage\ Service/values.yaml
-kubectl set env deployment/storage-service STORAGESERVICE_MESSAGING_URL="nats.$NAMESPACE.svc.cluster.local:4222" -n "$NAMESPACE"
-record_phase "storage" "done" "Storage service deployed"
-
-record_phase "status-list" "running" "Deploying status list service"
-ensure_postgres_database status
-kubectl create secret generic statuslist-db-secret \
-  --namespace "$NAMESPACE" \
-  --from-literal=postgresql-username="postgres" \
-  --from-literal=postgresql-password="$POSTGRES_ADMIN_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Status List Service Chart/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Status List Service Chart/values.yaml"
-helm dependency build "./Status List Service Chart"
-helm upgrade --install status-list-service-chart "./Status List Service Chart" \
-  --namespace "$NAMESPACE" \
-  --set database.autoMigrate=true \
-  --set status-list-service.database.secretName=statuslist-db-secret \
-  -f "./Status List Service Chart/values.yaml"
-mv ./Status\ List\ Service\ Chart/values.yaml.bak ./Status\ List\ Service\ Chart/values.yaml
-kubectl patch ing status-list-service -n "$NAMESPACE" --type='json' -p='[
-  {"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"status-list-service-chart-service"},
-  {"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/port/number","value":8080}
-]'
-record_phase "status-list" "done" "Status list service deployed"
-
-record_phase "universal-resolver" "running" "Deploying universal resolver"
-helm dependency build "./Universal Resolver"
-helm upgrade --install universal-resolver "./Universal Resolver" --namespace "$NAMESPACE"
-record_phase "universal-resolver" "done" "Universal resolver deployed"
-
-record_phase "signer" "running" "Deploying signer"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./signer/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./signer/values.yaml"
-helm dependency build "./signer"
-helm upgrade --install signer "./signer" --namespace "$NAMESPACE" -f "./signer/values.yaml"
-mv ./signer/values.yaml.bak ./signer/values.yaml
-kubectl set env deployment/signer \
-  -n "$NAMESPACE" \
-  VAULT_ADDR="https://vault.${NAMESPACE}.svc:8200" \
-  TRANSIT_MOUNT_PATH=transit \
-  TRANSIT_KEY_NAME=SDJWTCredential
-record_phase "signer" "done" "Signer deployed"
-
-record_phase "sdjwt" "running" "Deploying SD-JWT service"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./SdJwt Service/values.yaml"
-helm dependency build "./SdJwt Service"
-helm upgrade --install sdjwt "./SdJwt Service" --namespace "$NAMESPACE" -f "./SdJwt Service/values.yaml"
-mv ./SdJwt\ Service/values.yaml.bak ./SdJwt\ Service/values.yaml
-record_phase "sdjwt" "done" "SD-JWT service deployed"
-
-record_phase "dummy-content-signer" "running" "Deploying dummy content signer"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Dummy Content Signer/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Dummy Content Signer/values.yaml"
-helm dependency build "./Dummy Content Signer"
-helm upgrade --install dummy-content-signer "./Dummy Content Signer" \
-  --namespace "$NAMESPACE" -f "./Dummy Content Signer/values.yaml"
-mv ./Dummy\ Content\ Signer/values.yaml.bak ./Dummy\ Content\ Signer/values.yaml
-record_phase "dummy-content-signer" "done" "Dummy content signer deployed"
-
-record_phase "preauthbridge" "running" "Deploying pre-authorization bridge"
-kubectl create secret generic preauthbridge-oauth \
-  -n "$NAMESPACE" \
-  --from-literal=secret="$BRIDGE_CLIENT_SECRET" \
-  --dry-run=client -o yaml | kubectl apply -f -
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Pre Authorization Bridge Chart/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Pre Authorization Bridge Chart/values.yaml"
-helm dependency build "./Pre Authorization Bridge Chart"
-helm upgrade --install preauthbridge "./Pre Authorization Bridge Chart" \
-  --namespace "$NAMESPACE" \
-  --set keycloak.email="$EMAIL" \
-  --set pre-authorization-bridge.config.database.password="$REDIS_PASSWORD" \
-  -f "./Pre Authorization Bridge Chart/values.yaml"
-mv ./Pre\ Authorization\ Bridge\ Chart/values.yaml.bak ./Pre\ Authorization\ Bridge\ Chart/values.yaml
-record_phase "preauthbridge" "done" "Pre-authorization bridge deployed"
-
-record_phase "credential-issuance" "running" "Deploying credential issuance service"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Credential Issuance/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Credential Issuance/values.yaml"
-helm dependency build "./Credential Issuance"
-helm upgrade --install credential-issuance-service "./Credential Issuance" \
-  --namespace "$NAMESPACE" --values "./Credential Issuance/values.yaml"
-mv ./Credential\ Issuance/values.yaml.bak ./Credential\ Issuance/values.yaml
-record_phase "credential-issuance" "done" "Credential issuance service deployed"
-
-record_phase "credential-retrieval" "running" "Deploying credential retrieval service"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Credential Retrieval/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Credential Retrieval/values.yaml"
-helm dependency build "./Credential Retrieval"
-helm upgrade --install credential-retrieval-service "./Credential Retrieval" \
-  --values "./Credential Retrieval/values.yaml" --namespace "$NAMESPACE"
-mv ./Credential\ Retrieval/values.yaml.bak ./Credential\ Retrieval/values.yaml
-record_phase "credential-retrieval" "done" "Credential retrieval service deployed"
-
-record_phase "credential-verification" "running" "Deploying credential verification service"
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Credential Verification Service Chart/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Credential Verification Service Chart/values.yaml"
-helm dependency build "./Credential Verification Service Chart"
-helm upgrade --install credential-verification-service "./Credential Verification Service Chart" \
-  --values "./Credential Verification Service Chart/values.yaml" --namespace "$NAMESPACE"
-mv ./Credential\ Verification\ Service\ Chart/values.yaml.bak ./Credential\ Verification\ Service\ Chart/values.yaml
-container_name="$(kubectl -n "$NAMESPACE" get deploy credential-verification-service -o jsonpath='{.spec.template.spec.containers[0].name}')"
-
-patch_json="$(jq -n \
-  --arg name "$container_name" \
-  --arg nats "nats.${NAMESPACE}.svc.cluster.local:4222" \
-  '{
-    spec: {
-      template: {
-        spec: {
-          containers: [
-            {
-              name: $name,
-              env: [
-                {
-                  name: "CREDENTIALVERIFICATION_MESSAGING_NATS_URL",
-                  value: $nats
-                }
-              ]
-            }
-          ]
-        }
-      }
-    }
-  }'
-)"
-
-kubectl -n "$NAMESPACE" patch deploy/credential-verification-service --type=strategic -p "$patch_json"
-record_phase "credential-verification" "done" "Credential verification service deployed"
-
-record_phase "well-known" "running" "Deploying well-known services and ingress rules"
-ensure_postgres_database wellknown
-kubectl create secret generic wellknown-db-secret \
-  --namespace "$NAMESPACE" \
-  --from-literal=postgresql-username="postgres" \
-  --from-literal=postgresql-password="$POSTGRES_ADMIN_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Well Known Chart/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Well Known Chart/values.yaml"
-helm dependency build "./Well Known Chart"
-helm upgrade --install well-known-service "./Well Known Chart" \
-  --namespace "$NAMESPACE" -f "./Well Known Chart/values.yaml" --force
-mv ./Well\ Known\ Chart/values.yaml.bak ./Well\ Known\ Chart/values.yaml
-
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Well Known Ingress Rules/values.yaml"
-helm dependency build "./Well Known Ingress Rules"
-helm upgrade --install well-known-ingress-rules "./Well Known Ingress Rules" --namespace "$NAMESPACE"
-mv ./Well\ Known\ Ingress\ Rules/values.yaml.bak ./Well\ Known\ Ingress\ Rules/values.yaml
-record_phase "well-known" "done" "Well-known services deployed"
-
-record_phase "didcomm" "running" "Deploying DIDComm connector"
-repair_didcomm_dirty_migration
-sed -i.bak 's/\<DOMAIN\>/'"$DOMAIN"'/g' "./Didcomm/values.yaml"
-sed -i.bak 's/\<NAMESPACE\>/'"$NAMESPACE"'/g' "./Didcomm/values.yaml"
-helm dependency build "./Didcomm"
-helm upgrade --install didcomm "./Didcomm" \
-  --namespace "$NAMESPACE" \
-  -f "./Didcomm/values.yaml" \
-  --post-renderer "./Didcomm/didcomm-post-renderer.js"
-mv ./Didcomm/values.yaml.bak ./Didcomm/values.yaml
-kubectl -n "$NAMESPACE" rollout status deployment/didcomm-connector --timeout=15m
-record_phase "didcomm" "done" "DIDComm connector deployed and healthy"
-
-record_phase "smoke-tests" "running" "Verifying ingress, Keycloak connectivity, and stored secrets"
-post_deploy_smoke_checks
-record_phase "smoke-tests" "done" "Smoke checks completed"
-
-OCM_URL="https://cloud-wallet.${DOMAIN}"
-KEYCLOAK_URL="https://auth-cloud-wallet.${DOMAIN}"
-EXTERNAL_IP="$(collect_external_ip)"
-CLIENT_SECRET="$(kubectl -n "$NAMESPACE" get secret ocm-keycloak-client -o jsonpath='{.data.clientSecret}' | decode_base64)"
-DURATION_SECONDS="$(( $(date +%s) - START_TS ))"
-
-if (( DURATION_SECONDS > 600 )); then
-  emit_warning "Deployment completed in ${DURATION_SECONDS}s, which exceeds the 10 minute target."
-fi
-record_phase "complete" "done" "Deployment completed in ${DURATION_SECONDS}s"
-
-jq -cn \
-  --arg ocmUrl "$OCM_URL" \
-  --arg keycloakUrl "$KEYCLOAK_URL" \
-  --arg clientSecret "$CLIENT_SECRET" \
-  --arg externalIp "$EXTERNAL_IP" \
-  --arg status "Implemented" \
-  '{ocmUrl:$ocmUrl,keycloakUrl:$keycloakUrl,clientSecret:$clientSecret,externalIp:$externalIp,status:$status}' | sed 's/^/OUTPUT_JSON=/'
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi
