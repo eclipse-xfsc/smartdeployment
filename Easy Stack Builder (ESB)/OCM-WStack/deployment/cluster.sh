@@ -586,7 +586,7 @@ ensure_marker() {
         "$WORKDIR/namespaces.json" >/dev/null || { fail NOT_FRESH 'Upstream namespaces already exist without this installation marker.'; return 1; }
     local digest
     digest=$(jq -Sc 'del(.dnsSecret,.timeoutSeconds)' "$CONFIG" | sha256sum | cut -d ' ' -f 1)
-    jq -n --slurpfile c "$CONFIG" --arg packageVersion "12.6.2" --slurpfile lock "$ROOT/upstream-lock.json" \
+    jq -n --slurpfile c "$CONFIG" --arg packageVersion "12.6.3" --slurpfile lock "$ROOT/upstream-lock.json" \
         --arg name "$MARKER" --arg digest "$digest" --arg now "$(timestamp)" '
         $c[0] as $c | {apiVersion:"v1",kind:"ConfigMap",
         metadata:{name:$name,namespace:"kube-system",labels:{"app.kubernetes.io/managed-by":"esb-ocmwstack"}},

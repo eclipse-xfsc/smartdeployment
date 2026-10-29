@@ -39,7 +39,7 @@ if [ ! -f "$RELEASE/.ready" ]; then
     done
     # Dependency metadata is generated in the target volume, not maintained as a second application.
     cat >"$STAGE/package.json" <<'JSON'
-{"name":"ocm-orce-flows","version":"12.6.2","private":true,"dependencies":{"bcryptjs":"2.4.3","mongodb":"6.13.0","nats":"2.29.2","node-red-contrib-uibuilder":"7.5.0","vue":"3.5.13","qrcode":"1.5.4"}}
+{"name":"ocm-orce-flows","version":"12.6.3","private":true,"dependencies":{"bcryptjs":"2.4.3","mongodb":"6.13.0","nats":"2.29.2","node-red-contrib-uibuilder":"7.5.0","vue":"3.5.13","qrcode":"1.5.4"}}
 JSON
     # uibuilder loads this fixed integration hook; the actual authentication code lives in flows.json.
     cat >"$STAGE/uibuilder/.config/sioMiddleware.js" <<'JS'
