@@ -1309,7 +1309,7 @@ index c50a51e..f2936e8
  
      not_ready="$(
 -      jq -r '
-+      jq -L "${ESB_DEPLOY%/*}/deployment" -r '
++      jq -L "${JSON_LIB_DIR:?JSON library directory is required}" -r '
 +        include "filters";
          .[]
 +        | ({name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|accepted_sync_drift) as $accepted
@@ -1330,7 +1330,7 @@ index c50a51e..f2936e8
 -      echo "Erfolgreich: Alle ${count} Applications von '${APPSET_NAME}' sind Synced und Healthy."
 +    if [[ -z "$not_ready" && "$count" -eq "$expected" ]]; then
 +      echo "Ready: ${count} Applications in '${APPSET_NAME}' satisfy health and synchronization policy."
-+      jq -L "${ESB_DEPLOY%/*}/deployment" -c '
++      jq -L "${JSON_LIB_DIR:?JSON library directory is required}" -c '
 +        include "filters";
 +        {type:"application-readiness",phase:"applications-ready",
 +         acceptedSyncDifferences:[.[]|{name:.metadata.name,sync:.status.sync.status,health:.status.health.status}|select(accepted_sync_drift)]}
