@@ -55,7 +55,7 @@ Click on "New Node" in the sidebar.
 
 ![new button](./docImage/add-new-node.jpg?raw=true)
 
-Upload `node-red-ecofacis-federated-catalogue-1.0.2.tgz` from this repository and install. Refresh to activate the node.
+Upload `node-red-contrib-fed-cat-deploy-1.0.2.tgz` from this repository and install. Refresh to activate the node.
 
 
 ### 2. Install your node
@@ -123,19 +123,19 @@ Before running:
 ## 📁 Directory Contents
 ```
 .
-├── node-red-ecofacis-federated-catalogue-1.0.2.tgz
-├── FederatedCatalogue.html
-├── FederatedCatalogue.js
+├── node-red-contrib-fed-cat-deploy-1.0.2.tgz
+├── Federated-Catalogue.html
+├── Federated-Catalogue.js
 ├── package.json
 ```
 
-- **node-red-ecofacis-federated-catalogue-1.0.2.tgz**  
+- **node-red-contrib-fed-cat-deploy-1.0.2.tgz**  
   Installable node package.
 
-- **FederatedCatalogue.html**  
+- **Federated-Catalogue.html**  
   Node-RED UI form.
 
-- **FederatedCatalogue.js**  
+- **Federated-Catalogue.js**  
   Backend logic to send API requests and return results.
 
 - **package.json**  

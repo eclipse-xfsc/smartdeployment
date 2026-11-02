@@ -219,7 +219,6 @@ keycloak:
     host: fc-postgres
     database: keycloak
     user: keycloak
-    #password: keycloak
     existingSecret: fc-postgres
     existingSecretPasswordKey: "password"
   ingress:

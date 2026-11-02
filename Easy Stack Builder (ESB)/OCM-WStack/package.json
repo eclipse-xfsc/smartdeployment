@@ -1,6 +1,6 @@
 {
   "name": "orce-esb-ocmwstack",
-  "version": "12.6.3",
+  "version": "12.6.4",
   "description": "Node-RED deployer for OCM W-Stack and its dedicated ORCE wallet runtime",
   "license": "Apache-2.0",
   "engines": {
@@ -21,8 +21,7 @@
     "README.md",
     "charts-runtime",
     "charts-gateway",
-    "charts-dashboards",
-    "pack.sh"
+    "charts-dashboards"
   ],
   "scripts": {
     "check": "bash deploy.sh check",

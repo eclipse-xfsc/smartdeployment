@@ -139,7 +139,7 @@ EasyStack Builder modules also support automated uninstallation via removing the
 
 ## 🔮 What’s Next
 
-- Builder modules for OCM, TSA, PCM, and AA are in active development  
+- The OCM W-Stack builder is available in [`OCM-WStack`](OCM-WStack/README.md); the TSA, PCM and AAS builders are in the folders of the same name  
 - Version 2 will support deployment chaining, multi-cluster logic, and error recovery  
 - Integration with AI-based FAP Builder will enable dynamic module composition and self-optimizing infrastructure graphs
 

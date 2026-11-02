@@ -268,7 +268,7 @@ const locales = {
     "REQUEST_BODY_UNAVAILABLE": "The request body could not be read.",
     "REQUEST_TOO_LARGE": "The request is too large.",
     "acceptedStored": "Accepted and saved to Storage. The exact credential was confirmed by reading it back.",
-    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval cannot accept this credential format. Its current verifier supports JWT and SD-JWT; DeveloperCredential is issued as a JSON credential. The official Retrieval service needs support for this format.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "This credential format is not accepted by the connected Retrieval service, which currently supports JWT and SD-JWT credentials. DeveloperCredential is issued as a JSON credential.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval accepted the credential, but Storage persistence could not be confirmed. Do not accept the offer again.",
     "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval accepted the offer without returning a usable credential. Storage persistence is unconfirmed; do not accept again.",
     "notDeclared": "Not declared",
@@ -576,7 +576,7 @@ const locales = {
     "API_INVALID_RESPONSE": "Die API-Antwort des Servers ist ungültig.",
     "INVALID_JSON_BODY": "Die Anfrage muss ein gültiges JSON-Objekt enthalten.",
     "acceptedStored": "Angenommen und in Storage gespeichert. Der genaue Nachweis wurde durch erneutes Lesen bestätigt.",
-    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval unterstützt dieses Nachweisformat nicht. Die Prüfung akzeptiert derzeit JWT und SD-JWT; DeveloperCredential wird als JSON-Nachweis ausgestellt. Der offizielle Retrieval-Dienst benötigt Unterstützung für dieses Format.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Dieses Nachweisformat wird vom angebundenen Retrieval-Dienst nicht angenommen; er unterstützt derzeit JWT- und SD-JWT-Nachweise. DeveloperCredential wird als JSON-Nachweis ausgestellt.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval hat den Nachweis angenommen, aber die Speicherung konnte nicht bestätigt werden. Nehmen Sie das Angebot nicht erneut an.",
     "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval hat das Angebot ohne verwendbaren Nachweis angenommen. Die Speicherung ist unbestätigt; nicht erneut annehmen.",
     "notDeclared": "Nicht angegeben",
@@ -887,7 +887,7 @@ const locales = {
     "API_INVALID_RESPONSE": "La réponse API du serveur est invalide.",
     "INVALID_JSON_BODY": "La requête doit contenir un objet JSON valide.",
     "acceptedStored": "Accepté et enregistré dans Storage. Le justificatif exact a été confirmé par une nouvelle lecture.",
-    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Retrieval ne prend pas en charge ce format. Son vérificateur accepte actuellement JWT et SD-JWT ; DeveloperCredential est émis en JSON. Le service Retrieval officiel doit prendre en charge ce format.",
+    "RETRIEVAL_CREDENTIAL_FORMAT_UNSUPPORTED": "Ce format n'est pas accepté par le service Retrieval connecté, qui prend actuellement en charge les attestations JWT et SD-JWT. DeveloperCredential est émis au format JSON.",
     "ACCEPTED_STORAGE_UNCONFIRMED": "Retrieval a accepté le justificatif, mais son stockage n’a pas été confirmé. N’acceptez pas à nouveau l’offre.",
     "ACCEPTED_CREDENTIAL_RESPONSE_INVALID": "Retrieval a accepté l’offre sans renvoyer de justificatif utilisable. Le stockage reste non confirmé ; ne l’acceptez pas à nouveau.",
     "notDeclared": "Non déclaré",
@@ -2527,7 +2527,7 @@ const App = {
           change(v);
         }, s.view === v ? 'active' : ''))), h('div', {
           class: 'nav-footer'
-        }, [h('span', s.me.username || s.me.subject), h('small', 'OCM W-Stack · 12.5.11')])]),
+        }, [h('span', s.me.username || s.me.subject), h('small', 'OCM W-Stack · 12.6.4')])]),
         h('main', [h('div', {
             class: 'toolbar'
           }, [h('h2', t(s.view)), button('refresh', () => act(() => load()))]), !s.connected ? h(

@@ -581,13 +581,15 @@ test_credentials() {
     [[ $CONFIRM == 'CREATE TEST CREDENTIAL' ]] ||
         { fail CONFIRM 'Set confirm to CREATE TEST CREDENTIAL to run the native credential lifecycle test.'; return 1; }
     discover_storage_scope
-    start_tunnel credential-retrieval-service "$WORKDIR/retrieval-url"
-    start_tunnel storage-service "$WORKDIR/storage-url"
-    local random group tenant retrieval storage request_id deadline found=false
+    start_tunnel credential-retrieval-service "$WORKDIR/retrieval-url" || return 1
+    start_tunnel storage-service "$WORKDIR/storage-url" || return 1
+    # The offering bootstrap tool has no public route; reach it only through a localhost port-forward.
+    start_tunnel offering-dummy-credential-offering-bootstrap "$WORKDIR/offering-url" || return 1
+    local random group retrieval storage offering request_id deadline found=false
     random=$(openssl rand -hex 16)
     group="esb-check-${random:0:8}-${random:8:4}-${random:12:4}-${random:16:4}-${random:20:12}"
-    tenant=$(config_value '.tenantUrl')
     retrieval="$(cat "$WORKDIR/retrieval-url")/v1/tenants/$(jq -r '.tenantId|@uri' "$CONFIG")/offering"
+    offering="$(cat "$WORKDIR/offering-url")/api/offering/create"
     storage="$(cat "$WORKDIR/storage-url")$(jq -r --arg group "$group" \
         '"/v1/tenants/"+([.tenantId,"storage",.storageRegion,.storageCountry,$group,"credentials"]|map(@uri)|join("/"))' "$CONFIG")"
     jq --arg group "$group" '{status:"failed",tenantId,tenantUrl,testAccount:$group,checks:[],credentialLifecycle:"not-tested",retainedTestData:true}' \
@@ -596,7 +598,7 @@ test_credentials() {
     http_json "$WORKDIR/native-response.json" POST "$storage" "$WORKDIR/native-body.json"
     record_native_check storage-list-before true || true
     jq '{tenant_id:.tenantId,identifier:"SDJWTCredential",payload:{given_name:"Ada",family_name:"Lovelace"}}' "$CONFIG" >"$WORKDIR/native-body.json"
-    http_json "$WORKDIR/native-response.json" POST "$tenant/test/offering/create" "$WORKDIR/native-body.json"
+    http_json "$WORKDIR/native-response.json" POST "$offering" "$WORKDIR/native-body.json"
     if ! record_native_check native-offer-create '.data.offer.credential_offer|type=="string" and length>0'; then cat "$WORKDIR/native-report.json"; return; fi
     jq '{credential_offer:.data.offer.credential_offer}' "$WORKDIR/native-response.json" >"$WORKDIR/native-body.json"
     http_json "$WORKDIR/native-response.json" PUT "$retrieval/retrieve/$group" "$WORKDIR/native-body.json"
