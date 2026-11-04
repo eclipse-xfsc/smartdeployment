@@ -1,0 +1,43 @@
+{
+  "storageRegion": "EU",
+  "storageCountry": "DE",
+  "publicOrigin": "@TENANT_URL@",
+  "uiAdminUsername": "@UI_ADMIN@",
+  "uiAdminEmail": "@UI_EMAIL@",
+  "tenant": "@TENANT_ID@",
+  "account": "ocm-wstack",
+  "group": "ocm-wstack",
+  "cryptoNamespace": "ocm-wstack",
+  "cryptoGroup": "@TENANT_ID@",
+  "holderKey": "eckey",
+  "issuerDids": [
+    "did:web:@TENANT_HOST@"
+  ],
+  "offerIssuerHosts": [
+    "@TENANT_HOST@"
+  ],
+  "relationshipHosts": [
+    "@TENANT_HOST@"
+  ],
+  "didcommTopic": "didcomm-connector",
+  "didcommEventType": "didcomm.message",
+  "natsUrl": "nats://nats.infrastructure.svc.cluster.local:4222",
+  "eventSubjects": [
+    {
+      "subject": "retrieval.offering.publication",
+      "eventType": "retrieval.offering.received",
+      "type": "offers.changed"
+    }
+  ],
+  "services": {
+    "storage": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
+    "retrieval": "http://credential-retrieval-service.ocm-wstack.svc.cluster.local:8080",
+    "signer": "http://signer.ocm-wstack.svc.cluster.local:8080",
+    "status": "http://status-list-service.ocm-wstack.svc.cluster.local:8080",
+    "didcomm": "http://didcomm-connector.ocm-wstack.svc.cluster.local:9090"
+  },
+  "issuerBootstrapUrl": "http://dummycontentsigner.ocm-wstack.svc.cluster.local:8080",
+  "managedUpstreamTenant": true,
+  "issuerCredentialEndpoint": "@TENANT_URL@/api/credential",
+  "credentialTypes": []
+}

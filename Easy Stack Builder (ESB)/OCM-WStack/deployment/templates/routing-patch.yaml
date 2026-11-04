@@ -1,0 +1,104 @@
+spec:
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/template/spec/hostAliases, /spec/template/metadata/annotations/esb.xfsc.io~1credentials, /spec/template/metadata/annotations/esb.xfsc.io~1nats-recovery]
+    - group: apps
+      kind: StatefulSet
+      jsonPointers: [/spec/template/spec/hostAliases]
+    - group: apps
+      kind: StatefulSet
+      namespace: infrastructure
+      name: cassandra
+      jqPathExpressions:
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .startupProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .readinessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.timeoutSeconds'
+        - '.spec.template.spec.containers[] | select(.name == "cassandra") | .livenessProbe.failureThreshold'
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-retrieval-service
+      jsonPointers: [/spec/strategy]
+    - group: apps
+      kind: Deployment
+      namespace: ocm-wstack
+      name: credential-verification-service
+      jqPathExpressions:
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_HOST")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_PORT")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT")'
+        - '.spec.template.spec.containers[] | select(.name == "credential-verification-service") | .env[]? | select(.name == "CREDENTIALVERIFICATION_NATS_URL")'
+        # Remove only the complete, unchanged injected block during comparison.
+        # Changed, missing, duplicated or valueFrom entries remain visible.
+        - >-
+          [
+            {
+              "name": "CREDENTIALVERIFICATION_CASSANDRA_DATACENTER",
+              "value": "dc1"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_CASSANDRA_HOSTS",
+              "value": "cassandra.infrastructure.svc.cluster.local"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_CASSANDRA_PORT",
+              "value": "9042"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_DID_RESOLVER",
+              "value": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_CREDENTIAL_URL",
+              "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/credential"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_PRESENTATIONSIGNURL",
+              "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/proof"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_PRESENTATIONVERIFYURL",
+              "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/presentation/verify"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_SIGN_URL",
+              "value": "http://signer.ocm-wstack.svc.cluster.local:8080/v1/sign"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_TOPIC",
+              "value": "signer-topic"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_SIGNER_URL",
+              "value": "http://signer.ocm-wstack.svc.cluster.local:8080"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_STORAGE_TOPIC",
+              "value": "storage.service.store"
+            },
+            {
+              "name": "CREDENTIALVERIFICATION_STORAGE_URL",
+              "value": "http://storage-service.ocm-wstack.svc.cluster.local:8080"
+            }
+          ]
+          as $expected
+          | .spec.template.spec.containers[]
+          | select(.name == "credential-verification-service")
+          | select(.env as $env
+          | all($expected[]; . as $entry
+          | [$env[]?
+          | select(.name == $entry.name)] == [$entry]))
+          | .env[]
+          | select(. as $entry
+          | $expected
+          | index($entry) != null)
+    - group: ""
+      kind: Secret
+      namespace: ocm-wstack
+      name: credential-verification-service-state-signing
+      jsonPointers: [/data/state-signing-key]
+      jqPathExpressions:
+        - '.data | select(. == {})'
+  syncPolicy:
+    syncOptions: [CreateNamespace=true, ServerSideApply=true, RespectIgnoreDifferences=true]

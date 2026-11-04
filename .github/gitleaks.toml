@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Secret scan configuration for .github/workflows/esb-ocm-wstack-ci.yml.
+# The default gitleaks rules apply. upstream-lock.json holds SHA-256 checksums of pinned
+# upstream files, which the generic-api-key rule reports as keys; the file holds no secrets.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Checksums of pinned upstream files"
+paths = ['''upstream-lock\.json$''']

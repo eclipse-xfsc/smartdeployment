@@ -1,0 +1,139 @@
+{
+  "OCM W-Stack/Pre Authorization Bridge Chart": {
+    "pre-authorization-bridge": {
+      "image": {
+        "pullSecrets": ""
+      },
+      "podAnnotations": {
+        "inject.xfsc.io/enabled": "true",
+        "inject.xfsc.io/needs": "nats,redis,signer",
+        "inject.xfsc.io/env-prefix": "PREAUTHBRIDGE"
+      }
+    }
+  },
+  "OCM W-Stack/Well Known Chart": {
+    "well-known-service": {
+      "podAnnotations": {
+        "inject.xfsc.io/enabled": "true",
+        "inject.xfsc.io/needs": "postgres,nats",
+        "inject.xfsc.io/env-prefix": "WELLKNOWN_SERVICE"
+      }
+    }
+  },
+  "OCM W-Stack/Policy Chart": {
+    "policy": {
+      "image": {
+        "repository": "node-654e3bca7fbeeed18f81d7c7.ps-xaas.io",
+        "name": "tsa/policy",
+        "tag": "1.1.2",
+        "sha": "",
+        "pullSecrets": ""
+      },
+      "podAnnotations": {
+        "inject.xfsc.io/enabled": "true",
+        "inject.xfsc.io/needs": "nats,signer,did-resolver",
+        "inject.xfsc.io/env-replacements": "{}",
+        "inject.xfsc.io/env-prefix": ""
+      },
+      "policy": {
+        "nats": {
+          "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+        },
+        "http": {
+          "port": 8080
+        }
+      },
+      "service": {
+        "port": 8080
+      },
+      "memoryStorage": {
+        "policiesRepo": "https://github.com/eclipse-xfsc/rego-policies.git",
+        "policiesFolder": "Policies"
+      },
+      "addresses": {
+        "didResolver": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080",
+        "signer": "http://signer.ocm-wstack.svc.cluster.local:8080",
+        "ocm": "@TENANT_URL@",
+        "NAMESPACE": null
+      }
+    }
+  },
+  "OCM W-Stack/Credential Verification Service Chart": {
+    "credential-verification-service": {
+      "image": {
+        "pullSecrets": "esb-ocm-public-registry"
+      },
+      "podAnnotations": {
+        "inject.xfsc.io/enabled": "true",
+        "inject.xfsc.io/needs": "nats,cassandra,signer,did-resolver,storageservice",
+        "inject.xfsc.io/env-prefix": "CREDENTIALVERIFICATION",
+        "inject.xfsc.io/env-replacements": "{}"
+      },
+      "server": {
+        "http": {
+          "host": "0.0.0.0"
+        }
+      },
+      "config": {
+        "storageServiceUrl": "http://storage-service.ocm-wstack.svc.cluster.local:8080",
+        "externalPresentation": {
+          "enabled": true,
+          "authorizeEndpoint": "http://credential-verification-service.ocm-wstack.svc.cluster.local:8080/v1/tenants/@TENANT_ID@/presentation/",
+          "requestObjectPolicy": "",
+          "clientIdPolicy": "",
+          "credentialSelectionPolicy": "",
+          "clientUrlSchema": "https"
+        },
+        "messaging": {
+          "protocol": "nats",
+          "nats": {
+            "queueGroup": "credential-verification-service",
+            "timeoutInSec": 10
+          }
+        }
+      },
+      "ingress": {
+        "enabled": false
+      },
+      "resourceClaim": {
+        "cassandra": {
+          "enabled": true,
+          "providerRef": "cassandra",
+          "keyspace": "ocm"
+        }
+      }
+    }
+  },
+  "OCM W-Stack/Didcomm": {
+    "didcomm-connector": {
+      "ingress": {
+        "enabled": false
+      },
+      "podAnnotations": {
+        "inject.xfsc.io/enabled": "false"
+      },
+      "config": {
+        "env": "DEV",
+        "logLevel": "error",
+        "url": "@TENANT_URL@/api/didcomm",
+        "didcomm": {
+          "resolverUrl": "http://universal-resolver-service.infrastructure.svc.cluster.local:8080"
+        },
+        "messaging": {
+          "nats": {
+            "url": "nats://nats.infrastructure.svc.cluster.local:4222"
+          }
+        },
+        "database": {
+          "inMemory": false,
+          "host": "cassandra.infrastructure.svc.cluster.local",
+          "port": 9042,
+          "password": {
+            "passwordSecret": "esb-credential-verification-cassandra",
+            "passwordKey": "cassandra-password"
+          }
+        }
+      }
+    }
+  }
+}

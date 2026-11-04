@@ -1,0 +1,34 @@
+{{- if and .Values.tenantHost .Values.gatewayClusterIP }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: esb-ocm-tenant-routing
+spec:
+  background: false
+  failurePolicy: Fail
+  rules:
+    - name: route-tenant-through-envoy
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [ocm-wstack]
+              operations: [CREATE]
+              selector:
+                matchExpressions:
+                  - key: app
+                    operator: NotIn
+                    values: [ocm-ui-keycloak, ocm-ui-postgres, ocm-ui-mongodb]
+          - resources:
+              kinds: [Pod]
+              namespaces: [infrastructure]
+              operations: [CREATE]
+              names: ["*resolver*", "*driver-did*"]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            hostAliases:
+              - ip: {{ .Values.gatewayClusterIP | quote }}
+                hostnames:
+                  - {{ .Values.tenantHost | quote }}
+{{- end }}

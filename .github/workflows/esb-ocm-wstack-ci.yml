@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Checks for the ESB OCM W-Stack module. They run on every pull request and push that
+# touches the module. None of the jobs needs a repository secret, so they also run on
+# pull requests from forks.
+
+name: ESB OCM W-Stack checks
+
+on:
+  pull_request:
+    paths:
+      - "Easy Stack Builder (ESB)/OCM-WStack/**"
+      - ".github/workflows/esb-ocm-wstack-ci.yml"
+      - ".github/gitleaks.toml"
+  push:
+    branches: [main]
+    paths:
+      - "Easy Stack Builder (ESB)/OCM-WStack/**"
+      - ".github/workflows/esb-ocm-wstack-ci.yml"
+      - ".github/gitleaks.toml"
+
+permissions:
+  contents: read
+
+env:
+  MODULE: "Easy Stack Builder (ESB)/OCM-WStack"
+
+jobs:
+  shellcheck:
+    name: Shell scripts (shellcheck, errors only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          shellcheck --version
+          shellcheck --severity=error --shell=bash "$MODULE/deploy.sh" "$MODULE"/deployment/*.sh "$MODULE/charts-runtime/files/seed.sh"
+
+  javascript-syntax:
+    name: JavaScript and JSON syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check syntax
+        run: |
+          node --check "$MODULE/ocmwstack.js"
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$MODULE/charts-runtime/files/flows.json"
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$MODULE/package.json"
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$MODULE/upstream-lock.json"
+
+  helm:
+    name: Helm lint and template
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint and render the charts
+        run: |
+          # charts-runtime requires the values the deployer always sets (values.schema.json)
+          for chart in charts-runtime charts-gateway charts-dashboards; do
+            args=()
+            if [ "$chart" = charts-runtime ]; then args=(--set host=ci.example.invalid); fi
+            helm lint "$MODULE/$chart" "${args[@]}"
+            helm template ci "$MODULE/$chart" "${args[@]}" > /dev/null
+          done
+
+  bdd-bindings:
+    name: BDD suite bindings (no live calls)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Resolve every step of every suite
+        run: |
+          python -m pip install -r "$MODULE/test/bdd/requirements.txt"
+          for suite in core credential clearing refresh; do
+            python "$MODULE/test/bdd/run.py" --suite "$suite" --check
+          done
+
+  secret-scan:
+    name: Secret scan of the module
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan the current module files
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.18.4 \
+            detect --no-git --no-banner --redact --config /repo/.github/gitleaks.toml --source "/repo/$MODULE"
+
+  licence-check:
+    name: Eclipse Dash licence check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Check the runtime dependencies
+        run: |
+          curl -fsSL -o dash.jar "https://repo.eclipse.org/content/repositories/dash-licenses-releases/org/eclipse/dash/org.eclipse.dash.licenses/1.1.0/org.eclipse.dash.licenses-1.1.0.jar"
+          # Keep this list in line with the dependencies in package.json and charts-runtime/files/seed.sh.
+          printf '%s\n' \
+            "npm/npmjs/-/bcryptjs/2.4.3" \
+            "npm/npmjs/-/mongodb/6.13.0" \
+            "npm/npmjs/-/nats/2.29.2" \
+            "npm/npmjs/-/node-red-contrib-uibuilder/7.5.0" \
+            "npm/npmjs/-/vue/3.5.13" \
+            "npm/npmjs/-/qrcode/1.5.4" \
+            > dependencies.txt
+          java -jar dash.jar -summary DEPENDENCIES dependencies.txt || { cat DEPENDENCIES; exit 1; }
+          cat DEPENDENCIES
